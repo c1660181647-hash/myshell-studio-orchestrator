@@ -2473,7 +2473,17 @@ async def _project_delivery_bundle(
     accepted_jobs = [job for job in jobs if job and (job.get("evidence") or {}).get("accepted")]
 
     all_targets = [target for session in dispatch_sessions for target in session.get("targets", [])]
-    skipped_targets = [target for session in dispatch_sessions for target in session.get("skippedTargets", [])]
+    batch_skipped_targets = [target for session in dispatch_sessions for target in session.get("skippedTargets", [])]
+    operator_skipped_targets = [
+        {
+            **target,
+            "reason": target.get("reason") or "operator_skipped",
+            "message": target.get("message") or (target.get("evidence") or {}).get("reason") or "Operator skipped this target.",
+        }
+        for target in all_targets
+        if target.get("status") == "skipped"
+    ]
+    skipped_targets = [*batch_skipped_targets, *operator_skipped_targets]
     remaining_targets = [target for target in all_targets if target.get("status", "pending") in {"pending", "visited"}]
     target_status_counts = {
         "pending": sum(1 for target in all_targets if target.get("status", "pending") == "pending"),
@@ -2481,9 +2491,9 @@ async def _project_delivery_bundle(
         "completed": sum(1 for target in all_targets if target.get("status") == "completed"),
         "skipped": sum(1 for target in all_targets if target.get("status") == "skipped"),
         "error": sum(1 for target in all_targets if target.get("status") == "error"),
-        "blocked": len(skipped_targets),
+        "blocked": len(batch_skipped_targets),
         "remaining": len(remaining_targets),
-        "total": len(all_targets) + len(skipped_targets),
+        "total": len(all_targets) + len(batch_skipped_targets),
     }
     artifacts = _delivery_bundle_artifacts(project_id, dispatch_sessions, coverage.get("sourceSegmentId"))
 

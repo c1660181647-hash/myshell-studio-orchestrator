@@ -1009,6 +1009,8 @@ function StudioDispatchBatchStrip({
           <Pill tone={sessionSummary.pending ? 'hot' : 'default'}>{`${sessionSummary.pending} pending`}</Pill>
           <Pill tone={sessionSummary.visited ? 'hot' : 'default'}>{`${sessionSummary.visited} visited`}</Pill>
           <Pill tone={sessionSummary.completed ? 'success' : 'default'}>{`${sessionSummary.completed} done`}</Pill>
+          <Pill tone={sessionSummary.targetSkipped ? 'hot' : 'default'}>{`${sessionSummary.targetSkipped || 0} skipped`}</Pill>
+          <Pill tone={sessionSummary.targetErrors ? 'danger' : 'default'}>{`${sessionSummary.targetErrors || 0} errors`}</Pill>
         </>
       )}
       {visibleTargets.map((target) => (

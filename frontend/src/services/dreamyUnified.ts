@@ -449,7 +449,7 @@ export interface StudioDeliveryBundle {
   dispatchSessions: StudioDispatchSession[];
   acceptedJobs: StudioJob[];
   remainingTargets: StudioDispatchSessionTarget[];
-  skippedTargets: StudioDispatchBatchSkip[];
+  skippedTargets: Array<StudioDispatchBatchSkip | StudioDispatchSessionTarget>;
   reports: {
     deliveryReport: StudioProjectDeliveryReport;
     coverage: StudioCoverageReport;
