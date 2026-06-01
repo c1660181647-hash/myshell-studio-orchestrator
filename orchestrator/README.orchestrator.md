@@ -4,7 +4,7 @@ The backend exposes the Studio API for MyShell page and agent dispatch. It keeps
 
 ## Core Surfaces
 
-- `GET /api/health` reports backend, SQLite storage, Chrome CDP, MyShell cookie, and Dreamy delegated-auth state.
+- `GET /api/health` reports backend, SQLite storage, Chrome CDP, MyShell cookie, cookie injection, and Dreamy delegated-auth state.
 - `GET /api/pages` lists registered page adapters and miniapp navigation surfaces, including `dreamy-miniapp`, `myshell-art`, Explore, Upload, Tag Generator, Library, Energy, Earn, Settings, and Checkin.
 - `GET /api/agents` lists the dispatch graph agents.
 - `POST /api/studio/run` routes a prompt, creates a persisted job, and streams Studio SSE events.

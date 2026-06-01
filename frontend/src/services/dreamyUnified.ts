@@ -110,6 +110,21 @@ export interface StudioAuthStatus {
   message?: string;
 }
 
+export interface StudioHealthComponent {
+  status: 'ok' | 'ready' | 'client_delegated' | 'auth_missing' | 'unavailable' | 'error' | string;
+  message?: string;
+  mode?: string;
+  path?: string;
+  url?: string;
+}
+
+export interface StudioHealth {
+  status: 'ok' | 'degraded' | string;
+  version?: string;
+  checkedAt?: string;
+  components: Record<string, StudioHealthComponent>;
+}
+
 export interface StudioPageAdapter {
   id: StudioApi;
   name: string;
@@ -330,6 +345,11 @@ export function getStudioRunEndpoint(): string {
   return base ? `${base}/api/studio/run` : '/api/studio/run';
 }
 
+export function getStudioHealthEndpoint(): string {
+  const base = getOrchestratorBaseUrl();
+  return base ? `${base}/api/health` : '/api/health';
+}
+
 export function getStudioProjectEndpoint(projectId: string): string {
   const base = getOrchestratorBaseUrl();
   const path = `/api/studio/projects/${encodeURIComponent(projectId)}`;
@@ -512,6 +532,12 @@ export async function fetchStudioAgents(): Promise<StudioAgentCapability[]> {
   if (!response.ok) throw new Error(`Studio agents ${response.status}: ${response.statusText}`);
   const body = await response.json();
   return body.agents || [];
+}
+
+export async function fetchStudioHealth(): Promise<StudioHealth> {
+  const response = await fetch(getStudioHealthEndpoint());
+  if (!response.ok) throw new Error(`Studio health ${response.status}: ${response.statusText}`);
+  return response.json();
 }
 
 export async function fetchStudioJob(jobId: string): Promise<StudioJob> {

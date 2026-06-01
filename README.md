@@ -11,7 +11,7 @@ MyShell Studio Orchestrator is a unified agent dispatch center for Dreamy miniap
 - Navigation dispatch registry for the existing miniapp surfaces: Explore, AI Picks, Bot Detail, Upload, Tag Generator, Library, Energy Store, Earn, Share Invite, Settings, and Checkin.
 - Prompt-aware page routing: default Studio runs can infer page targets such as Library, Upload, Settings, Energy, Earn, or Checkin from natural language; explicit page selections still win.
 - Manifest-driven page expansion via `orchestrator/backend/studio_pages_manifest.json` or `STUDIO_PAGES_MANIFEST`, so new MyShell miniapp surfaces can be added without changing Python router code.
-- Health checks that report backend, storage, Chrome CDP, MyShell cookies, and Dreamy auth delegation separately.
+- Health checks that report backend, storage, Chrome CDP, MyShell cookies, cookie injection, and Dreamy auth delegation separately, with the same status visible in Studio.
 
 ## Repository Layout
 

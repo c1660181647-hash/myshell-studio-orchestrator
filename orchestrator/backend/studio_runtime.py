@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -34,16 +35,23 @@ async def runtime_health(store_path: str) -> dict[str, Any]:
     cdp_ready = await chrome_cdp_ready()
     dreamy_auth = "client_delegated"
     art_auth = "ready" if has_cookies else "auth_missing"
+    cookie_injection = "ready" if has_cookies else "auth_missing"
     overall = "ok" if storage_ready else "degraded"
     return {
         "status": overall,
         "version": "0.2.0",
+        "checkedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "components": {
-            "backend": {"status": "ok"},
+            "backend": {"status": "ok", "message": "FastAPI runtime is serving requests"},
             "storage": {"status": "ok" if storage_ready else "error", "path": store_path},
             "chromeCdp": {"status": "ok" if cdp_ready else "unavailable", "url": CDP_URL},
-            "myshellCookies": {"status": art_auth},
-            "dreamyApiAuth": {"status": dreamy_auth},
+            "myshellCookies": {"status": art_auth, "message": "Cookies configured" if has_cookies else "No MyShell cookies configured"},
+            "cookieInjection": {
+                "status": cookie_injection,
+                "mode": "env-or-file",
+                "message": "Cookie injection source is available" if has_cookies else "Set MYSHELL_COOKIES or a backend cookie file",
+            },
+            "dreamyApiAuth": {"status": dreamy_auth, "mode": "telegram-init-data"},
         },
     }
 

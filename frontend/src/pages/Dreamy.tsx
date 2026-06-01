@@ -42,6 +42,7 @@ import {
   cancelStudioJob,
   extractGenerateTaskMedia,
   fetchStudioAgents,
+  fetchStudioHealth,
   fetchStudioJobs,
   fetchStudioPages,
   fetchStudioProjects,
@@ -66,6 +67,7 @@ import type {
   StudioAgentNode,
   StudioApi,
   StudioExecutionRequest,
+  StudioHealth,
   StudioJob,
   StudioMode,
   StudioPageAdapter,
@@ -153,6 +155,13 @@ function statusPillTone(status?: string): 'default' | 'hot' | 'success' | 'dange
   if (status === 'done') return 'success';
   if (status === 'error' || status === 'timeout' || status === 'auth_missing') return 'danger';
   if (status === 'running' || status === 'queued') return 'hot';
+  return 'default';
+}
+
+function healthPillTone(status?: string): 'default' | 'hot' | 'success' | 'danger' {
+  if (status === 'ok' || status === 'ready' || status === 'client_delegated') return 'success';
+  if (status === 'auth_missing' || status === 'unavailable' || status === 'degraded') return 'hot';
+  if (status === 'error') return 'danger';
   return 'default';
 }
 
@@ -388,6 +397,49 @@ function ModeSwitch({ mode, onChange }: { mode: StudioMode; onChange: (mode: Stu
           {item}
         </button>
       ))}
+    </div>
+  );
+}
+
+function StudioHealthStrip({ health }: { health: StudioHealth | null }) {
+  const components = [
+    ['backend', 'Backend'],
+    ['storage', 'Storage'],
+    ['chromeCdp', 'CDP'],
+    ['myshellCookies', 'Cookies'],
+    ['cookieInjection', 'Injection'],
+    ['dreamyApiAuth', 'Dreamy'],
+  ] as const;
+
+  return (
+    <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
+      <Pill tone={healthPillTone(health?.status)}>{health ? `Health ${health.status}` : 'Health checking'}</Pill>
+      {components.map(([id, label]) => {
+        const component = health?.components?.[id];
+        const status = component?.status || 'unknown';
+        const detail = component?.message || component?.path || component?.url || component?.mode || '';
+        const tone = healthPillTone(status);
+        return (
+          <span
+            key={id}
+            title={detail}
+            className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2"
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                tone === 'success'
+                  ? 'bg-Cr-text-success-default-v2'
+                  : tone === 'danger'
+                    ? 'bg-Cr-text-critical-default-v2'
+                    : tone === 'hot'
+                      ? 'bg-dreamy-brand-hot-v2'
+                      : 'bg-Cr-text-subtlest-v2'
+              }`}
+            />
+            {label} {status}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -1460,6 +1512,7 @@ export default function Dreamy() {
   const [hubJobs, setHubJobs] = useState<StudioJob[]>([]);
   const [selectedPageId, setSelectedPageId] = useState<StudioApi | string>('dreamy-miniapp');
   const [selectedAgentId, setSelectedAgentId] = useState(DEFAULT_STUDIO_AGENT_ID);
+  const [studioHealth, setStudioHealth] = useState<StudioHealth | null>(null);
 
   const selectedSegment = useMemo(() => {
     const id = project?.selectedSegmentId;
@@ -1491,10 +1544,12 @@ export default function Dreamy() {
     void Promise.all([
       fetchStudioPages().catch(() => []),
       fetchStudioAgents().catch(() => []),
-    ]).then(([nextPages, nextAgents]) => {
+      fetchStudioHealth().catch(() => null),
+    ]).then(([nextPages, nextAgents, nextHealth]) => {
       if (cancelled) return;
       setPages(nextPages);
       setAgents(nextAgents);
+      setStudioHealth(nextHealth);
       setSelectedPageId((current) =>
         nextPages.length && !nextPages.some((page) => page.id === current) ? nextPages[0].id : current,
       );
@@ -2048,6 +2103,8 @@ export default function Dreamy() {
           </button>
         </div>
       </header>
+
+      <StudioHealthStrip health={studioHealth} />
 
       <div className="grid h-11 shrink-0 grid-cols-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-1 lg:hidden">
         {(['chat', 'preview'] as TabKey[]).map((tab) => (

@@ -142,6 +142,25 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(retried.json()["job"]["status"], "queued")
         self.assertEqual(retried.json()["job"]["attempt"], 2)
 
+    def test_health_reports_delivery_components(self) -> None:
+        health = self.client.get("/api/health")
+        self.assertEqual(health.status_code, 200)
+        body = health.json()
+        self.assertIn(body["status"], {"ok", "degraded"})
+        self.assertIn("checkedAt", body)
+
+        components = body["components"]
+        for component_id in (
+            "backend",
+            "storage",
+            "chromeCdp",
+            "myshellCookies",
+            "cookieInjection",
+            "dreamyApiAuth",
+        ):
+            self.assertIn(component_id, components)
+            self.assertIn("status", components[component_id])
+
     def test_pages_cover_existing_myshell_miniapp_routes(self) -> None:
         pages = self.client.get("/api/pages")
         self.assertEqual(pages.status_code, 200)
