@@ -39,6 +39,16 @@ PLACEHOLDER_POSTERS = {
 }
 
 
+def _agent_id_for_page(page: dict[str, Any]) -> str:
+    if page.get("executor") == "navigation":
+        return "miniapp-page-navigator"
+    return "myshell-art-cdp-executor" if page["id"] == "myshell-art" else "dreamy-miniapp-executor"
+
+
+def _navigation_path_for_page(page: dict[str, Any]) -> str:
+    return page.get("appRoute") or ""
+
+
 def now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -128,7 +138,7 @@ def default_agent_graph() -> list[dict[str, Any]]:
         },
         {
             "id": "dreamy-executor",
-            "label": "Dreamy Executor",
+            "label": "Page Executor",
             "status": "idle",
             "detail": "Runs miniapp or MyShell Art generation",
         },
@@ -336,6 +346,7 @@ def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dic
         "executor": page["executor"],
         "api": page["id"],
         "page": page,
+        "navigationPath": _navigation_path_for_page(page),
         "jobId": job["jobId"],
         "segmentId": job["segmentId"],
         "botSlug": job.get("botSlug", ""),
@@ -371,9 +382,10 @@ def _create_job(
         "segmentId": segment["id"],
         "pageId": page["id"],
         "pageName": page["name"],
-        "agentId": "myshell-art-cdp-executor" if page["id"] == "myshell-art" else "dreamy-miniapp-executor",
+        "agentId": _agent_id_for_page(page),
         "executor": page["executor"],
         "api": page["id"],
+        "navigationPath": _navigation_path_for_page(page),
         "status": status,
         "action": segment["action"],
         "botSlug": segment["botSlug"],
@@ -521,13 +533,14 @@ def register_studio_routes(app) -> None:
             route["page"] = page
             route["api"] = page["id"]
             route["executor"] = page["executor"]
+            route["navigationPath"] = _navigation_path_for_page(page)
             yield _event("route", route)
 
             yield _event(
                 "progress",
                 {
                     "step": "planning",
-                    "message": "Preparing Dreamy segment request",
+                    "message": "Preparing Studio dispatch request",
                     "progress": 20,
                 },
             )
@@ -544,7 +557,11 @@ def register_studio_routes(app) -> None:
             _append_message(
                 project,
                 "assistant",
-                f"Queued {route['bot']['name']} for {normalized_action}.",
+                (
+                    f"Queued {page['name']} navigation dispatch."
+                    if page["executor"] == "navigation"
+                    else f"Queued {route['bot']['name']} for {normalized_action}."
+                ),
                 route=route,
                 segmentId=segment["id"],
                 jobId=job["jobId"],
@@ -556,6 +573,7 @@ def register_studio_routes(app) -> None:
                     "executor": route["executor"],
                     "api": page["id"],
                     "page": page,
+                    "navigationPath": _navigation_path_for_page(page),
                     "jobId": job["jobId"],
                     "segmentId": segment["id"],
                     "botSlug": route["bot"]["slug"],
@@ -571,6 +589,26 @@ def register_studio_routes(app) -> None:
                 },
             )
             yield _event("job", {"job": job})
+
+            if page["executor"] == "navigation":
+                segment["status"] = "done"
+                segment["evidence"] = _evidence(
+                    "done",
+                    page["id"],
+                    accepted=True,
+                    message=f"Navigation dispatch prepared for {page['name']} at {_navigation_path_for_page(page)}.",
+                )
+                segment["updatedAt"] = now_iso()
+                _update_job(
+                    job,
+                    status="done",
+                    evidence=segment["evidence"],
+                    authStatus=adapter_auth_status(page["id"]),
+                )
+                _set_graph_status(project, route, segment)
+                _save_project(project)
+                _sync_project_jobs(project)
+                yield _event("job", {"job": STUDIO_STORE.get_job(job["jobId"])})
 
             if page["id"] == "myshell-art":
                 auth_status = adapter_auth_status(page["id"])
@@ -673,7 +711,7 @@ def register_studio_routes(app) -> None:
             yield _event(
                 "done",
                 {
-                    "status": "queued",
+                    "status": segment.get("status", "queued"),
                     "projectId": project["projectId"],
                     "segmentId": segment["id"],
                     "jobId": job["jobId"],

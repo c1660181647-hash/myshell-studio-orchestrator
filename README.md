@@ -8,6 +8,7 @@ MyShell Studio Orchestrator is a unified agent dispatch center for Dreamy miniap
 - FastAPI backend with persistent Studio projects/jobs/evidence trails, SSE routing, and typed MyShell page/agent registries.
 - Dreamy miniapp client executor for `generate`, `generate/result`, `task/running`, `task/cancel`, `task/retry`, and library-backed refresh flows.
 - MyShell Art CDP adapter surface for browser-cookie-backed page execution. Missing cookies become `auth_missing`, not fake success.
+- Navigation dispatch registry for the existing miniapp surfaces: Explore, AI Picks, Bot Detail, Upload, Tag Generator, Library, Energy Store, Earn, Share Invite, Settings, and Checkin.
 - Health checks that report backend, storage, Chrome CDP, MyShell cookies, and Dreamy auth delegation separately.
 
 ## Repository Layout
@@ -56,7 +57,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `POST /api/studio/jobs/{job_id}/cancel`
 - `POST /api/studio/jobs/{job_id}/retry`
 
-`/api/studio/run` streams `meta`, `route`, `progress`, `execution_request`, `job`, `project`, and `done` events. Placeholder posters are always evidence-only drafts; completion requires fresh media, a task result, or an explicit failure/auth/timeout state.
+`/api/studio/run` streams `meta`, `route`, `progress`, `execution_request`, `job`, `project`, and `done` events. Placeholder posters are always evidence-only drafts; generation completion requires fresh media, a task result, or an explicit failure/auth/timeout state. Navigation pages return `executor: "navigation"` plus `navigationPath` and complete with accepted route evidence.
 
 `/api/studio/projects` and `/api/studio/jobs` power restart recovery and queue views. Job responses include `evidenceTrail`, and retry responses include a client `executionRequest` when the adapter must run from the authenticated miniapp browser.
 

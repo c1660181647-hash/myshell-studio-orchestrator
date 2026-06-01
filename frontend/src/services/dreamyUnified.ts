@@ -12,7 +12,21 @@ export type UnifiedMode = 'orchestrator' | 'miniapp' | 'monitor';
 export type StudioMode = 'player' | 'canvas';
 export type StudioAction = 'generate' | 'extend' | 'restyle' | 'retry-agent';
 export type StudioStatus = 'draft' | 'queued' | 'running' | 'done' | 'timeout' | 'auth_missing' | 'error' | 'cancelled';
-export type StudioApi = 'dreamy-miniapp' | 'myshell-art';
+export type StudioApi =
+  | 'dreamy-miniapp'
+  | 'myshell-art'
+  | 'explore'
+  | 'ai-picks'
+  | 'bot-detail'
+  | 'upload'
+  | 'tag-generator'
+  | 'library'
+  | 'energy-store'
+  | 'earn'
+  | 'share-invite'
+  | 'settings'
+  | 'checkin';
+export type StudioExecutor = 'client' | 'server' | 'navigation';
 
 export interface OrchestratorBotRef {
   id?: string;
@@ -100,9 +114,11 @@ export interface StudioPageAdapter {
   name: string;
   kind: string;
   baseUrl: string;
-  executor: 'client' | 'server';
+  appRoute?: string;
+  executor: StudioExecutor;
   authMode: string;
   status: string;
+  dispatchMode?: string;
   botCount?: number;
   capabilities: string[];
 }
@@ -122,8 +138,9 @@ export interface StudioJob {
   pageId: StudioApi | string;
   pageName: string;
   agentId: string;
-  executor: 'client' | 'server';
-  api: StudioApi;
+  executor: StudioExecutor;
+  api: StudioApi | string;
+  navigationPath?: string;
   status: StudioStatus;
   action: StudioAction;
   botSlug: string;
@@ -192,8 +209,9 @@ export interface StudioRouteEvent {
   action: StudioAction;
   sourceSegmentId?: string;
   sourceSummary?: string;
-  executor: 'client' | 'server';
+  executor: StudioExecutor;
   api?: StudioApi;
+  navigationPath?: string;
   page?: StudioPageAdapter;
   bot: {
     slug: string;
@@ -214,9 +232,10 @@ export interface StudioProgressEvent {
 
 export interface StudioExecutionRequest {
   type?: 'execution_request';
-  executor: 'client' | 'server';
-  api: StudioApi;
+  executor: StudioExecutor;
+  api: StudioApi | string;
   page?: StudioPageAdapter;
+  navigationPath?: string;
   jobId: string;
   segmentId: string;
   botSlug: string;

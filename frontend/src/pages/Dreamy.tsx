@@ -463,6 +463,12 @@ function ChatMessage({
         {item.route && (
           <div className="mt-2 rounded-lg-v2 bg-Cr-beta-white-3-v2 p-2 text-xs leading-5 text-Cr-text-subtler-v2">
             <div className="font-semibold text-Cr-text-subtle-v2">{item.route.analysis}</div>
+            {item.route.page && (
+              <div className="text-Cr-text-subtle-v2">
+                {item.route.page.name}
+                {item.route.navigationPath ? ` · ${item.route.navigationPath}` : ''}
+              </div>
+            )}
             <div>{item.route.reason}</div>
           </div>
         )}
@@ -1743,7 +1749,10 @@ export default function Dreamy() {
             if (rawEventName === 'route' && 'bot' in event) {
               updateAssistant(assistantId, {
                 route: event,
-                content: `Matched ${event.bot.name}.`,
+                content:
+                  event.executor === 'navigation' && event.page?.name
+                    ? `Matched ${event.page.name}.`
+                    : `Matched ${event.bot.name}.`,
               });
               return;
             }
@@ -1769,6 +1778,12 @@ export default function Dreamy() {
               });
               if (executionEvent.executor === 'client') {
                 await registerClientExecution(executionEvent, currentProjectId, fileForRequest, assistantId);
+              } else if (executionEvent.executor === 'navigation') {
+                updateAssistant(assistantId, {
+                  pending: false,
+                  segmentId: executionEvent.segmentId,
+                  content: `Dispatch target ready: ${executionEvent.page?.name || executionEvent.api}.`,
+                });
               } else {
                 updateAssistant(assistantId, {
                   pending: false,

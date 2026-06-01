@@ -5,7 +5,7 @@ The backend exposes the Studio API for MyShell page and agent dispatch. It keeps
 ## Core Surfaces
 
 - `GET /api/health` reports backend, SQLite storage, Chrome CDP, MyShell cookie, and Dreamy delegated-auth state.
-- `GET /api/pages` lists registered page adapters: `dreamy-miniapp` and `myshell-art`.
+- `GET /api/pages` lists registered page adapters and miniapp navigation surfaces, including `dreamy-miniapp`, `myshell-art`, Explore, Upload, Tag Generator, Library, Energy, Earn, Settings, and Checkin.
 - `GET /api/agents` lists the dispatch graph agents.
 - `POST /api/studio/run` routes a prompt, creates a persisted job, and streams Studio SSE events.
 - `GET /api/studio/projects` lists recent persisted projects for Studio restore.
@@ -15,7 +15,7 @@ The backend exposes the Studio API for MyShell page and agent dispatch. It keeps
 
 ## Evidence Rules
 
-The backend never marks placeholder media as complete. `done` is accepted only when a fresh media URL or task result is registered. Missing cookies become `auth_missing`; long-running or failed adapters become `timeout` or `error`.
+The backend never marks placeholder media as complete. Generation `done` is accepted only when a fresh media URL or task result is registered. Navigation pages complete with accepted route evidence and a `navigationPath`. Missing cookies become `auth_missing`; long-running or failed adapters become `timeout` or `error`.
 
 ## Local Backend
 

@@ -138,6 +138,50 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(retried.json()["job"]["status"], "queued")
         self.assertEqual(retried.json()["job"]["attempt"], 2)
 
+    def test_pages_cover_existing_myshell_miniapp_routes(self) -> None:
+        pages = self.client.get("/api/pages")
+        self.assertEqual(pages.status_code, 200)
+
+        page_by_id = {page["id"]: page for page in pages.json()["pages"]}
+        expected_routes = {
+            "explore": "/",
+            "ai-picks": "/ai-picks",
+            "bot-detail": "/bot",
+            "upload": "/upload",
+            "tag-generator": "/tag-generator",
+            "library": "/library",
+            "energy-store": "/energy",
+            "earn": "/earn",
+            "share-invite": "/share-invite",
+            "settings": "/settings",
+            "checkin": "/checkin-demo",
+        }
+
+        for page_id, route in expected_routes.items():
+            self.assertIn(page_id, page_by_id)
+            self.assertEqual(page_by_id[page_id]["appRoute"], route)
+            self.assertEqual(page_by_id[page_id]["executor"], "navigation")
+
+    def test_navigation_page_dispatch_returns_navigation_execution(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "open my generated library", "page_id": "library"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        route = next(payload for name, payload in events if name == "route")
+        execution = next(payload for name, payload in events if name == "execution_request")
+        job_payloads = [payload["job"] for name, payload in events if name == "job"]
+
+        self.assertEqual(route["page"]["id"], "library")
+        self.assertEqual(execution["executor"], "navigation")
+        self.assertEqual(execution["navigationPath"], "/library")
+        self.assertEqual(execution["page"]["appRoute"], "/library")
+        self.assertEqual(job_payloads[-1]["status"], "done")
+        self.assertEqual(job_payloads[-1]["evidence"]["accepted"], True)
+
     def test_project_and_job_queue_endpoints_include_evidence_trail(self) -> None:
         with self.client.stream(
             "POST",
