@@ -382,6 +382,175 @@ def _studio_coverage(project_id: str | None = None, source_segment_id: str | Non
     }
 
 
+def _default_dispatch_route(
+    *,
+    action: str = "generate",
+    source_segment_id: str | None = None,
+    source_segment: StudioSegment | None = None,
+) -> dict[str, Any]:
+    default_bot = get_bot_by_slug("seedream-multi-chart") or MYSHELL_BOTS[0]
+    return {
+        "bot": {
+            "slug": default_bot["slug"],
+            "name": default_bot["name"],
+            "type": default_bot["type"],
+            "rating": default_bot.get("rating", 4.5),
+            "description": default_bot.get("desc", ""),
+            "pageUrl": f"https://art.myshell.ai/creative/{default_bot['slug']}",
+        },
+        "action": _normalize_action(action),
+        "sourceSegmentId": source_segment_id,
+        "sourceSummary": f"Using segment {source_segment_id}" if source_segment_id else "Starting from prompt",
+        "analysis": "Coverage verification queued by Studio.",
+        "reason": "Batch verification for a ready dispatch target.",
+        "optimizedPrompt": "Verify Studio dispatch coverage.",
+        "executor": "navigation",
+        "sourceMediaUrl": _accepted_source_media_url(source_segment),
+    }
+
+
+def _coverage_skip(page: dict[str, Any], reason: str, message: str = "") -> dict[str, Any]:
+    return {
+        "pageId": page["pageId"],
+        "pageName": page["pageName"],
+        "executor": page.get("executor", ""),
+        "dispatchStatus": page.get("dispatchStatus", ""),
+        "coverageStatus": page.get("coverageStatus", ""),
+        "reason": reason,
+        "message": message or page.get("dispatchMessage", ""),
+        "missingRouteParams": page.get("missingRouteParams") or [],
+    }
+
+
+def _verify_navigation_page(
+    project: StudioProject,
+    coverage_page: dict[str, Any],
+    source_segment: StudioSegment | None,
+    resolved_source_segment_id: str | None,
+) -> dict[str, Any]:
+    page = get_page(coverage_page["pageId"])
+    prompt = f"Verify {page['name']} dispatch coverage."
+    route = _default_dispatch_route(source_segment_id=resolved_source_segment_id, source_segment=source_segment)
+    route.update(
+        {
+            "page": page,
+            "api": page["id"],
+            "executor": page["executor"],
+            "agentId": coverage_page.get("agentId") or _agent_id_for_page(page),
+            "optimizedPrompt": prompt,
+        }
+    )
+    route.update(_navigation_contract(page, route, source_segment))
+    navigation_path = route.get("navigationPath", "")
+    missing_route_params = _missing_route_params(page, navigation_path)
+    route["routeParams"] = page.get("routeParams") or []
+    route["missingRouteParams"] = missing_route_params
+
+    segment = _append_queued_segment(project, route, prompt, "generate", resolved_source_segment_id)
+    job = _create_job(project, segment, route, page, source_segment, agent_id=route["agentId"])
+    segment["status"] = "done"
+    segment["evidence"] = _evidence(
+        "done",
+        page["id"],
+        accepted=True,
+        message=f"Coverage verification prepared navigation dispatch for {page['name']} at {navigation_path}.",
+    )
+    segment["evidence"].update(
+        {
+            "pageId": page["id"],
+            "agentId": job["agentId"],
+            "navigationPath": navigation_path,
+            "missingRouteParams": [],
+            "coverageVerification": True,
+        }
+    )
+    segment["updatedAt"] = now_iso()
+    _update_job(
+        job,
+        status="done",
+        evidence=segment["evidence"],
+        authStatus=adapter_auth_status(page["id"]),
+    )
+    _set_graph_status(project, route, segment)
+    _append_message(
+        project,
+        "assistant",
+        f"Verified {page['name']} navigation dispatch.",
+        route=route,
+        segmentId=segment["id"],
+        jobId=job["jobId"],
+    )
+    _save_project(project)
+    _sync_project_jobs(project)
+    return _job_with_evidence(STUDIO_STORE.get_job(job["jobId"])) or job
+
+
+def _verify_studio_coverage(
+    *,
+    project_id: str | None = None,
+    source_segment_id: str | None = None,
+    page_ids: list[str] | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    project = _project(project_id, "player")
+    before = _studio_coverage(project_id=project["projectId"], source_segment_id=source_segment_id)
+    resolved_source_segment_id = before.get("sourceSegmentId") or source_segment_id
+    source_segment = _resolve_source_segment(project, resolved_source_segment_id)
+    requested_page_ids = {page_id for page_id in (page_ids or []) if page_id}
+    created_jobs: list[dict[str, Any]] = []
+    skipped_pages: list[dict[str, Any]] = []
+
+    for page in before["pages"]:
+        if requested_page_ids and page["pageId"] not in requested_page_ids:
+            continue
+        if len(created_jobs) >= max(1, limit):
+            skipped_pages.append(_coverage_skip(page, "limit_reached", "Verification limit reached."))
+            continue
+        if page.get("coverageStatus") == "covered":
+            skipped_pages.append(_coverage_skip(page, "already_covered", "Accepted evidence already exists."))
+            continue
+        if page.get("missingRouteParams"):
+            skipped_pages.append(_coverage_skip(page, "missing_params"))
+            continue
+        if not page.get("dispatchReady"):
+            skipped_pages.append(_coverage_skip(page, "not_ready"))
+            continue
+        if page.get("executor") != "navigation":
+            skipped_pages.append(
+                _coverage_skip(
+                    page,
+                    "executor_not_batch_safe",
+                    "Only navigation targets are automatically verified in batch.",
+                )
+            )
+            continue
+        created_jobs.append(
+            _verify_navigation_page(
+                project,
+                page,
+                source_segment,
+                resolved_source_segment_id,
+            )
+        )
+
+    _sync_project_jobs(project)
+    after = _studio_coverage(project_id=project["projectId"], source_segment_id=resolved_source_segment_id)
+    return {
+        "status": "verified" if created_jobs else "no_verifiable_pages",
+        "checkedAt": now_iso(),
+        "project": project,
+        "projectId": project["projectId"],
+        "sourceSegmentId": after.get("sourceSegmentId"),
+        "sourceMediaUrl": after.get("sourceMediaUrl", ""),
+        "matchedCount": len(created_jobs) + len(skipped_pages),
+        "createdCount": len(created_jobs),
+        "skippedCount": len(skipped_pages),
+        "jobs": created_jobs,
+        "skippedPages": skipped_pages,
+        "coverage": after,
+    }
+
+
 def _delivery_gate(
     gate_id: str,
     label: str,
@@ -1265,6 +1434,21 @@ def register_studio_routes(app) -> None:
         source_segment_id: Optional[str] = Query(None),
     ):
         return _studio_coverage(project_id=project_id, source_segment_id=source_segment_id)
+
+    @app.post("/api/studio/coverage/verify")
+    async def post_studio_coverage_verify(payload: Optional[dict[str, Any]] = Body(None)):
+        body = payload or {}
+        page_ids = body.get("page_ids") or body.get("pageIds") or []
+        if isinstance(page_ids, str):
+            page_ids = [page_ids]
+        if not isinstance(page_ids, list):
+            raise HTTPException(status_code=400, detail="page_ids must be a list")
+        return _verify_studio_coverage(
+            project_id=body.get("project_id") or body.get("projectId"),
+            source_segment_id=body.get("source_segment_id") or body.get("sourceSegmentId"),
+            page_ids=[str(page_id) for page_id in page_ids],
+            limit=max(1, min(int(body.get("limit") or 50), 100)),
+        )
 
     @app.get("/api/studio/readiness")
     async def get_studio_readiness():

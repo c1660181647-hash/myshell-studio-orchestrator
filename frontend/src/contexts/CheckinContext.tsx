@@ -5,6 +5,7 @@ import {
   claimCheckin,
   type CheckinStatus,
 } from '../services/checkin';
+import { hasTelegramInitData } from '../services/api';
 import { trackEvent } from '../services/tracking';
 import { useEnergy } from './EnergyContext';
 
@@ -62,6 +63,12 @@ export function CheckinProvider({ children }: { children: ReactNode }) {
   const fetchedRef = useRef(false);
 
   const doFetch = useCallback(async (): Promise<CheckinStatus | null> => {
+    if (!hasTelegramInitData()) {
+      setStatus(null);
+      setLoading(false);
+      setError(null);
+      return null;
+    }
     setLoading(true);
     setError(null);
     try {

@@ -30,6 +30,10 @@ function getInitData(): string {
   return window.Telegram?.WebApp?.initData || '';
 }
 
+export function hasTelegramInitData(): boolean {
+  return Boolean(getInitData());
+}
+
 // ── Base request ──
 
 export class ApiError extends Error {

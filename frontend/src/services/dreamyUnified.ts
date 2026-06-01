@@ -313,6 +313,30 @@ export interface StudioCoverageReport {
   pages: StudioCoveragePage[];
 }
 
+export interface StudioCoverageVerifyResult {
+  status: 'verified' | 'no_verifiable_pages' | string;
+  checkedAt: string;
+  project: StudioProject;
+  projectId: string;
+  sourceSegmentId?: string | null;
+  sourceMediaUrl?: string;
+  matchedCount: number;
+  createdCount: number;
+  skippedCount: number;
+  jobs: StudioJob[];
+  skippedPages: Array<{
+    pageId: StudioApi | string;
+    pageName: string;
+    executor: StudioExecutor | string;
+    dispatchStatus: string;
+    coverageStatus: StudioCoverageStatus;
+    reason: string;
+    message?: string;
+    missingRouteParams?: string[];
+  }>;
+  coverage: StudioCoverageReport;
+}
+
 export interface StudioAgentCapability {
   id: string;
   label: string;
@@ -758,6 +782,26 @@ export async function fetchStudioCoverage(options: {
   const query = params.toString();
   const response = await fetch(getStudioRootEndpoint(`/api/studio/coverage${query ? `?${query}` : ''}`));
   if (!response.ok) throw new Error(`Studio coverage ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function verifyStudioCoverage(options: {
+  projectId?: string;
+  sourceSegmentId?: string;
+  pageIds?: Array<StudioApi | string>;
+  limit?: number;
+} = {}): Promise<StudioCoverageVerifyResult> {
+  const response = await fetch(getStudioRootEndpoint('/api/studio/coverage/verify'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      project_id: options.projectId,
+      source_segment_id: options.sourceSegmentId,
+      page_ids: options.pageIds,
+      limit: options.limit || 50,
+    }),
+  });
+  if (!response.ok) throw new Error(`Studio coverage verify ${response.status}: ${response.statusText}`);
   return response.json();
 }
 

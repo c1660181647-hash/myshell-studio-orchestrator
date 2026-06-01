@@ -788,6 +788,95 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(rerun_execution["missingRouteParams"], [])
         self.assertIn("img=https%3A%2F%2Fexample.com%2Ffallback-coverage-source.png", rerun_execution["navigationPath"])
 
+    def test_coverage_verify_creates_accepted_navigation_jobs_for_ready_pages(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            with self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={"message": "create verification source image"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                source_events = _sse_events("".join(response.iter_text()))
+
+            source_meta = next(payload for name, payload in source_events if name == "meta")
+            source_execution = next(payload for name, payload in source_events if name == "execution_request")
+            source_url = "https://example.com/verify-source.png"
+            update = self.client.post(
+                f"/api/studio/projects/{source_meta['projectId']}/client-result",
+                json={
+                    "segmentId": source_execution["segmentId"],
+                    "jobId": source_execution["jobId"],
+                    "status": "done",
+                    "taskId": "task_verify_source",
+                    "url": source_url,
+                    "posterUrl": source_url,
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            verified = self.client.post(
+                "/api/studio/coverage/verify",
+                json={
+                    "project_id": source_meta["projectId"],
+                    "source_segment_id": source_execution["segmentId"],
+                },
+            )
+
+        self.assertEqual(verified.status_code, 200)
+        body = verified.json()
+        created_page_ids = {job["pageId"] for job in body["jobs"]}
+        skipped_by_id = {page["pageId"]: page for page in body["skippedPages"]}
+
+        self.assertEqual(body["project"]["projectId"], source_meta["projectId"])
+        self.assertEqual(body["coverage"]["sourceSegmentId"], source_execution["segmentId"])
+        self.assertEqual(body["coverage"]["sourceMediaUrl"], source_url)
+        self.assertGreaterEqual(body["createdCount"], 10)
+        self.assertEqual(body["createdCount"], len(body["jobs"]))
+        self.assertIn("library", created_page_ids)
+        self.assertIn("tag-generator", created_page_ids)
+        self.assertIn("bot-detail", created_page_ids)
+        self.assertNotIn("myshell-art", created_page_ids)
+        self.assertIn("myshell-art", skipped_by_id)
+        self.assertEqual(skipped_by_id["myshell-art"]["reason"], "not_ready")
+
+        tag_job = next(job for job in body["jobs"] if job["pageId"] == "tag-generator")
+        self.assertEqual(tag_job["status"], "done")
+        self.assertEqual(tag_job["evidence"]["accepted"], True)
+        self.assertEqual(tag_job["evidence"]["pageId"], "tag-generator")
+        self.assertEqual(tag_job["evidence"]["missingRouteParams"], [])
+        self.assertIn("img=https%3A%2F%2Fexample.com%2Fverify-source.png", tag_job["navigationPath"])
+        self.assertFalse(tag_job["evidence"].get("mediaUrl", "").startswith("/gallery"))
+        self.assertGreaterEqual(body["coverage"]["summary"]["covered"], body["createdCount"] + 1)
+
+    def test_coverage_verify_skips_contextual_pages_without_source_media(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            verified = self.client.post("/api/studio/coverage/verify", json={})
+
+        self.assertEqual(verified.status_code, 200)
+        body = verified.json()
+        created_page_ids = {job["pageId"] for job in body["jobs"]}
+        skipped_by_id = {page["pageId"]: page for page in body["skippedPages"]}
+
+        self.assertTrue(body["project"]["projectId"].startswith("project_"))
+        self.assertGreaterEqual(body["createdCount"], 9)
+        self.assertIn("library", created_page_ids)
+        self.assertNotIn("tag-generator", created_page_ids)
+        self.assertIn("tag-generator", skipped_by_id)
+        self.assertEqual(skipped_by_id["tag-generator"]["reason"], "missing_params")
+        self.assertEqual(skipped_by_id["tag-generator"]["missingRouteParams"], ["img"])
+        self.assertIn("myshell-art", skipped_by_id)
+        self.assertEqual(skipped_by_id["myshell-art"]["reason"], "not_ready")
+
     def test_run_stream_preserves_selected_agent_id_through_retry(self) -> None:
         with self.client.stream(
             "POST",

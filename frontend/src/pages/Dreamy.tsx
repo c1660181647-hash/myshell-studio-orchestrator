@@ -59,6 +59,7 @@ import {
   resolveStudioAssetUrl,
   streamStudioRun,
   submitDreamyMiniappJob,
+  verifyStudioCoverage,
 } from '../services/dreamyUnified';
 import {
   clearStudioDispatchSession,
@@ -562,15 +563,33 @@ function StudioDeliveryReportStrip({
   );
 }
 
-function StudioCoverageStrip({ coverage }: { coverage: StudioCoverageReport | null }) {
+function StudioCoverageStrip({
+  coverage,
+  verifying,
+  onVerify,
+}: {
+  coverage: StudioCoverageReport | null;
+  verifying: boolean;
+  onVerify: () => void;
+}) {
   const summary = coverage?.summary;
   const gaps = (coverage?.pages || []).filter((page) => page.coverageStatus !== 'covered');
+  const canVerify = Boolean(summary?.readyUnverified);
 
   return (
     <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
       <Pill tone={coverage?.status === 'blocked' ? 'danger' : coverage?.status === 'ready' ? 'success' : 'hot'}>
         {coverage ? `Coverage ${coverage.status}` : 'Coverage checking'}
       </Pill>
+      <button
+        type="button"
+        disabled={!canVerify || verifying}
+        onClick={onVerify}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <RefreshCcw size={12} className={verifying ? 'animate-spin' : ''} />
+        Verify Ready
+      </button>
       {summary && (
         <>
           <Pill tone={summary.covered === summary.total ? 'success' : 'hot'}>{`${summary.covered}/${summary.total} covered`}</Pill>
@@ -827,32 +846,37 @@ function SegmentCard({
 }) {
   const media = getSegmentMedia(segment);
   return (
-    <button
-      type="button"
-      onClick={onSelect}
+    <div
       className={`group relative h-[86px] w-[116px] shrink-0 overflow-hidden rounded-lg-v2 border text-left transition-colors ${
         active ? 'border-dreamy-brand-hot-v2' : 'border-Cr-border-default-v2'
       } bg-Cr-Bg-surface-default-v2`}
     >
-      {media ? (
-        <img src={media} alt="" className="h-full w-full object-cover opacity-80" />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center bg-Cr-Bg-surface-subtle-v2">
-          <Film size={18} className="text-Cr-text-subtler-v2" />
+      <button
+        type="button"
+        onClick={onSelect}
+        className="block h-full w-full text-left"
+        aria-label={`Select ${segment.botName} segment`}
+      >
+        {media ? (
+          <img src={media} alt="" className="h-full w-full object-cover opacity-80" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-Cr-Bg-surface-subtle-v2">
+            <Film size={18} className="text-Cr-text-subtler-v2" />
+          </div>
+        )}
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2">
+          <div className="truncate text-[11px] font-semibold text-white">{segment.botName}</div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] capitalize text-white/70">{segment.action}</span>
+            <span className={`text-[10px] font-semibold ${segment.status === 'error' ? 'text-red-300' : 'text-white/70'}`}>
+              {segment.status}
+            </span>
+          </div>
         </div>
-      )}
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2">
-        <div className="truncate text-[11px] font-semibold text-white">{segment.botName}</div>
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[10px] capitalize text-white/70">{segment.action}</span>
-          <span className={`text-[10px] font-semibold ${segment.status === 'error' ? 'text-red-300' : 'text-white/70'}`}>
-            {segment.status}
-          </span>
-        </div>
-      </div>
-      <span className="absolute left-2 top-2 rounded bg-black/50 px-1.5 py-0.5 text-[10px] font-semibold text-white/85">
-        {segment.type}
-      </span>
+        <span className="absolute left-2 top-2 rounded bg-black/50 px-1.5 py-0.5 text-[10px] font-semibold text-white/85">
+          {segment.type}
+        </span>
+      </button>
       <button
         type="button"
         onClick={(event) => {
@@ -864,7 +888,7 @@ function SegmentCard({
       >
         <Trash2 size={12} />
       </button>
-    </button>
+    </div>
   );
 }
 
@@ -1770,6 +1794,7 @@ export default function Dreamy() {
   const [queueAgentFilter, setQueueAgentFilter] = useState('all');
   const [dispatchPreview, setDispatchPreview] = useState<StudioDispatchPreview | null>(null);
   const [bulkActionRunning, setBulkActionRunning] = useState<'cancel' | 'retry' | null>(null);
+  const [coverageVerifyRunning, setCoverageVerifyRunning] = useState(false);
 
   const selectedSegment = useMemo(() => {
     const id = project?.selectedSegmentId;
@@ -2529,6 +2554,59 @@ export default function Dreamy() {
     ]);
   };
 
+  const runCoverageVerification = async () => {
+    if (coverageVerifyRunning) return;
+    setCoverageVerifyRunning(true);
+    const result = await verifyStudioCoverage({
+      projectId: project?.projectId,
+      sourceSegmentId: selectedSegment?.id,
+      limit: 50,
+    }).catch((error) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: 'Coverage verification failed.',
+          error: error instanceof Error ? error.message : String(error),
+          createdAt: nowIso(),
+        },
+      ]);
+      return null;
+    });
+    setCoverageVerifyRunning(false);
+    if (!result) return;
+
+    mergeProject(result.project);
+    result.jobs.forEach((job) => mergeJob(job));
+    setCoverageReport(result.coverage);
+    const nextProjectId = result.project.projectId;
+    const nextSourceSegmentId = result.coverage.sourceSegmentId || selectedSegment?.id;
+    await Promise.all([
+      fetchStudioJobs({ limit: 50 }).then((jobs) => setHubJobs(jobs)).catch(() => undefined),
+      fetchStudioOverview().then((overview) => setStudioOverview(overview)).catch(() => undefined),
+      fetchStudioReadiness().then((readiness) => setStudioReadiness(readiness)).catch(() => undefined),
+      fetchStudioDispatchMatrix({
+        projectId: nextProjectId,
+        sourceSegmentId: nextSourceSegmentId || undefined,
+      }).then((matrix) => setDispatchMatrix(matrix)).catch(() => undefined),
+      fetchStudioCoverage({
+        projectId: nextProjectId,
+        sourceSegmentId: nextSourceSegmentId || undefined,
+      }).then((coverage) => setCoverageReport(coverage)).catch(() => undefined),
+      fetchStudioProjectDeliveryReport(nextProjectId).then((report) => setDeliveryReport(report)).catch(() => undefined),
+    ]);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: makeId('assistant'),
+        role: 'assistant',
+        content: `Coverage verified ${result.createdCount} page${result.createdCount === 1 ? '' : 's'}; skipped ${result.skippedCount}.`,
+        createdAt: nowIso(),
+      },
+    ]);
+  };
+
   return (
     <div className="flex h-full min-h-[100dvh] flex-col bg-Cr-Bg-soft-v2 text-Cr-text-default-v2">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3">
@@ -2569,7 +2647,11 @@ export default function Dreamy() {
       <StudioHealthStrip health={studioHealth} />
       <StudioReadinessStrip readiness={studioReadiness} />
       <StudioDeliveryReportStrip projectId={project?.projectId} report={deliveryReport} />
-      <StudioCoverageStrip coverage={coverageReport} />
+      <StudioCoverageStrip
+        coverage={coverageReport}
+        verifying={coverageVerifyRunning}
+        onVerify={() => void runCoverageVerification()}
+      />
 
       <div className="grid shrink-0 gap-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
         <label className="grid gap-1">

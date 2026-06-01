@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { fetchInit, invalidateEnergyCache } from '../services/api';
+import { fetchInit, hasTelegramInitData, invalidateEnergyCache } from '../services/api';
 import type { InitResponse } from '../types';
 import i18n from '../i18n';
 import { trackEvent } from '../services/tracking';
@@ -43,6 +43,11 @@ export function EnergyProvider({ children }: { children: ReactNode }) {
   const [init, setInit] = useState<InitResponse | null>(null);
 
   const load = useCallback(async () => {
+    if (!hasTelegramInitData()) {
+      setInit(null);
+      setEnergy(null);
+      return;
+    }
     try {
       const data = await fetchInit();
       setInit(data);
