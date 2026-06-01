@@ -432,6 +432,19 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(body["reports"]["dispatchMatrix"]["summary"]["total"], body["summary"]["pages"])
         self.assertEqual(body["reports"]["handoffSnapshot"]["projectId"], meta["projectId"])
 
+        download = self.client.get(
+            "/api/studio/delivery-audit",
+            params={"project_id": meta["projectId"], "source_segment_id": execution["segmentId"], "download": "1"},
+        )
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(download.headers.get("content-type", "").split(";")[0], "application/json")
+        disposition = download.headers.get("content-disposition", "")
+        self.assertIn("attachment", disposition)
+        self.assertIn(f"myshell-studio-audit-{meta['projectId']}.json", disposition)
+        download_body = download.json()
+        self.assertEqual(download_body["projectId"], meta["projectId"])
+        self.assertEqual(download_body["requirements"][0]["id"], body["requirements"][0]["id"])
+
     def test_dispatch_matrix_covers_all_pages_agents_and_paths(self) -> None:
         matrix = self.client.get("/api/studio/dispatch-matrix")
 

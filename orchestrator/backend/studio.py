@@ -2345,8 +2345,18 @@ def register_studio_routes(app) -> None:
     async def get_studio_delivery_audit(
         project_id: Optional[str] = Query(None),
         source_segment_id: Optional[str] = Query(None),
+        download: bool = Query(False),
     ):
-        return await _studio_delivery_audit(project_id=project_id, source_segment_id=source_segment_id)
+        audit = await _studio_delivery_audit(project_id=project_id, source_segment_id=source_segment_id)
+        if download:
+            audit_project_id = audit.get("projectId") or project_id or "current"
+            return JSONResponse(
+                audit,
+                headers={
+                    "Content-Disposition": f'attachment; filename="myshell-studio-audit-{audit_project_id}.json"',
+                },
+            )
+        return audit
 
     @app.get("/api/studio/dispatch-preview")
     async def get_dispatch_preview(

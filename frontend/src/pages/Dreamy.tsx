@@ -216,6 +216,10 @@ function deliveryBundleFilename(bundle: StudioDeliveryBundle): string {
   return `myshell-studio-delivery-${bundle.projectId}.json`;
 }
 
+function deliveryAuditFilename(audit: StudioDeliveryAudit): string {
+  return `myshell-studio-audit-${audit.projectId || 'current'}.json`;
+}
+
 function statusTone(status?: string): string {
   if (status === 'done') return 'text-Cr-text-success-default-v2';
   if (status === 'error' || status === 'timeout' || status === 'auth_missing') return 'text-Cr-text-critical-default-v2';
@@ -565,10 +569,12 @@ function StudioDeliveryAuditStrip({
   audit,
   refreshing,
   onRefresh,
+  onDownload,
 }: {
   audit: StudioDeliveryAudit | null;
   refreshing: boolean;
   onRefresh: () => void;
+  onDownload: () => void;
 }) {
   const summary = audit?.summary;
   const gaps = (audit?.requirements || []).filter((item) => item.status !== 'ready');
@@ -586,6 +592,15 @@ function StudioDeliveryAuditStrip({
       >
         <RefreshCcw size={12} className={refreshing ? 'animate-spin' : ''} />
         Refresh Audit
+      </button>
+      <button
+        type="button"
+        disabled={!audit}
+        onClick={onDownload}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <Download size={12} />
+        Audit JSON
       </button>
       {summary && (
         <>
@@ -2238,6 +2253,21 @@ export default function Dreamy() {
     [applyDeliveryAudit, project?.projectId, studioContextSourceSegmentId],
   );
 
+  const downloadDeliveryAudit = useCallback(() => {
+    if (!deliveryAudit) return;
+    const filename = deliveryAuditFilename(deliveryAudit);
+    downloadJsonPayload(deliveryAudit, filename);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: makeId('assistant'),
+        role: 'assistant',
+        content: `Delivery audit downloaded ${filename}.`,
+        createdAt: nowIso(),
+      },
+    ]);
+  }, [deliveryAudit]);
+
   const refreshHandoffSnapshot = useCallback(
     async (options: { projectId?: string; sourceSegmentId?: string; interactive?: boolean } = {}) => {
       const interactive = options.interactive ?? true;
@@ -3367,6 +3397,7 @@ export default function Dreamy() {
         audit={deliveryAudit}
         refreshing={deliveryAuditRefreshing}
         onRefresh={() => void refreshDeliveryAudit({ interactive: true })}
+        onDownload={downloadDeliveryAudit}
       />
       <StudioDeliveryReportStrip projectId={project?.projectId} report={deliveryReport} />
       <StudioCoverageStrip

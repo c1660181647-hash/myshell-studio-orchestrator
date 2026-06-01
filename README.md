@@ -101,7 +101,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 
 `/api/studio/readiness` returns delivery gates for the handoff surface: backend, storage, Chrome CDP, cookie injection, page registry, agent registry, dispatch preview, overview, MyShell Art auth, and job store. Required gate failures make the response `blocked`; optional auth/CDP gaps are surfaced as `degraded` or `auth_missing` rather than hidden as success.
 
-`/api/studio/delivery-audit` returns a machine-readable acceptance report for operators and deployment checks. Pass optional `project_id` and `source_segment_id` to include project-specific handoff evidence. The response includes top-level `status`, `summary`, `requirements`, `artifacts`, and embedded `reports` for health, readiness, overview, dispatch matrix, coverage, project delivery, and handoff snapshot. The Studio UI surfaces this as the Audit strip.
+`/api/studio/delivery-audit` returns a machine-readable acceptance report for operators and deployment checks. Pass optional `project_id` and `source_segment_id` to include project-specific handoff evidence, and add `download=1` to receive a JSON attachment named `myshell-studio-audit-{project_id|current}.json`. The response includes top-level `status`, `summary`, `requirements`, `artifacts`, and embedded `reports` for health, readiness, overview, dispatch matrix, coverage, project delivery, and handoff snapshot. The Studio UI surfaces this as the Audit strip with refresh and Audit JSON download actions.
 
 `/api/studio/dispatch-preview` preflights a target page without creating a job. It returns the resolved page, executor, agent, auth status, navigation path, route params, and `missingRouteParams`, which lets the Studio UI show exactly where a dispatch will go before it runs.
 
