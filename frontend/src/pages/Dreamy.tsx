@@ -10,6 +10,7 @@ import {
   Clock3,
   Copy,
   Download,
+  ExternalLink,
   Film,
   GitBranch,
   Hand,
@@ -59,6 +60,7 @@ import {
   fetchStudioReadiness,
   fetchStudioDispatchSession,
   fetchStudioDispatchSessions,
+  getStudioRootEndpoint,
   planStudioDispatchBatch,
   postStudioClientResult,
   resetStudioProject,
@@ -98,6 +100,7 @@ import type {
   StudioExecutor,
   StudioExecutionRequest,
   StudioHandoffAction,
+  StudioHandoffArtifact,
   StudioHandoffSnapshot,
   StudioHealth,
   StudioJob,
@@ -568,6 +571,41 @@ function StudioReadinessStrip({ readiness }: { readiness: StudioReadiness | null
   );
 }
 
+function artifactHref(artifact: StudioHandoffArtifact): string {
+  return getStudioRootEndpoint(artifact.url || artifact.endpoint);
+}
+
+function StudioArtifactLinks({
+  artifacts,
+  limit = 4,
+}: {
+  artifacts?: StudioHandoffArtifact[];
+  limit?: number;
+}) {
+  const visibleArtifacts = (artifacts || []).filter((artifact) => artifact.url || artifact.endpoint).slice(0, limit);
+  if (!visibleArtifacts.length) return null;
+
+  return (
+    <>
+      {visibleArtifacts.map((artifact) => (
+        <a
+          key={`${artifact.id}:${artifact.url || artifact.endpoint}`}
+          data-testid="studio-artifact-link"
+          href={artifactHref(artifact)}
+          target="_blank"
+          rel="noreferrer"
+          title={artifact.url || artifact.endpoint}
+          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2 hover:bg-Cr-beta-white-8-v2"
+        >
+          <ExternalLink size={12} className="text-Cr-text-subtlest-v2" />
+          <span className="max-w-[130px] truncate">{artifact.label || artifact.id}</span>
+        </a>
+      ))}
+      {(artifacts || []).length > visibleArtifacts.length && <Pill>{`+${(artifacts || []).length - visibleArtifacts.length} artifacts`}</Pill>}
+    </>
+  );
+}
+
 function StudioDeliveryAuditStrip({
   audit,
   refreshing,
@@ -632,6 +670,7 @@ function StudioDeliveryAuditStrip({
           <Pill tone={summary.missingParams ? 'hot' : 'default'}>{`${summary.missingParams} missing params`}</Pill>
           <Pill tone={summary.actions ? 'hot' : 'success'}>{`${summary.actions || 0} actions`}</Pill>
           <Pill>{`${summary.artifacts} artifacts`}</Pill>
+          <StudioArtifactLinks artifacts={audit?.artifacts} limit={4} />
         </>
       )}
       {actions.slice(0, 3).map((action) => {
@@ -832,6 +871,7 @@ function StudioHandoffSnapshotStrip({
           </Pill>
           <Pill>{`${summary.jobs} jobs`}</Pill>
           <Pill>{`${snapshot?.artifacts.length || 0} artifacts`}</Pill>
+          <StudioArtifactLinks artifacts={bundle?.artifacts || snapshot?.artifacts} limit={4} />
         </>
       )}
       {bundle && (

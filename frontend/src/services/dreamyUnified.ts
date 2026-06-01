@@ -886,7 +886,8 @@ export function getStudioJobEndpoint(jobId: string): string {
   return base ? `${base}${path}` : path;
 }
 
-function getStudioRootEndpoint(path: string): string {
+export function getStudioRootEndpoint(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
   const base = getOrchestratorBaseUrl();
   return base ? `${base}${path}` : path;
 }
