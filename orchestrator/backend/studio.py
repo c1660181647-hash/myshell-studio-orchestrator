@@ -60,6 +60,8 @@ CORE_DELIVERY_AGENT_IDS = {
 }
 READY_GATE_STATUSES = {"ok", "ready", "client_delegated"}
 BLOCKED_GATE_STATUSES = {"blocked", "error"}
+PENDING_DELIVERY_STATUSES = {"draft", "queued", "running"}
+ISSUE_DELIVERY_STATUSES = {"timeout", "auth_missing", "error"}
 
 PLACEHOLDER_POSTERS = {
     "generate": "/gallery/creative-whale.jpg",
@@ -758,6 +760,129 @@ def _job_with_evidence(job: dict[str, Any] | None) -> dict[str, Any] | None:
     return enriched
 
 
+def _delivery_action_for_status(status: str, evidence: dict[str, Any]) -> dict[str, Any] | None:
+    if status in {"draft", "queued"}:
+        return {
+            "action": "wait-for-adapter",
+            "status": status,
+            "message": evidence.get("message") or "Adapter output has not been accepted yet.",
+        }
+    if status == "running":
+        return {
+            "action": "poll-result",
+            "status": status,
+            "message": evidence.get("message") or "Job is still running; refresh or wait for result evidence.",
+        }
+    if status == "auth_missing":
+        return {
+            "action": "restore-auth",
+            "status": status,
+            "message": evidence.get("message") or "Authentication is missing for this adapter.",
+        }
+    if status == "timeout":
+        return {
+            "action": "retry-or-cancel",
+            "status": status,
+            "message": evidence.get("message") or "Adapter timed out before returning accepted evidence.",
+        }
+    if status == "error":
+        return {
+            "action": "inspect-error",
+            "status": status,
+            "message": evidence.get("message") or "Adapter reported an error.",
+        }
+    if status == "done" and not evidence.get("accepted"):
+        return {
+            "action": "verify-evidence",
+            "status": status,
+            "message": evidence.get("message") or "Done status needs accepted media evidence.",
+        }
+    return None
+
+
+def _project_delivery_report(project: StudioProject) -> dict[str, Any]:
+    _sync_project_jobs(project)
+    jobs = [_job_with_evidence(job) for job in STUDIO_STORE.list_jobs(project["projectId"])]
+    jobs_by_id = {job["jobId"]: job for job in jobs if job}
+    jobs_by_segment: dict[str, dict[str, Any]] = {}
+    for job in jobs:
+        if job and job.get("segmentId") and job.get("segmentId") not in jobs_by_segment:
+            jobs_by_segment[str(job["segmentId"])] = job
+
+    segment_reports: list[dict[str, Any]] = []
+    unresolved_actions: list[dict[str, Any]] = []
+    accepted_evidence = 0
+    pending_evidence = 0
+    issue_count = 0
+
+    for segment in project.get("segments", []):
+        job = jobs_by_id.get(segment.get("jobId")) or jobs_by_segment.get(segment.get("id")) or {}
+        evidence = segment.get("evidence") or job.get("evidence") or {}
+        evidence_trail = job.get("evidenceTrail") or []
+        status = str(segment.get("status") or job.get("status") or "draft")
+        if evidence.get("accepted"):
+            accepted_evidence += 1
+        if status in PENDING_DELIVERY_STATUSES or (status == "done" and not evidence.get("accepted")):
+            pending_evidence += 1
+        if status in ISSUE_DELIVERY_STATUSES:
+            issue_count += 1
+
+        action = _delivery_action_for_status(status, evidence)
+        if action:
+            unresolved_actions.append(
+                {
+                    **action,
+                    "segmentId": segment.get("id"),
+                    "jobId": job.get("jobId") or segment.get("jobId") or "",
+                    "pageId": job.get("pageId") or job.get("api") or "",
+                    "botName": segment.get("botName") or job.get("botName") or "",
+                }
+            )
+
+        segment_reports.append(
+            {
+                "segmentId": segment.get("id"),
+                "jobId": job.get("jobId") or segment.get("jobId") or "",
+                "pageId": job.get("pageId") or job.get("api") or "",
+                "pageName": job.get("pageName") or "",
+                "agentId": job.get("agentId") or "",
+                "status": status,
+                "botName": segment.get("botName") or job.get("botName") or "",
+                "mediaUrl": segment.get("url") or job.get("mediaUrl") or "",
+                "posterUrl": segment.get("posterUrl") or job.get("posterUrl") or "",
+                "taskId": segment.get("taskId") or job.get("taskId") or "",
+                "authStatus": segment.get("authStatus") or job.get("authStatus") or {},
+                "evidence": evidence,
+                "evidenceTrail": evidence_trail,
+                "updatedAt": segment.get("updatedAt") or job.get("updatedAt") or "",
+            }
+        )
+
+    status_counts = _status_counts([job for job in jobs if job])
+    ready_for_handoff = bool(jobs) and not unresolved_actions and accepted_evidence > 0 and issue_count == 0
+    handoff_status = "ready" if ready_for_handoff else "needs_attention" if issue_count else "in_progress"
+
+    return {
+        "projectId": project["projectId"],
+        "conversationId": project.get("conversationId", ""),
+        "checkedAt": now_iso(),
+        "handoffStatus": handoff_status,
+        "readyForHandoff": ready_for_handoff,
+        "summary": {
+            "totalSegments": len(project.get("segments", [])),
+            "totalJobs": len(jobs),
+            "acceptedEvidence": accepted_evidence,
+            "pendingEvidence": pending_evidence,
+            "issueCount": issue_count,
+            "unresolvedActionCount": len(unresolved_actions),
+        },
+        "statusCounts": status_counts,
+        "segments": segment_reports,
+        "jobs": jobs,
+        "unresolvedActions": unresolved_actions,
+    }
+
+
 def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dict[str, Any]:
     page = get_page(job.get("pageId"))
     segment = _find_segment(project, job.get("segmentId")) or {
@@ -1226,6 +1351,13 @@ def register_studio_routes(app) -> None:
             raise HTTPException(status_code=404, detail="Project not found")
         _sync_project_jobs(project)
         return project
+
+    @app.get("/api/studio/projects/{project_id}/delivery-report")
+    async def get_studio_project_delivery_report(project_id: str):
+        project = _get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return _project_delivery_report(project)
 
     @app.post("/api/studio/projects/{project_id}/client-result")
     async def post_studio_client_result(project_id: str, payload: dict[str, Any] = Body(...)):

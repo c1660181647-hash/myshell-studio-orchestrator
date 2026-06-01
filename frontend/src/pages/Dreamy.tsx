@@ -48,6 +48,7 @@ import {
   fetchStudioJobs,
   fetchStudioOverview,
   fetchStudioPages,
+  fetchStudioProjectDeliveryReport,
   fetchStudioProjects,
   fetchStudioReadiness,
   postStudioClientResult,
@@ -80,6 +81,7 @@ import type {
   StudioPageAdapter,
   StudioProgressEvent,
   StudioProject,
+  StudioProjectDeliveryReport,
   StudioReadiness,
   StudioRouteEvent,
   StudioRunEvent,
@@ -181,6 +183,13 @@ function healthPillTone(status?: string): 'default' | 'hot' | 'success' | 'dange
   if (status === 'ok' || status === 'ready' || status === 'client_delegated') return 'success';
   if (status === 'auth_missing' || status === 'unavailable' || status === 'degraded') return 'hot';
   if (status === 'error' || status === 'blocked') return 'danger';
+  return 'default';
+}
+
+function handoffPillTone(status?: string): 'default' | 'hot' | 'success' | 'danger' {
+  if (status === 'ready') return 'success';
+  if (status === 'needs_attention') return 'danger';
+  if (status === 'in_progress') return 'hot';
   return 'default';
 }
 
@@ -497,6 +506,45 @@ function StudioReadinessStrip({ readiness }: { readiness: StudioReadiness | null
           </span>
         );
       })}
+    </div>
+  );
+}
+
+function StudioDeliveryReportStrip({
+  projectId,
+  report,
+}: {
+  projectId?: string;
+  report: StudioProjectDeliveryReport | null;
+}) {
+  if (!projectId) return null;
+  const summary = report?.summary;
+  const actions = report?.unresolvedActions || [];
+
+  return (
+    <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
+      <Pill tone={handoffPillTone(report?.handoffStatus)}>
+        {report ? `Project ${report.handoffStatus}` : 'Project checking'}
+      </Pill>
+      {summary && (
+        <>
+          <Pill tone={summary.acceptedEvidence ? 'success' : 'default'}>{`${summary.acceptedEvidence} accepted`}</Pill>
+          <Pill tone={summary.pendingEvidence ? 'hot' : 'default'}>{`${summary.pendingEvidence} pending`}</Pill>
+          <Pill tone={summary.issueCount ? 'danger' : 'default'}>{`${summary.issueCount} issues`}</Pill>
+        </>
+      )}
+      {actions.slice(0, 4).map((action) => (
+        <span
+          key={`${action.segmentId || action.jobId || action.action}_${action.action}`}
+          title={action.message || action.action}
+          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2"
+        >
+          <AlertTriangle size={12} className="text-dreamy-brand-hot-v2" />
+          <span className="max-w-[130px] truncate">{action.action}</span>
+          <span className="text-Cr-text-subtlest-v2">{action.status}</span>
+        </span>
+      ))}
+      {actions.length > 4 && <Pill tone="hot">{`+${actions.length - 4} actions`}</Pill>}
     </div>
   );
 }
@@ -1572,6 +1620,7 @@ export default function Dreamy() {
   const [studioHealth, setStudioHealth] = useState<StudioHealth | null>(null);
   const [studioOverview, setStudioOverview] = useState<StudioOverview | null>(null);
   const [studioReadiness, setStudioReadiness] = useState<StudioReadiness | null>(null);
+  const [deliveryReport, setDeliveryReport] = useState<StudioProjectDeliveryReport | null>(null);
   const [queueStatusFilter, setQueueStatusFilter] = useState<StudioStatus | 'all'>('all');
   const [queuePageFilter, setQueuePageFilter] = useState<StudioApi | string>('all');
   const [queueAgentFilter, setQueueAgentFilter] = useState('all');
@@ -1694,6 +1743,22 @@ export default function Dreamy() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!project?.projectId) {
+      setDeliveryReport(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchStudioProjectDeliveryReport(project.projectId).then((report) => {
+      if (!cancelled) setDeliveryReport(report);
+    }).catch(() => {
+      if (!cancelled) setDeliveryReport(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [hubJobsVersion, project?.projectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2106,6 +2171,7 @@ export default function Dreamy() {
     const projectId = project?.projectId;
     setProject(null);
     setHubJobs([]);
+    setDeliveryReport(null);
     forgetLastStudioProjectId();
     clearStudioDispatchSession();
     setMessages([
@@ -2225,6 +2291,9 @@ export default function Dreamy() {
       }).then((jobs) => setHubJobs(jobs)).catch(() => undefined),
       fetchStudioOverview().then((overview) => setStudioOverview(overview)).catch(() => undefined),
       fetchStudioReadiness().then((readiness) => setStudioReadiness(readiness)).catch(() => undefined),
+      project?.projectId
+        ? fetchStudioProjectDeliveryReport(project.projectId).then((report) => setDeliveryReport(report)).catch(() => undefined)
+        : Promise.resolve(),
     ]);
     setMessages((prev) => [
       ...prev,
@@ -2278,6 +2347,7 @@ export default function Dreamy() {
 
       <StudioHealthStrip health={studioHealth} />
       <StudioReadinessStrip readiness={studioReadiness} />
+      <StudioDeliveryReportStrip projectId={project?.projectId} report={deliveryReport} />
 
       <div className="grid shrink-0 gap-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
         <label className="grid gap-1">

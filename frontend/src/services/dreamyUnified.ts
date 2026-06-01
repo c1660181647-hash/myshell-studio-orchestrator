@@ -147,6 +147,53 @@ export interface StudioReadiness {
   health?: StudioHealth;
 }
 
+export interface StudioDeliveryAction {
+  action: string;
+  status: StudioStatus | string;
+  message?: string;
+  segmentId?: string;
+  jobId?: string;
+  pageId?: string;
+  botName?: string;
+}
+
+export interface StudioDeliverySegment {
+  segmentId: string;
+  jobId?: string;
+  pageId?: string;
+  pageName?: string;
+  agentId?: string;
+  status: StudioStatus | string;
+  botName?: string;
+  mediaUrl?: string;
+  posterUrl?: string;
+  taskId?: string;
+  authStatus?: StudioAuthStatus;
+  evidence?: StudioEvidence;
+  evidenceTrail?: StudioEvidence[];
+  updatedAt?: string;
+}
+
+export interface StudioProjectDeliveryReport {
+  projectId: string;
+  conversationId: string;
+  checkedAt: string;
+  handoffStatus: 'ready' | 'in_progress' | 'needs_attention' | string;
+  readyForHandoff: boolean;
+  summary: {
+    totalSegments: number;
+    totalJobs: number;
+    acceptedEvidence: number;
+    pendingEvidence: number;
+    issueCount: number;
+    unresolvedActionCount: number;
+  };
+  statusCounts: Record<StudioStatus | string, number>;
+  segments: StudioDeliverySegment[];
+  jobs: StudioJob[];
+  unresolvedActions: StudioDeliveryAction[];
+}
+
 export interface StudioPageAdapter {
   id: StudioApi;
   name: string;
@@ -579,6 +626,14 @@ export async function fetchStudioProject(projectId: string): Promise<StudioProje
   const response = await fetch(getStudioProjectEndpoint(projectId));
   if (!response.ok) {
     throw new Error(`Studio project ${response.status}: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+export async function fetchStudioProjectDeliveryReport(projectId: string): Promise<StudioProjectDeliveryReport> {
+  const response = await fetch(`${getStudioProjectEndpoint(projectId)}/delivery-report`);
+  if (!response.ok) {
+    throw new Error(`Studio delivery report ${response.status}: ${response.statusText}`);
   }
   return response.json();
 }

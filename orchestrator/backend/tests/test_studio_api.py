@@ -586,6 +586,56 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(evidence.status_code, 200)
         self.assertEqual(evidence.json()["evidence"][0]["status"], "queued")
 
+    def test_project_delivery_report_summarizes_handoff_evidence(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "queue delivery segment"},
+        ) as response:
+            events = _sse_events("".join(response.iter_text()))
+
+        meta = next(payload for name, payload in events if name == "meta")
+        execution = next(payload for name, payload in events if name == "execution_request")
+
+        pending_report = self.client.get(f"/api/studio/projects/{meta['projectId']}/delivery-report")
+        self.assertEqual(pending_report.status_code, 200)
+        self.assertEqual(pending_report.headers.get("content-type", "").split(";")[0], "application/json")
+        pending_body = pending_report.json()
+        self.assertEqual(pending_body["projectId"], meta["projectId"])
+        self.assertEqual(pending_body["handoffStatus"], "in_progress")
+        self.assertFalse(pending_body["readyForHandoff"])
+        self.assertEqual(pending_body["summary"]["totalJobs"], 1)
+        self.assertEqual(pending_body["summary"]["acceptedEvidence"], 0)
+        self.assertEqual(pending_body["summary"]["pendingEvidence"], 1)
+        self.assertEqual(pending_body["statusCounts"]["queued"], 1)
+        self.assertEqual(pending_body["segments"][0]["jobId"], execution["jobId"])
+        self.assertEqual(pending_body["segments"][0]["evidenceTrail"][0]["status"], "queued")
+        self.assertEqual(pending_body["unresolvedActions"][0]["action"], "wait-for-adapter")
+
+        done = self.client.post(
+            f"/api/studio/projects/{meta['projectId']}/client-result",
+            json={
+                "segmentId": execution["segmentId"],
+                "jobId": execution["jobId"],
+                "status": "done",
+                "taskId": "task_delivery_done",
+                "url": "https://example.com/fresh-delivery.png",
+                "posterUrl": "https://example.com/fresh-delivery.png",
+            },
+        )
+        self.assertEqual(done.status_code, 200)
+
+        ready_report = self.client.get(f"/api/studio/projects/{meta['projectId']}/delivery-report")
+        self.assertEqual(ready_report.status_code, 200)
+        ready_body = ready_report.json()
+        self.assertEqual(ready_body["handoffStatus"], "ready")
+        self.assertTrue(ready_body["readyForHandoff"])
+        self.assertEqual(ready_body["summary"]["acceptedEvidence"], 1)
+        self.assertEqual(ready_body["summary"]["pendingEvidence"], 0)
+        self.assertEqual(ready_body["summary"]["issueCount"], 0)
+        self.assertEqual(ready_body["segments"][0]["evidence"]["mediaUrl"], "https://example.com/fresh-delivery.png")
+        self.assertEqual(ready_body["unresolvedActions"], [])
+
     def test_job_queue_can_filter_by_page_and_agent(self) -> None:
         with self.client.stream(
             "POST",

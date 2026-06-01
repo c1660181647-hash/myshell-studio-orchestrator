@@ -13,6 +13,7 @@ MyShell Studio Orchestrator is a unified agent dispatch center for Dreamy miniap
 - Manifest-driven page expansion via `orchestrator/backend/studio_pages_manifest.json` or `STUDIO_PAGES_MANIFEST`, so new MyShell miniapp surfaces can be added without changing Python router code.
 - Health checks that report backend, storage, Chrome CDP, MyShell cookies, cookie injection, and Dreamy auth delegation separately, with the same status visible in Studio.
 - Delivery readiness gates that combine health, registry coverage, dispatch preview, overview, MyShell Art auth, and job-store checks into a single Studio handoff status.
+- Project delivery reports that summarize accepted evidence, pending evidence, issue counts, unresolved actions, and per-segment evidence trails for operator handoff.
 
 ## Repository Layout
 
@@ -55,6 +56,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `POST /api/studio/run`
 - `GET /api/studio/projects`
 - `GET /api/studio/projects/{project_id}`
+- `GET /api/studio/projects/{project_id}/delivery-report`
 - `POST /api/studio/projects/{project_id}/client-result`
 - `POST /api/studio/projects/{project_id}/reset`
 - `GET /api/studio/jobs`
@@ -75,6 +77,8 @@ http://127.0.0.1:5174/?test_route=dreamy
 `/api/studio/run` streams `meta`, `route`, `progress`, `execution_request`, `job`, `project`, and `done` events. Placeholder posters are always evidence-only drafts; generation completion requires fresh media, a task result, or an explicit failure/auth/timeout state. When no non-default page is selected, the intent router can infer registered miniapp pages directly from prompts like "open my generated library", "upload an image", or "go to settings". Navigation pages return `executor: "navigation"`, `clientAction: "navigate"`, and `navigationPath`; the Studio frontend executes the route switch, keeps a return dock available, and the backend stores accepted route evidence.
 
 `/api/studio/projects` and `/api/studio/jobs` power restart recovery and queue views. Job responses include `evidenceTrail`, and retry responses include a client `executionRequest` when the adapter must run from the authenticated miniapp browser. The job queue supports `status`, `page_id`, and `agent_id` filters for the Studio dispatch center.
+
+`/api/studio/projects/{project_id}/delivery-report` turns a persisted project into a handoff report with `handoffStatus`, `readyForHandoff`, status counts, accepted/pending/issue evidence counts, unresolved actions, and each segment's evidence trail. The Studio UI surfaces this as the Project Delivery strip above the page registry.
 
 `POST /api/studio/jobs/bulk` applies `cancel` or `retry` to filtered queue slices using the same `status`, `page_id`, `agent_id`, and `project_id` filters. Bulk cancel skips terminal `done` and `cancelled` jobs by default unless `include_terminal` is set. It returns updated jobs, skipped jobs, touched projects, and retry execution requests when adapter execution must resume.
 
