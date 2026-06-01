@@ -577,6 +577,7 @@ function StudioDispatchMatrixPanel({
               <Pill tone={summary.ready === summary.total ? 'success' : 'hot'}>{`${summary.ready}/${summary.total} ready`}</Pill>
               <Pill tone={summary.missingParams ? 'hot' : 'default'}>{`${summary.missingParams} missing params`}</Pill>
               <Pill>{`${summary.navigation} nav`}</Pill>
+              {matrix?.sourceSegmentId && <Pill tone="success">source segment</Pill>}
             </>
           )}
         </div>
@@ -1804,6 +1805,19 @@ export default function Dreamy() {
 
   useEffect(() => {
     let cancelled = false;
+    void fetchStudioDispatchMatrix({
+      projectId: project?.projectId,
+      sourceSegmentId: selectedSegment?.id,
+    }).then((matrix) => {
+      if (!cancelled) setDispatchMatrix(matrix);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.projectId, selectedSegment?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
     void fetchStudioProjects(20).then((storedProjects) => {
       if (cancelled) return;
       if (!storedProjects.length) return;
@@ -1854,7 +1868,10 @@ export default function Dreamy() {
     void Promise.all([
       fetchStudioOverview().catch(() => null),
       fetchStudioReadiness().catch(() => null),
-      fetchStudioDispatchMatrix().catch(() => null),
+      fetchStudioDispatchMatrix({
+        projectId: project?.projectId,
+        sourceSegmentId: selectedSegment?.id,
+      }).catch(() => null),
     ]).then(([overview, readiness, matrix]) => {
       if (cancelled) return;
       if (overview) setStudioOverview(overview);
@@ -1864,7 +1881,7 @@ export default function Dreamy() {
     return () => {
       cancelled = true;
     };
-  }, [hubJobsVersion]);
+  }, [hubJobsVersion, project?.projectId, selectedSegment?.id]);
 
   useEffect(() => {
     if (!selectedPageId) return;
@@ -2377,7 +2394,10 @@ export default function Dreamy() {
       }).then((jobs) => setHubJobs(jobs)).catch(() => undefined),
       fetchStudioOverview().then((overview) => setStudioOverview(overview)).catch(() => undefined),
       fetchStudioReadiness().then((readiness) => setStudioReadiness(readiness)).catch(() => undefined),
-      fetchStudioDispatchMatrix().then((matrix) => setDispatchMatrix(matrix)).catch(() => undefined),
+      fetchStudioDispatchMatrix({
+        projectId: project?.projectId,
+        sourceSegmentId: selectedSegment?.id,
+      }).then((matrix) => setDispatchMatrix(matrix)).catch(() => undefined),
       project?.projectId
         ? fetchStudioProjectDeliveryReport(project.projectId).then((report) => setDeliveryReport(report)).catch(() => undefined)
         : Promise.resolve(),

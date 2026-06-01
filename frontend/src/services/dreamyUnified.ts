@@ -216,6 +216,9 @@ export interface StudioDispatchMatrixEntry {
 
 export interface StudioDispatchMatrix {
   checkedAt: string;
+  projectId?: string | null;
+  sourceSegmentId?: string | null;
+  sourceMediaUrl?: string;
   summary: {
     total: number;
     ready: number;
@@ -700,8 +703,15 @@ export async function fetchStudioReadiness(): Promise<StudioReadiness> {
   return response.json();
 }
 
-export async function fetchStudioDispatchMatrix(): Promise<StudioDispatchMatrix> {
-  const response = await fetch(getStudioRootEndpoint('/api/studio/dispatch-matrix'));
+export async function fetchStudioDispatchMatrix(options: {
+  projectId?: string;
+  sourceSegmentId?: string;
+} = {}): Promise<StudioDispatchMatrix> {
+  const params = new URLSearchParams();
+  if (options.projectId) params.set('project_id', options.projectId);
+  if (options.sourceSegmentId) params.set('source_segment_id', options.sourceSegmentId);
+  const query = params.toString();
+  const response = await fetch(getStudioRootEndpoint(`/api/studio/dispatch-matrix${query ? `?${query}` : ''}`));
   if (!response.ok) throw new Error(`Studio dispatch matrix ${response.status}: ${response.statusText}`);
   return response.json();
 }

@@ -84,6 +84,23 @@ def _agent_id_for_dispatch(page: dict[str, Any], preferred_agent_id: str | None 
     return _agent_id_for_page(page)
 
 
+def _accepted_source_media_url(source_segment: Optional[StudioSegment]) -> str:
+    if not source_segment:
+        return ""
+    evidence = source_segment.get("evidence") or {}
+    media_url = (
+        evidence.get("mediaUrl")
+        or source_segment.get("url")
+        or (source_segment.get("posterUrl") if source_segment.get("status") == "done" else "")
+        or ""
+    )
+    if evidence.get("accepted") and media_url:
+        return str(media_url)
+    if source_segment.get("status") == "done" and source_segment.get("url"):
+        return str(source_segment["url"])
+    return ""
+
+
 def _navigation_path_for_page(
     page: dict[str, Any],
     route: dict[str, Any] | None = None,
@@ -101,7 +118,7 @@ def _navigation_path_for_page(
     if "slug_id" in route_params and bot_slug:
         query["slug_id"] = bot_slug
     if "img" in route_params and source_segment:
-        source_url = source_segment.get("url") or source_segment.get("posterUrl") or ""
+        source_url = _accepted_source_media_url(source_segment)
         if source_url:
             query["img"] = source_url
     if not query:
@@ -221,9 +238,13 @@ def _recommended_action_for_page(page: dict[str, Any]) -> str:
     return "execute-client"
 
 
-def _dispatch_matrix_entry(page: dict[str, Any], route: dict[str, Any]) -> dict[str, Any]:
+def _dispatch_matrix_entry(
+    page: dict[str, Any],
+    route: dict[str, Any],
+    source_segment: Optional[StudioSegment] = None,
+) -> dict[str, Any]:
     runtime_page = _page_with_runtime_status(page)
-    contract = _navigation_contract(page, route)
+    contract = _navigation_contract(page, route, source_segment)
     navigation_path = contract.get("navigationPath", "")
     missing_params = _missing_route_params(page, navigation_path)
     dispatch_ready = bool(runtime_page["dispatchReady"]) and not missing_params
@@ -251,8 +272,11 @@ def _dispatch_matrix_entry(page: dict[str, Any], route: dict[str, Any]) -> dict[
     }
 
 
-def _dispatch_matrix() -> dict[str, Any]:
+def _dispatch_matrix(project_id: str | None = None, source_segment_id: str | None = None) -> dict[str, Any]:
     default_bot = get_bot_by_slug("seedream-multi-chart") or MYSHELL_BOTS[0]
+    project = _get_project(project_id) if project_id else None
+    resolved_source_segment_id = source_segment_id or (project or {}).get("selectedSegmentId")
+    source_segment = _find_segment(project, resolved_source_segment_id) if project else None
     route = {
         "bot": {
             "slug": default_bot["slug"],
@@ -263,7 +287,7 @@ def _dispatch_matrix() -> dict[str, Any]:
             "pageUrl": f"https://art.myshell.ai/creative/{default_bot['slug']}",
         }
     }
-    entries = [_dispatch_matrix_entry(page, route) for page in list_studio_pages()]
+    entries = [_dispatch_matrix_entry(page, route, source_segment) for page in list_studio_pages()]
     summary = {
         "total": len(entries),
         "ready": sum(1 for entry in entries if entry["dispatchReady"]),
@@ -275,6 +299,9 @@ def _dispatch_matrix() -> dict[str, Any]:
     }
     return {
         "checkedAt": now_iso(),
+        "projectId": project.get("projectId") if project else None,
+        "sourceSegmentId": source_segment.get("id") if source_segment else None,
+        "sourceMediaUrl": _accepted_source_media_url(source_segment),
         "summary": summary,
         "entries": entries,
     }
@@ -1132,8 +1159,11 @@ def register_studio_routes(app) -> None:
         return _studio_overview(limit=limit)
 
     @app.get("/api/studio/dispatch-matrix")
-    async def get_studio_dispatch_matrix():
-        return _dispatch_matrix()
+    async def get_studio_dispatch_matrix(
+        project_id: Optional[str] = Query(None),
+        source_segment_id: Optional[str] = Query(None),
+    ):
+        return _dispatch_matrix(project_id=project_id, source_segment_id=source_segment_id)
 
     @app.get("/api/studio/readiness")
     async def get_studio_readiness():

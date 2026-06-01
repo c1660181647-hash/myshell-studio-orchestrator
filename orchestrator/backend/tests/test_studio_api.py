@@ -410,6 +410,56 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn(art["authStatus"]["status"], {"ready", "auth_missing"})
         self.assertEqual(art["dispatchReady"], art["authStatus"]["status"] == "ready")
 
+    def test_dispatch_matrix_uses_source_segment_for_contextual_pages(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "create source image"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        meta = next(payload for name, payload in events if name == "meta")
+        execution = next(payload for name, payload in events if name == "execution_request")
+        image_url = "https://example.com/source-image.png"
+
+        queued_matrix = self.client.get(
+            "/api/studio/dispatch-matrix",
+            params={"project_id": meta["projectId"], "source_segment_id": execution["segmentId"]},
+        )
+        self.assertEqual(queued_matrix.status_code, 200)
+        queued_entries = {entry["pageId"]: entry for entry in queued_matrix.json()["entries"]}
+        self.assertFalse(queued_entries["tag-generator"]["dispatchReady"])
+        self.assertEqual(queued_entries["tag-generator"]["missingRouteParams"], ["img"])
+
+        updated = self.client.post(
+            f"/api/studio/projects/{meta['projectId']}/client-result",
+            json={
+                "segmentId": execution["segmentId"],
+                "jobId": execution["jobId"],
+                "status": "done",
+                "taskId": "task_source_image",
+                "url": image_url,
+                "posterUrl": image_url,
+            },
+        )
+        self.assertEqual(updated.status_code, 200)
+
+        matrix = self.client.get(
+            "/api/studio/dispatch-matrix",
+            params={"project_id": meta["projectId"], "source_segment_id": execution["segmentId"]},
+        )
+        self.assertEqual(matrix.status_code, 200)
+        body = matrix.json()
+        entries = {entry["pageId"]: entry for entry in body["entries"]}
+
+        tag_generator = entries["tag-generator"]
+        self.assertTrue(tag_generator["dispatchReady"])
+        self.assertEqual(tag_generator["missingRouteParams"], [])
+        self.assertIn("img=https%3A%2F%2Fexample.com%2Fsource-image.png", tag_generator["navigationPath"])
+        self.assertGreaterEqual(body["summary"]["ready"], 12)
+        self.assertEqual(body["summary"]["missingParams"], 0)
+
     def test_pages_cover_existing_myshell_miniapp_routes(self) -> None:
         pages = self.client.get("/api/pages")
         self.assertEqual(pages.status_code, 200)
