@@ -73,7 +73,9 @@ import type {
   StudioAgentNode,
   StudioApi,
   StudioDispatchMatrix,
+  StudioDispatchMatrixEntry,
   StudioDispatchPreview,
+  StudioExecutor,
   StudioExecutionRequest,
   StudioHealth,
   StudioJob,
@@ -133,6 +135,13 @@ interface ChatItem {
   route?: StudioRouteEvent;
   steps?: StudioProgressEvent[];
   segmentId?: string;
+}
+
+interface StudioDispatchRunOverride {
+  pageId: StudioApi | string;
+  agentId?: string;
+  pageName?: string;
+  executor?: StudioExecutor;
 }
 
 const DEFAULT_DREAMY_SLUG = 'ai-porn-generator';
@@ -554,11 +563,15 @@ function StudioDeliveryReportStrip({
 function StudioDispatchMatrixPanel({
   matrix,
   selectedPageId,
+  submitting,
   onSelectPage,
+  onRunEntry,
 }: {
   matrix: StudioDispatchMatrix | null;
   selectedPageId: string;
+  submitting: boolean;
   onSelectPage: (pageId: string) => void;
+  onRunEntry: (entry: StudioDispatchMatrixEntry) => void;
 }) {
   const entries = matrix?.entries || [];
   if (!entries.length) return null;
@@ -585,35 +598,54 @@ function StudioDispatchMatrixPanel({
       <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
         {entries.map((entry) => {
           const active = entry.pageId === selectedPageId;
+          const missingLabel = entry.missingRouteParams.length
+            ? `Needs ${entry.missingRouteParams.join(', ')}`
+            : '';
+          const blockedLabel = missingLabel || entry.dispatchStatus;
           return (
-            <button
+            <div
               key={entry.pageId}
-              type="button"
-              onClick={() => onSelectPage(entry.pageId)}
               className={`grid min-w-[230px] gap-2 rounded-lg-v2 border p-2 text-left text-xs transition-colors ${
                 active
                   ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
                   : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 active:bg-Cr-beta-white-8-v2'
               }`}
-              aria-label={`Select ${entry.pageName} dispatch target`}
             >
-              <div className="flex min-w-0 items-center justify-between gap-2">
-                <div className="min-w-0 truncate font-semibold text-Cr-text-default-v2">{entry.pageName}</div>
-                <Pill tone={healthPillTone(entry.dispatchStatus)}>{entry.dispatchStatus}</Pill>
-              </div>
-              <div className="flex min-w-0 items-center justify-between gap-2 text-[11px] text-Cr-text-subtler-v2">
-                <span className="truncate">{entry.agentId}</span>
-                <span className="shrink-0">{entry.executor}</span>
-              </div>
-              <div className="flex min-w-0 items-center justify-between gap-2 text-[11px] text-Cr-text-subtlest-v2">
-                <span className="truncate">{entry.navigationPath || entry.recommendedAction}</span>
-                {!!entry.missingRouteParams.length && (
-                  <span className="shrink-0 font-semibold text-dreamy-brand-hot-v2">
-                    {entry.missingRouteParams.join(', ')}
-                  </span>
-                )}
-              </div>
-            </button>
+              <button
+                type="button"
+                onClick={() => onSelectPage(entry.pageId)}
+                className="grid min-w-0 gap-2 text-left"
+                aria-label={`Select ${entry.pageName} dispatch target`}
+              >
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <div className="min-w-0 truncate font-semibold text-Cr-text-default-v2">{entry.pageName}</div>
+                  <Pill tone={healthPillTone(entry.dispatchStatus)}>{entry.dispatchStatus}</Pill>
+                </div>
+                <div className="flex min-w-0 items-center justify-between gap-2 text-[11px] text-Cr-text-subtler-v2">
+                  <span className="truncate">{entry.agentId}</span>
+                  <span className="shrink-0">{entry.executor}</span>
+                </div>
+                <div className="flex min-w-0 items-center justify-between gap-2 text-[11px] text-Cr-text-subtlest-v2">
+                  <span className="truncate">{entry.navigationPath || entry.recommendedAction}</span>
+                  {!!entry.missingRouteParams.length && (
+                    <span className="shrink-0 font-semibold text-dreamy-brand-hot-v2">
+                      {entry.missingRouteParams.join(', ')}
+                    </span>
+                  )}
+                </div>
+              </button>
+              <button
+                type="button"
+                disabled={!entry.dispatchReady || submitting}
+                onClick={() => onRunEntry(entry)}
+                title={entry.dispatchReady ? `Dispatch ${entry.pageName}` : blockedLabel}
+                aria-label={`Dispatch ${entry.pageName}`}
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-default-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+              >
+                <Play size={12} />
+                <span className="truncate">{entry.dispatchReady ? 'Dispatch' : blockedLabel}</span>
+              </button>
+            </div>
           );
         })}
       </div>
@@ -2054,17 +2086,30 @@ export default function Dreamy() {
   );
 
   const runStudio = useCallback(
-    async (action: StudioAction = 'generate', overridePrompt?: string, source?: StudioSegment | null) => {
+    async (
+      action: StudioAction = 'generate',
+      overridePrompt?: string,
+      source?: StudioSegment | null,
+      dispatchOverride?: StudioDispatchRunOverride,
+    ) => {
       if (submitting) return;
       const text = (overridePrompt || prompt).trim();
-      const isNavigationDispatch = selectedPage?.executor === 'navigation';
-      if (!text && action === 'generate' && !isNavigationDispatch) return;
+      const targetPage = dispatchOverride?.pageId
+        ? pages.find((page) => page.id === dispatchOverride.pageId) || selectedPage
+        : selectedPage;
+      const targetPageId = dispatchOverride?.pageId || selectedPageId;
+      const targetAgentId = dispatchOverride?.agentId || selectedAgentId;
+      const targetPageName = dispatchOverride?.pageName || targetPage?.name || String(targetPageId);
+      const targetExecutor = dispatchOverride?.executor || targetPage?.executor;
+      const isNavigationDispatch = targetExecutor === 'navigation';
+      const isMatrixDispatch = Boolean(dispatchOverride);
+      if (!text && action === 'generate' && !isNavigationDispatch && !isMatrixDispatch) return;
 
       const runPrompt = text || {
         extend: 'Extend this into the next shot',
         restyle: 'Restyle this segment',
         'retry-agent': 'Try another agent for this segment',
-        generate: isNavigationDispatch && selectedPage ? `Open ${selectedPage.name}` : 'Create a new Dreamy segment',
+        generate: isNavigationDispatch ? `Open ${targetPageName}` : `Dispatch ${targetPageName}`,
       }[action];
       const fileForRequest = selectedFile;
       const userId = makeId('user');
@@ -2081,8 +2126,8 @@ export default function Dreamy() {
       trackEvent('dreamy_studio_run', {
         action,
         mode,
-        page_id: selectedPageId,
-        agent_id: selectedAgentId,
+        page_id: targetPageId,
+        agent_id: targetAgentId,
         has_image: Boolean(fileForRequest),
         source_segment_id: sourceSegment?.id || '',
       });
@@ -2098,8 +2143,8 @@ export default function Dreamy() {
           action,
           projectId: project?.projectId,
           sourceSegmentId: sourceSegment?.id,
-          pageId: selectedPageId,
-          agentId: selectedAgentId,
+          pageId: targetPageId,
+          agentId: targetAgentId,
           agentGraph: project?.agentGraph,
           imageFile: fileForRequest,
           signal: controller.signal,
@@ -2236,6 +2281,7 @@ export default function Dreamy() {
       mergeProject,
       mode,
       mergeJob,
+      pages,
       project,
       navigate,
       prompt,
@@ -2255,6 +2301,17 @@ export default function Dreamy() {
     abortRef.current = null;
     setSubmitting(false);
   };
+
+  const runMatrixEntry = useCallback((entry: StudioDispatchMatrixEntry) => {
+    changePage(entry.pageId);
+    setSelectedAgentId(entry.agentId);
+    void runStudio('generate', undefined, selectedSegment, {
+      pageId: entry.pageId,
+      agentId: entry.agentId,
+      pageName: entry.pageName,
+      executor: entry.executor,
+    });
+  }, [changePage, runStudio, selectedSegment]);
 
   const selectSegment = (segmentId: string) => {
     setProject((prev) => (prev ? { ...prev, selectedSegmentId: segmentId } : prev));
@@ -2569,7 +2626,9 @@ export default function Dreamy() {
       <StudioDispatchMatrixPanel
         matrix={dispatchMatrix}
         selectedPageId={selectedPageId}
+        submitting={submitting}
         onSelectPage={selectOverviewPage}
+        onRunEntry={runMatrixEntry}
       />
 
       <div className="shrink-0 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">

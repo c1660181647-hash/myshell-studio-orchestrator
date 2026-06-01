@@ -88,12 +88,7 @@ def _accepted_source_media_url(source_segment: Optional[StudioSegment]) -> str:
     if not source_segment:
         return ""
     evidence = source_segment.get("evidence") or {}
-    media_url = (
-        evidence.get("mediaUrl")
-        or source_segment.get("url")
-        or (source_segment.get("posterUrl") if source_segment.get("status") == "done" else "")
-        or ""
-    )
+    media_url = evidence.get("mediaUrl") or source_segment.get("url") or ""
     if evidence.get("accepted") and media_url:
         return str(media_url)
     if source_segment.get("status") == "done" and source_segment.get("url"):
@@ -1327,13 +1322,29 @@ def register_studio_routes(app) -> None:
                         accepted=False,
                         message=f"Missing route parameters: {', '.join(missing_route_params)}.",
                     )
+                    segment["evidence"].update(
+                        {
+                            "pageId": page["id"],
+                            "agentId": job["agentId"],
+                            "navigationPath": navigation_path,
+                            "missingRouteParams": missing_route_params,
+                        }
+                    )
                 else:
                     segment["status"] = "done"
                     segment["evidence"] = _evidence(
                         "done",
                         page["id"],
                         accepted=True,
-                        message=f"Navigation dispatch prepared for {page['name']} at {_navigation_path_for_page(page, route, source_segment)}.",
+                        message=f"Navigation dispatch prepared for {page['name']} at {navigation_path}.",
+                    )
+                    segment["evidence"].update(
+                        {
+                            "pageId": page["id"],
+                            "agentId": job["agentId"],
+                            "navigationPath": navigation_path,
+                            "missingRouteParams": [],
+                        }
                     )
                 segment["updatedAt"] = now_iso()
                 _update_job(

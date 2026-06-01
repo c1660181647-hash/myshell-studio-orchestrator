@@ -573,6 +573,82 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(job_payloads[-1]["status"], "done")
         self.assertEqual(job_payloads[-1]["evidence"]["accepted"], True)
 
+    def test_navigation_dispatch_evidence_records_contextual_path(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "create source image"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            source_events = _sse_events("".join(response.iter_text()))
+
+        source_meta = next(payload for name, payload in source_events if name == "meta")
+        source_execution = next(payload for name, payload in source_events if name == "execution_request")
+        source_url = "https://example.com/contextual-source.png"
+        self.client.post(
+            f"/api/studio/projects/{source_meta['projectId']}/client-result",
+            json={
+                "segmentId": source_execution["segmentId"],
+                "jobId": source_execution["jobId"],
+                "status": "done",
+                "taskId": "task_contextual_source",
+                "url": source_url,
+                "posterUrl": source_url,
+            },
+        )
+
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={
+                "message": "dispatch tag generator from matrix",
+                "project_id": source_meta["projectId"],
+                "source_segment_id": source_execution["segmentId"],
+                "page_id": "tag-generator",
+                "agent_id": "miniapp-page-navigator",
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        execution = next(payload for name, payload in events if name == "execution_request")
+        jobs = [payload["job"] for name, payload in events if name == "job"]
+        final_job = jobs[-1]
+
+        self.assertEqual(execution["api"], "tag-generator")
+        self.assertEqual(execution["agentId"], "miniapp-page-navigator")
+        self.assertEqual(execution["missingRouteParams"], [])
+        self.assertIn("img=https%3A%2F%2Fexample.com%2Fcontextual-source.png", execution["navigationPath"])
+        self.assertEqual(final_job["status"], "done")
+        self.assertEqual(final_job["evidence"]["accepted"], True)
+        self.assertEqual(final_job["evidence"]["navigationPath"], execution["navigationPath"])
+        self.assertEqual(final_job["evidence"]["pageId"], "tag-generator")
+        self.assertEqual(final_job["evidence"]["agentId"], "miniapp-page-navigator")
+
+    def test_navigation_segment_placeholder_is_not_source_media(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "open my generated library", "page_id": "library"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        meta = next(payload for name, payload in events if name == "meta")
+        execution = next(payload for name, payload in events if name == "execution_request")
+
+        matrix = self.client.get(
+            "/api/studio/dispatch-matrix",
+            params={"project_id": meta["projectId"], "source_segment_id": execution["segmentId"]},
+        )
+        self.assertEqual(matrix.status_code, 200)
+        entries = {entry["pageId"]: entry for entry in matrix.json()["entries"]}
+
+        tag_generator = entries["tag-generator"]
+        self.assertFalse(tag_generator["dispatchReady"])
+        self.assertEqual(tag_generator["missingRouteParams"], ["img"])
+        self.assertNotIn("img=%2Fgallery", tag_generator["navigationPath"])
+
     def test_run_stream_preserves_selected_agent_id_through_retry(self) -> None:
         with self.client.stream(
             "POST",

@@ -100,6 +100,10 @@ export interface StudioEvidence {
   accepted: boolean;
   mediaUrl?: string;
   taskId?: string;
+  pageId?: string;
+  agentId?: string;
+  navigationPath?: string;
+  missingRouteParams?: string[];
   message?: string;
   checkedAt?: string;
 }
