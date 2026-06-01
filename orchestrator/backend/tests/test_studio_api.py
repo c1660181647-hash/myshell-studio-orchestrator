@@ -142,6 +142,42 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(retried.json()["job"]["status"], "queued")
         self.assertEqual(retried.json()["job"]["attempt"], 2)
 
+    def test_pages_report_dispatch_readiness_and_auth_status(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {
+                    "status": "auth_missing",
+                    "mode": "browser-cookies",
+                    "message": "Set MyShell cookies before server execution",
+                }
+            return {
+                "status": "client_delegated",
+                "mode": "telegram-init-data",
+                "message": "Uses the authenticated miniapp session",
+            }
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            pages = self.client.get("/api/pages")
+
+        self.assertEqual(pages.status_code, 200)
+        page_by_id = {page["id"]: page for page in pages.json()["pages"]}
+
+        dreamy = page_by_id["dreamy-miniapp"]
+        self.assertEqual(dreamy["authStatus"]["status"], "client_delegated")
+        self.assertEqual(dreamy["dispatchStatus"], "ready")
+        self.assertTrue(dreamy["dispatchReady"])
+
+        library = page_by_id["library"]
+        self.assertEqual(library["authStatus"]["status"], "client_delegated")
+        self.assertEqual(library["dispatchStatus"], "ready")
+        self.assertTrue(library["dispatchReady"])
+
+        art = page_by_id["myshell-art"]
+        self.assertEqual(art["authStatus"]["status"], "auth_missing")
+        self.assertEqual(art["dispatchStatus"], "auth_missing")
+        self.assertFalse(art["dispatchReady"])
+        self.assertIn("cookies", art["dispatchMessage"].lower())
+
     def test_health_reports_delivery_components(self) -> None:
         health = self.client.get("/api/health")
         self.assertEqual(health.status_code, 200)

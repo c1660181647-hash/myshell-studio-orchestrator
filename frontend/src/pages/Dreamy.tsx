@@ -2159,6 +2159,20 @@ export default function Dreamy() {
           <RotateCcw size={14} />
           Refresh
         </button>
+        <div className="flex min-w-0 items-center gap-2 overflow-x-auto rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 py-2 sm:col-span-3 [-webkit-overflow-scrolling:touch]">
+          {selectedPage?.dispatchReady ? (
+            <CheckCircle2 size={14} className="shrink-0 text-Cr-text-success-default-v2" />
+          ) : (
+            <AlertTriangle size={14} className="shrink-0 text-Cr-text-critical-default-v2" />
+          )}
+          <Pill tone={healthPillTone(selectedPage?.dispatchStatus)}>{selectedPage?.dispatchStatus || 'unknown'}</Pill>
+          <span className="shrink-0 text-[11px] font-semibold text-Cr-text-subtler-v2">
+            {selectedPage?.dispatchMode || selectedPage?.executor || 'dispatch'}
+          </span>
+          <span className="min-w-[160px] truncate text-[11px] text-Cr-text-subtler-v2">
+            {selectedPage?.dispatchMessage || selectedPage?.authStatus?.message || selectedPage?.authMode || 'No runtime status'}
+          </span>
+        </div>
       </div>
 
       <div className="shrink-0 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">

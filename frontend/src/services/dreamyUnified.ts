@@ -135,6 +135,10 @@ export interface StudioPageAdapter {
   authMode: string;
   status: string;
   dispatchMode?: string;
+  dispatchReady?: boolean;
+  dispatchStatus?: string;
+  dispatchMessage?: string;
+  authStatus?: StudioAuthStatus;
   routeParams?: string[];
   routeDefaults?: Record<string, string>;
   intentKeywords?: string[];

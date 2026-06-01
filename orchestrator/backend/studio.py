@@ -31,6 +31,7 @@ PROJECTS: dict[str, StudioProject] = {}
 VALID_MODES = {"player", "canvas"}
 VALID_ACTIONS = {"generate", "extend", "restyle", "retry-agent"}
 VALID_STATUSES = {"draft", "queued", "running", "done", "timeout", "auth_missing", "error", "cancelled"}
+READY_AUTH_STATUSES = {"ok", "ready", "client_delegated"}
 
 PLACEHOLDER_POSTERS = {
     "generate": "/gallery/creative-whale.jpg",
@@ -89,6 +90,20 @@ def _navigation_contract(
         "clientAction": "navigate",
         "navigationPath": _navigation_path_for_page(page, route, source_segment),
         "studioReturnPath": "/dreamy",
+    }
+
+
+def _page_with_runtime_status(page: dict[str, Any]) -> dict[str, Any]:
+    auth_status = adapter_auth_status(page["id"])
+    auth_state = str(auth_status.get("status") or "unknown")
+    dispatch_ready = auth_state in READY_AUTH_STATUSES
+    dispatch_status = "ready" if dispatch_ready else auth_state
+    return {
+        **page,
+        "authStatus": auth_status,
+        "dispatchReady": dispatch_ready,
+        "dispatchStatus": dispatch_status,
+        "dispatchMessage": auth_status.get("message") or page.get("dispatchMode") or "",
     }
 
 
@@ -510,7 +525,7 @@ def _event(event: str, payload: StudioEvent) -> dict[str, str]:
 def register_studio_routes(app) -> None:
     @app.get("/api/pages")
     async def get_studio_pages():
-        return {"pages": list_studio_pages()}
+        return {"pages": [_page_with_runtime_status(page) for page in list_studio_pages()]}
 
     @app.get("/api/agents")
     async def get_studio_agents():
