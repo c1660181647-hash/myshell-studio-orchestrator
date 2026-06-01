@@ -512,6 +512,13 @@ export interface StudioActionResolveResult {
     message?: string;
     env?: string;
     command?: string;
+    endpoint?: string;
+    url?: string;
+    retryEndpoint?: string;
+    retryUrl?: string;
+    cancelEndpoint?: string;
+    cancelUrl?: string;
+    query?: Record<string, unknown>;
     targetId?: string;
   };
   result?: StudioCoverageVerifyResult;

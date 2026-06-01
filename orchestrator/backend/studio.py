@@ -1628,6 +1628,46 @@ async def _studio_delivery_audit(
     }
 
 
+def _operator_action_url(endpoint: str, target_id: str, query: dict[str, Any] | None = None) -> str:
+    encoded_target = quote(str(target_id), safe="")
+    url = (
+        endpoint.replace("{job_id}", encoded_target)
+        .replace("{project_id}", encoded_target)
+        .replace("{session_id}", encoded_target)
+    )
+    clean_query = {
+        key: value
+        for key, value in (query or {}).items()
+        if value is not None and value != ""
+    }
+    if clean_query:
+        delimiter = "&" if "?" in url else "?"
+        url = f"{url}{delimiter}{urlencode(clean_query)}"
+    return url
+
+
+def _materialize_operator_instruction(instruction: dict[str, Any]) -> dict[str, Any]:
+    materialized = dict(instruction)
+    target_id = str(materialized.get("targetId") or "")
+    endpoint_query: dict[str, Any] = {}
+    if materialized.get("endpoint") == "/api/studio/dispatch-preview" and target_id:
+        endpoint_query["page_id"] = target_id
+        materialized["query"] = endpoint_query
+
+    for field, url_field in (
+        ("endpoint", "url"),
+        ("retryEndpoint", "retryUrl"),
+        ("cancelEndpoint", "cancelUrl"),
+    ):
+        endpoint = materialized.get(field)
+        if endpoint:
+            query = endpoint_query if field == "endpoint" else None
+            concrete_url = _operator_action_url(str(endpoint), target_id, query)
+            materialized[field] = concrete_url
+            materialized[url_field] = concrete_url
+    return materialized
+
+
 def _manual_action_instruction(action: str, target_id: str) -> dict[str, Any]:
     if action == "restore-auth":
         return {
@@ -1792,7 +1832,7 @@ async def _resolve_studio_action(payload: dict[str, Any] | None) -> dict[str, An
             "sourceSegmentId": source_segment_id,
             "resultType": "operator-instruction",
             "message": "Manual operator action is required.",
-            "next": _manual_action_instruction(action, target_id),
+            "next": _materialize_operator_instruction(_manual_action_instruction(action, target_id)),
             "audit": audit,
         }
 
@@ -1836,7 +1876,7 @@ async def _resolve_studio_actions_batch(payload: dict[str, Any] | None) -> dict[
                     "targetId": target_id,
                     "resultType": "operator-instruction",
                     "message": "Manual operator action is required.",
-                    "next": _manual_action_instruction(action, target_id),
+                    "next": _materialize_operator_instruction(_manual_action_instruction(action, target_id)),
                 }
             )
         else:

@@ -86,6 +86,7 @@ import type {
   StudioAgentCapability,
   StudioAction,
   StudioAgentNode,
+  StudioActionResolveResult,
   StudioApi,
   StudioCoverageReport,
   StudioDeliveryAudit,
@@ -224,6 +225,20 @@ function deliveryBundleFilename(bundle: StudioDeliveryBundle): string {
 
 function deliveryAuditFilename(audit: StudioDeliveryAudit): string {
   return `myshell-studio-audit-${audit.projectId || 'current'}.json`;
+}
+
+function formatStudioActionNext(next?: StudioActionResolveResult['next']): string {
+  if (!next) return '';
+  const details = [
+    next.label,
+    next.message,
+    next.url ? `Open ${next.url}` : '',
+    next.retryUrl ? `Retry ${next.retryUrl}` : '',
+    next.cancelUrl ? `Cancel ${next.cancelUrl}` : '',
+    next.env ? `Env ${next.env}` : '',
+    next.command ? `Command ${next.command}` : '',
+  ].filter(Boolean);
+  return details.length ? ` ${details.join(' ')}` : '';
 }
 
 function statusTone(status?: string): string {
@@ -2880,7 +2895,7 @@ export default function Dreamy() {
       if (result.result?.project) mergeProject(result.result.project);
       result.result?.jobs?.forEach((job) => mergeJob(job));
       applyDeliveryAudit(result.audit);
-      const nextMessage = result.next?.message ? ` ${result.next.message}` : '';
+      const nextMessage = formatStudioActionNext(result.next);
       const created = result.result?.createdCount ?? 0;
       setMessages((prev) => [
         ...prev,

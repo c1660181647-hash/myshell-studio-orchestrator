@@ -647,6 +647,35 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(batch_body["skippedActions"], [])
         self.assertEqual({item["action"] for item in batch_body["manualActions"]}, {action for action, _target_id in action_targets})
 
+    def test_studio_action_resolve_returns_concrete_operator_urls(self) -> None:
+        retry = self.client.post(
+            "/api/studio/actions/resolve",
+            json={"action": "retry-or-cancel", "target_id": "job_timeout"},
+        )
+        self.assertEqual(retry.status_code, 200)
+        retry_next = retry.json()["next"]
+        self.assertEqual(retry_next["retryUrl"], "/api/studio/jobs/job_timeout/retry")
+        self.assertEqual(retry_next["cancelUrl"], "/api/studio/jobs/job_timeout/cancel")
+        self.assertNotIn("{job_id}", json.dumps(retry_next))
+
+        inspect_error = self.client.post(
+            "/api/studio/actions/resolve",
+            json={"action": "inspect-error", "target_id": "job_error"},
+        )
+        self.assertEqual(inspect_error.status_code, 200)
+        inspect_next = inspect_error.json()["next"]
+        self.assertEqual(inspect_next["url"], "/api/studio/jobs/job_error/evidence")
+        self.assertNotIn("{job_id}", json.dumps(inspect_next))
+
+        route_params = self.client.post(
+            "/api/studio/actions/resolve",
+            json={"action": "provide-route-params", "target_id": "tag-generator"},
+        )
+        self.assertEqual(route_params.status_code, 200)
+        route_next = route_params.json()["next"]
+        self.assertEqual(route_next["url"], "/api/studio/dispatch-preview?page_id=tag-generator")
+        self.assertEqual(route_next["query"]["page_id"], "tag-generator")
+
     def test_dispatch_matrix_covers_all_pages_agents_and_paths(self) -> None:
         matrix = self.client.get("/api/studio/dispatch-matrix")
 
