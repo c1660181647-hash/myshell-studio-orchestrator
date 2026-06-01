@@ -412,6 +412,67 @@ export interface StudioHandoffSnapshot {
   };
 }
 
+export interface StudioDispatchBatchTarget {
+  id: string;
+  pageId: StudioApi | string;
+  pageName: string;
+  kind: string;
+  executor: StudioExecutor | string;
+  agentId: string;
+  recommendedAction: 'navigate' | 'execute-client' | 'execute-server' | string;
+  dispatchStatus: string;
+  dispatchMessage?: string;
+  clientAction?: 'navigate' | string;
+  navigationPath?: string;
+  studioReturnPath?: string;
+  routeParams: string[];
+  missingRouteParams: string[];
+  authStatus: StudioAuthStatus;
+  capabilities: string[];
+  projectId?: string | null;
+  sourceSegmentId?: string | null;
+  sourceMediaUrl?: string;
+}
+
+export interface StudioDispatchBatchSkip {
+  id: string;
+  pageId: StudioApi | string;
+  pageName: string;
+  kind: string;
+  executor: StudioExecutor | string;
+  agentId: string;
+  recommendedAction: 'navigate' | 'execute-client' | 'execute-server' | string;
+  dispatchStatus: string;
+  reason: string;
+  message?: string;
+  navigationPath?: string;
+  missingRouteParams: string[];
+  authStatus: StudioAuthStatus;
+}
+
+export interface StudioDispatchBatchPlan {
+  status: 'planned' | 'blocked' | string;
+  readyForDispatch: boolean;
+  checkedAt: string;
+  projectId?: string | null;
+  sourceSegmentId?: string | null;
+  sourceMediaUrl?: string;
+  summary: {
+    total: number;
+    planned: number;
+    skipped: number;
+    navigation: number;
+    client: number;
+    server: number;
+    missingParams: number;
+    blocked: number;
+  };
+  targets: StudioDispatchBatchTarget[];
+  skippedTargets: StudioDispatchBatchSkip[];
+  matrix: StudioDispatchMatrix;
+  handoffSnapshot: StudioHandoffSnapshot;
+}
+
 export interface StudioAgentCapability {
   id: string;
   label: string;
@@ -870,6 +931,26 @@ export async function fetchStudioHandoffSnapshot(options: {
   const query = params.toString();
   const response = await fetch(getStudioRootEndpoint(`/api/studio/handoff-snapshot${query ? `?${query}` : ''}`));
   if (!response.ok) throw new Error(`Studio handoff snapshot ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function planStudioDispatchBatch(options: {
+  projectId?: string;
+  sourceSegmentId?: string;
+  pageIds?: Array<StudioApi | string>;
+  limit?: number;
+} = {}): Promise<StudioDispatchBatchPlan> {
+  const response = await fetch(getStudioRootEndpoint('/api/studio/dispatch-batch'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      project_id: options.projectId,
+      source_segment_id: options.sourceSegmentId,
+      page_ids: options.pageIds,
+      limit: options.limit || 50,
+    }),
+  });
+  if (!response.ok) throw new Error(`Studio dispatch batch ${response.status}: ${response.statusText}`);
   return response.json();
 }
 

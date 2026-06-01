@@ -551,6 +551,108 @@ def _verify_studio_coverage(
     }
 
 
+def _dispatch_target(entry: dict[str, Any], matrix: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"dispatch:{entry.get('pageId')}",
+        "pageId": entry.get("pageId"),
+        "pageName": entry.get("pageName"),
+        "kind": entry.get("kind", ""),
+        "executor": entry.get("executor", ""),
+        "agentId": entry.get("agentId"),
+        "recommendedAction": entry.get("recommendedAction"),
+        "dispatchStatus": entry.get("dispatchStatus"),
+        "dispatchMessage": entry.get("dispatchMessage", ""),
+        "clientAction": entry.get("clientAction"),
+        "navigationPath": entry.get("navigationPath", ""),
+        "studioReturnPath": entry.get("studioReturnPath") or "/dreamy",
+        "routeParams": entry.get("routeParams") or [],
+        "missingRouteParams": [],
+        "authStatus": entry.get("authStatus") or {},
+        "capabilities": entry.get("capabilities") or [],
+        "projectId": matrix.get("projectId"),
+        "sourceSegmentId": matrix.get("sourceSegmentId"),
+        "sourceMediaUrl": matrix.get("sourceMediaUrl", ""),
+    }
+
+
+def _dispatch_skip(entry: dict[str, Any], reason: str, message: str = "") -> dict[str, Any]:
+    return {
+        "id": f"skip:{entry.get('pageId')}",
+        "pageId": entry.get("pageId"),
+        "pageName": entry.get("pageName"),
+        "kind": entry.get("kind", ""),
+        "executor": entry.get("executor", ""),
+        "agentId": entry.get("agentId"),
+        "recommendedAction": entry.get("recommendedAction"),
+        "dispatchStatus": entry.get("dispatchStatus"),
+        "reason": reason,
+        "message": message or entry.get("dispatchMessage", ""),
+        "navigationPath": entry.get("navigationPath", ""),
+        "missingRouteParams": entry.get("missingRouteParams") or [],
+        "authStatus": entry.get("authStatus") or {},
+    }
+
+
+async def _studio_dispatch_batch_plan(
+    *,
+    project_id: str | None = None,
+    source_segment_id: str | None = None,
+    page_ids: list[str] | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    if project_id and not _get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    matrix = _dispatch_matrix(project_id=project_id, source_segment_id=source_segment_id)
+    requested_page_ids = {page_id for page_id in (page_ids or []) if page_id}
+    max_targets = max(1, min(limit, 100))
+    selected_entries = [
+        entry for entry in matrix.get("entries", []) if not requested_page_ids or entry.get("pageId") in requested_page_ids
+    ]
+    targets: list[dict[str, Any]] = []
+    skipped_targets: list[dict[str, Any]] = []
+
+    for entry in selected_entries:
+        if len(targets) >= max_targets:
+            skipped_targets.append(_dispatch_skip(entry, "limit_reached", "Dispatch batch limit reached."))
+            continue
+        if entry.get("missingRouteParams"):
+            skipped_targets.append(_dispatch_skip(entry, "missing_params"))
+            continue
+        if not entry.get("dispatchReady"):
+            skipped_targets.append(_dispatch_skip(entry, str(entry.get("dispatchStatus") or "not_ready")))
+            continue
+        targets.append(_dispatch_target(entry, matrix))
+
+    summary = {
+        "total": len(selected_entries),
+        "planned": len(targets),
+        "skipped": len(skipped_targets),
+        "navigation": sum(1 for target in targets if target.get("executor") == "navigation"),
+        "client": sum(1 for target in targets if target.get("executor") == "client"),
+        "server": sum(1 for target in targets if target.get("executor") == "server"),
+        "missingParams": sum(1 for target in skipped_targets if target.get("reason") == "missing_params"),
+        "blocked": sum(1 for target in skipped_targets if target.get("reason") in {"auth_missing", "error", "not_ready"}),
+    }
+    handoff = await _studio_handoff_snapshot(
+        project_id=matrix.get("projectId") or project_id,
+        source_segment_id=matrix.get("sourceSegmentId") or source_segment_id,
+    )
+    return {
+        "status": "planned" if targets else "blocked",
+        "readyForDispatch": bool(targets),
+        "checkedAt": now_iso(),
+        "projectId": matrix.get("projectId"),
+        "sourceSegmentId": matrix.get("sourceSegmentId"),
+        "sourceMediaUrl": matrix.get("sourceMediaUrl", ""),
+        "summary": summary,
+        "targets": targets,
+        "skippedTargets": skipped_targets,
+        "matrix": matrix,
+        "handoffSnapshot": handoff,
+    }
+
+
 def _gate_status_from_report(status: str) -> str:
     if status in {"ok", "ready"}:
         return "ready"
@@ -1668,6 +1770,21 @@ def register_studio_routes(app) -> None:
         if not isinstance(page_ids, list):
             raise HTTPException(status_code=400, detail="page_ids must be a list")
         return _verify_studio_coverage(
+            project_id=body.get("project_id") or body.get("projectId"),
+            source_segment_id=body.get("source_segment_id") or body.get("sourceSegmentId"),
+            page_ids=[str(page_id) for page_id in page_ids],
+            limit=max(1, min(int(body.get("limit") or 50), 100)),
+        )
+
+    @app.post("/api/studio/dispatch-batch")
+    async def post_studio_dispatch_batch(payload: Optional[dict[str, Any]] = Body(None)):
+        body = payload or {}
+        page_ids = body.get("page_ids") or body.get("pageIds") or []
+        if isinstance(page_ids, str):
+            page_ids = [page_ids]
+        if not isinstance(page_ids, list):
+            raise HTTPException(status_code=400, detail="page_ids must be a list")
+        return await _studio_dispatch_batch_plan(
             project_id=body.get("project_id") or body.get("projectId"),
             source_segment_id=body.get("source_segment_id") or body.get("sourceSegmentId"),
             page_ids=[str(page_id) for page_id in page_ids],

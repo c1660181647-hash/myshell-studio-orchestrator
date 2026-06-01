@@ -961,6 +961,79 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("myshell-art", action_by_target)
         self.assertEqual(action_by_target["myshell-art"]["action"], "restore-auth")
 
+    def test_dispatch_batch_plans_ready_targets_and_skips_blocked_pages(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            with self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={"message": "create batch dispatch source image"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                source_events = _sse_events("".join(response.iter_text()))
+
+            source_meta = next(payload for name, payload in source_events if name == "meta")
+            source_execution = next(payload for name, payload in source_events if name == "execution_request")
+            source_url = "https://example.com/dispatch-batch-source.png"
+            update = self.client.post(
+                f"/api/studio/projects/{source_meta['projectId']}/client-result",
+                json={
+                    "segmentId": source_execution["segmentId"],
+                    "jobId": source_execution["jobId"],
+                    "status": "done",
+                    "taskId": "task_dispatch_batch_source",
+                    "url": source_url,
+                    "posterUrl": source_url,
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            planned = self.client.post(
+                "/api/studio/dispatch-batch",
+                json={
+                    "project_id": source_meta["projectId"],
+                    "source_segment_id": source_execution["segmentId"],
+                    "limit": 50,
+                },
+            )
+
+        self.assertEqual(planned.status_code, 200)
+        self.assertEqual(planned.headers.get("content-type", "").split(";")[0], "application/json")
+        body = planned.json()
+        self.assertEqual(body["projectId"], source_meta["projectId"])
+        self.assertEqual(body["sourceSegmentId"], source_execution["segmentId"])
+        self.assertEqual(body["sourceMediaUrl"], source_url)
+        self.assertEqual(body["status"], "planned")
+        self.assertTrue(body["readyForDispatch"])
+        self.assertEqual(body["summary"]["total"], 13)
+        self.assertGreaterEqual(body["summary"]["planned"], 12)
+        self.assertEqual(body["summary"]["skipped"], 1)
+        self.assertEqual(body["summary"]["server"], 0)
+        self.assertGreaterEqual(body["summary"]["navigation"], 11)
+        self.assertGreaterEqual(body["summary"]["client"], 1)
+
+        target_by_page = {target["pageId"]: target for target in body["targets"]}
+        self.assertIn("dreamy-miniapp", target_by_page)
+        self.assertEqual(target_by_page["dreamy-miniapp"]["recommendedAction"], "execute-client")
+        self.assertIn("library", target_by_page)
+        self.assertEqual(target_by_page["library"]["recommendedAction"], "navigate")
+        self.assertEqual(target_by_page["library"]["navigationPath"], "/library")
+        self.assertIn("tag-generator", target_by_page)
+        self.assertIn("img=https%3A%2F%2Fexample.com%2Fdispatch-batch-source.png", target_by_page["tag-generator"]["navigationPath"])
+        self.assertEqual(target_by_page["tag-generator"]["clientAction"], "navigate")
+
+        skipped_by_page = {target["pageId"]: target for target in body["skippedTargets"]}
+        self.assertIn("myshell-art", skipped_by_page)
+        self.assertEqual(skipped_by_page["myshell-art"]["reason"], "auth_missing")
+        self.assertEqual(skipped_by_page["myshell-art"]["recommendedAction"], "execute-server")
+
+        self.assertEqual(body["handoffSnapshot"]["status"], "blocked")
+        self.assertEqual(body["handoffSnapshot"]["summary"]["readyUnverified"], 11)
+
     def test_run_stream_preserves_selected_agent_id_through_retry(self) -> None:
         with self.client.stream(
             "POST",

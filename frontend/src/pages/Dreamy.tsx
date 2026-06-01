@@ -54,6 +54,7 @@ import {
   fetchStudioProjectDeliveryReport,
   fetchStudioProjects,
   fetchStudioReadiness,
+  planStudioDispatchBatch,
   postStudioClientResult,
   resetStudioProject,
   retryStudioJob,
@@ -78,6 +79,8 @@ import type {
   StudioCoverageReport,
   StudioDispatchMatrix,
   StudioDispatchMatrixEntry,
+  StudioDispatchBatchPlan,
+  StudioDispatchBatchTarget,
   StudioDispatchPreview,
   StudioExecutor,
   StudioExecutionRequest,
@@ -681,6 +684,80 @@ function StudioHandoffSnapshotStrip({
           <GitBranch size={12} className="text-dreamy-brand-hot-v2" />
           <span className="max-w-[130px] truncate">{action.targetName || action.targetId || action.kind}</span>
           <span className="text-Cr-text-subtlest-v2">{action.action}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function StudioDispatchBatchStrip({
+  plan,
+  planning,
+  onPlan,
+  onOpenTarget,
+}: {
+  plan: StudioDispatchBatchPlan | null;
+  planning: boolean;
+  onPlan: () => void;
+  onOpenTarget: (target: StudioDispatchBatchTarget) => void;
+}) {
+  const summary = plan?.summary;
+  const nextNavigationTarget = plan?.targets.find((target) => target.executor === 'navigation' && target.navigationPath);
+  const skipped = plan?.skippedTargets || [];
+
+  return (
+    <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
+      <Pill tone={plan?.readyForDispatch ? 'success' : plan ? 'danger' : 'default'}>
+        {plan ? `Batch ${plan.status}` : 'Batch not planned'}
+      </Pill>
+      <button
+        type="button"
+        disabled={planning}
+        onClick={onPlan}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <RefreshCcw size={12} className={planning ? 'animate-spin' : ''} />
+        Plan All
+      </button>
+      <button
+        type="button"
+        disabled={!nextNavigationTarget}
+        onClick={() => nextNavigationTarget && onOpenTarget(nextNavigationTarget)}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <Play size={12} />
+        Open Next
+      </button>
+      {summary && (
+        <>
+          <Pill tone={summary.planned ? 'success' : 'default'}>{`${summary.planned}/${summary.total} targets`}</Pill>
+          <Pill>{`${summary.navigation} nav`}</Pill>
+          <Pill>{`${summary.client} client`}</Pill>
+          <Pill>{`${summary.server} server`}</Pill>
+          <Pill tone={summary.skipped ? 'hot' : 'default'}>{`${summary.skipped} skipped`}</Pill>
+          <Pill tone={summary.missingParams ? 'hot' : 'default'}>{`${summary.missingParams} missing params`}</Pill>
+        </>
+      )}
+      {plan?.targets.slice(0, 5).map((target) => (
+        <span
+          key={target.id}
+          title={target.navigationPath || target.dispatchMessage || target.recommendedAction}
+          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2"
+        >
+          <GitBranch size={12} className={target.executor === 'navigation' ? 'text-Cr-text-success-default-v2' : 'text-dreamy-brand-hot-v2'} />
+          <span className="max-w-[120px] truncate">{target.pageName}</span>
+          <span className="text-Cr-text-subtlest-v2">{target.executor}</span>
+        </span>
+      ))}
+      {skipped.slice(0, 4).map((target) => (
+        <span
+          key={target.id}
+          title={target.message || target.reason}
+          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2"
+        >
+          <AlertTriangle size={12} className="text-dreamy-brand-hot-v2" />
+          <span className="max-w-[120px] truncate">{target.pageName}</span>
+          <span className="text-Cr-text-subtlest-v2">{target.reason}</span>
         </span>
       ))}
     </div>
@@ -1860,6 +1937,7 @@ export default function Dreamy() {
   const [dispatchMatrix, setDispatchMatrix] = useState<StudioDispatchMatrix | null>(null);
   const [coverageReport, setCoverageReport] = useState<StudioCoverageReport | null>(null);
   const [handoffSnapshot, setHandoffSnapshot] = useState<StudioHandoffSnapshot | null>(null);
+  const [dispatchBatchPlan, setDispatchBatchPlan] = useState<StudioDispatchBatchPlan | null>(null);
   const [queueStatusFilter, setQueueStatusFilter] = useState<StudioStatus | 'all'>('all');
   const [queuePageFilter, setQueuePageFilter] = useState<StudioApi | string>('all');
   const [queueAgentFilter, setQueueAgentFilter] = useState('all');
@@ -1867,6 +1945,7 @@ export default function Dreamy() {
   const [bulkActionRunning, setBulkActionRunning] = useState<'cancel' | 'retry' | null>(null);
   const [coverageVerifyRunning, setCoverageVerifyRunning] = useState(false);
   const [handoffRefreshing, setHandoffRefreshing] = useState(false);
+  const [dispatchBatchPlanning, setDispatchBatchPlanning] = useState(false);
 
   const selectedSegment = useMemo(() => {
     const id = project?.selectedSegmentId;
@@ -1929,6 +2008,23 @@ export default function Dreamy() {
     () => hubJobs.map((job) => `${job.jobId}:${job.status}:${job.updatedAt || ''}`).join('|'),
     [hubJobs],
   );
+  const studioContextSourceSegmentId = useMemo(
+    () =>
+      selectedSegment?.id ||
+      dispatchMatrix?.sourceSegmentId ||
+      coverageReport?.sourceSegmentId ||
+      handoffSnapshot?.sourceSegmentId ||
+      project?.selectedSegmentId ||
+      project?.segments?.[project.segments.length - 1]?.id,
+    [
+      coverageReport?.sourceSegmentId,
+      dispatchMatrix?.sourceSegmentId,
+      handoffSnapshot?.sourceSegmentId,
+      project?.selectedSegmentId,
+      project?.segments,
+      selectedSegment?.id,
+    ],
+  );
 
   const applyHandoffSnapshot = useCallback((snapshot: StudioHandoffSnapshot) => {
     setHandoffSnapshot(snapshot);
@@ -1947,7 +2043,7 @@ export default function Dreamy() {
       try {
         const snapshot = await fetchStudioHandoffSnapshot({
           projectId: options.projectId ?? project?.projectId,
-          sourceSegmentId: options.sourceSegmentId ?? selectedSegment?.id,
+          sourceSegmentId: options.sourceSegmentId ?? studioContextSourceSegmentId,
         });
         applyHandoffSnapshot(snapshot);
         return snapshot;
@@ -1969,7 +2065,62 @@ export default function Dreamy() {
         if (interactive) setHandoffRefreshing(false);
       }
     },
-    [applyHandoffSnapshot, project?.projectId, selectedSegment?.id],
+    [applyHandoffSnapshot, project?.projectId, studioContextSourceSegmentId],
+  );
+
+  const planDispatchBatch = useCallback(async () => {
+    if (dispatchBatchPlanning) return;
+    setDispatchBatchPlanning(true);
+    try {
+      const projectId = project?.projectId || readLastStudioProjectId() || undefined;
+      const plan = await planStudioDispatchBatch({
+        projectId,
+        sourceSegmentId: studioContextSourceSegmentId,
+        limit: 50,
+      });
+      setDispatchBatchPlan(plan);
+      applyHandoffSnapshot(plan.handoffSnapshot);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: `Batch dispatch planned ${plan.summary.planned} target${plan.summary.planned === 1 ? '' : 's'}; skipped ${plan.summary.skipped}.`,
+          createdAt: nowIso(),
+        },
+      ]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: 'Batch dispatch planning failed.',
+          error: error instanceof Error ? error.message : String(error),
+          createdAt: nowIso(),
+        },
+      ]);
+    } finally {
+      setDispatchBatchPlanning(false);
+    }
+  }, [applyHandoffSnapshot, dispatchBatchPlanning, project?.projectId, studioContextSourceSegmentId]);
+
+  const openDispatchBatchTarget = useCallback(
+    (target: StudioDispatchBatchTarget) => {
+      const targetPath = normalizeStudioNavigationPath(target.navigationPath);
+      if (!targetPath) return;
+      const projectId = target.projectId || project?.projectId || '';
+      if (projectId) saveLastStudioProjectId(projectId);
+      saveStudioDispatchSession({
+        projectId,
+        pageId: String(target.pageId),
+        pageName: target.pageName,
+        navigationPath: targetPath,
+        studioReturnPath: target.studioReturnPath || '/dreamy',
+      });
+      navigate(targetPath);
+    },
+    [navigate, project?.projectId],
   );
 
   useEffect(() => {
@@ -2538,6 +2689,7 @@ export default function Dreamy() {
     setDeliveryReport(null);
     setCoverageReport(null);
     setHandoffSnapshot(null);
+    setDispatchBatchPlan(null);
     forgetLastStudioProjectId();
     clearStudioDispatchSession();
     setMessages([
@@ -2792,6 +2944,12 @@ export default function Dreamy() {
         snapshot={handoffSnapshot}
         refreshing={handoffRefreshing}
         onRefresh={() => void refreshHandoffSnapshot({ interactive: true })}
+      />
+      <StudioDispatchBatchStrip
+        plan={dispatchBatchPlan}
+        planning={dispatchBatchPlanning}
+        onPlan={() => void planDispatchBatch()}
+        onOpenTarget={openDispatchBatchTarget}
       />
 
       <div className="grid shrink-0 gap-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
