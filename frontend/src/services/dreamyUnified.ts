@@ -219,6 +219,7 @@ export interface StudioRouteEvent {
   sourceSummary?: string;
   executor: StudioExecutor;
   api?: StudioApi;
+  agentId?: string;
   clientAction?: 'navigate' | string;
   navigationPath?: string;
   studioReturnPath?: string;
@@ -245,6 +246,7 @@ export interface StudioExecutionRequest {
   executor: StudioExecutor;
   api: StudioApi | string;
   page?: StudioPageAdapter;
+  agentId?: string;
   clientAction?: 'navigate' | string;
   navigationPath?: string;
   studioReturnPath?: string;
@@ -284,6 +286,7 @@ export interface StreamStudioRunOptions {
   projectId?: string | null;
   sourceSegmentId?: string | null;
   pageId?: StudioApi | string;
+  agentId?: string;
   agentGraph?: StudioAgentNode[];
   imageFile?: File | null;
   signal?: AbortSignal;
@@ -457,6 +460,7 @@ export async function streamStudioRun({
   projectId,
   sourceSegmentId,
   pageId,
+  agentId,
   agentGraph,
   imageFile,
   signal,
@@ -469,6 +473,7 @@ export async function streamStudioRun({
   if (projectId) formData.append('project_id', projectId);
   if (sourceSegmentId) formData.append('source_segment_id', sourceSegmentId);
   if (pageId) formData.append('page_id', pageId);
+  if (agentId) formData.append('agent_id', agentId);
   if (agentGraph) formData.append('agent_graph', JSON.stringify(agentGraph));
   if (imageFile) formData.append('image', imageFile);
 

@@ -255,6 +255,29 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(job_payloads[-1]["status"], "done")
         self.assertEqual(job_payloads[-1]["evidence"]["accepted"], True)
 
+    def test_run_stream_preserves_selected_agent_id_through_retry(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "plan this segment", "agent_id": "asset-planner"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        route = next(payload for name, payload in events if name == "route")
+        execution = next(payload for name, payload in events if name == "execution_request")
+        job = next(payload["job"] for name, payload in events if name == "job")
+
+        self.assertEqual(route["agentId"], "asset-planner")
+        self.assertEqual(execution["agentId"], "asset-planner")
+        self.assertEqual(job["agentId"], "asset-planner")
+
+        retry = self.client.post(f"/api/studio/jobs/{execution['jobId']}/retry")
+        self.assertEqual(retry.status_code, 200)
+        body = retry.json()
+        self.assertEqual(body["job"]["agentId"], "asset-planner")
+        self.assertEqual(body["executionRequest"]["agentId"], "asset-planner")
+
     def test_default_run_infers_navigation_page_from_prompt(self) -> None:
         with self.client.stream(
             "POST",

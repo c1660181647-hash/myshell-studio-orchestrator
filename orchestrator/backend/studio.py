@@ -46,6 +46,13 @@ def _agent_id_for_page(page: dict[str, Any]) -> str:
     return "myshell-art-cdp-executor" if page["id"] == "myshell-art" else "dreamy-miniapp-executor"
 
 
+def _agent_id_for_dispatch(page: dict[str, Any], preferred_agent_id: str | None = None) -> str:
+    agents_by_id = {agent["id"]: agent for agent in list_studio_agents()}
+    if preferred_agent_id and preferred_agent_id in agents_by_id:
+        return preferred_agent_id
+    return _agent_id_for_page(page)
+
+
 def _navigation_path_for_page(
     page: dict[str, Any],
     route: dict[str, Any] | None = None,
@@ -382,6 +389,7 @@ def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dic
         "executor": page["executor"],
         "api": page["id"],
         "page": page,
+        "agentId": job.get("agentId") or _agent_id_for_page(page),
         **_navigation_contract(page, route, source_segment),
         "jobId": job["jobId"],
         "segmentId": job["segmentId"],
@@ -405,6 +413,7 @@ def _create_job(
     page: dict[str, Any],
     source_segment: Optional[StudioSegment] = None,
     status: str = "queued",
+    agent_id: str | None = None,
 ) -> dict[str, Any]:
     auth_status = adapter_auth_status(page["id"])
     evidence = _evidence(
@@ -419,7 +428,7 @@ def _create_job(
         "segmentId": segment["id"],
         "pageId": page["id"],
         "pageName": page["name"],
-        "agentId": _agent_id_for_page(page),
+        "agentId": _agent_id_for_dispatch(page, agent_id),
         "executor": page["executor"],
         "api": page["id"],
         **_navigation_contract(page, route, source_segment),
@@ -515,6 +524,7 @@ def register_studio_routes(app) -> None:
         action: str = Form("generate"),
         source_segment_id: Optional[str] = Form(None),
         page_id: str = Form("dreamy-miniapp"),
+        agent_id: Optional[str] = Form(None),
         agent_graph: Optional[str] = Form(None),
         image: Optional[UploadFile] = File(None),
     ):
@@ -570,6 +580,7 @@ def register_studio_routes(app) -> None:
             route["page"] = page
             route["api"] = page["id"]
             route["executor"] = page["executor"]
+            route["agentId"] = _agent_id_for_dispatch(page, agent_id)
             route.update(_navigation_contract(page, route, source_segment))
             yield _event("route", route)
 
@@ -589,7 +600,7 @@ def register_studio_routes(app) -> None:
                 normalized_action,
                 source_segment_id,
             )
-            job = _create_job(project, segment, route, page, source_segment)
+            job = _create_job(project, segment, route, page, source_segment, agent_id=route["agentId"])
             graph = _set_graph_status(project, route, segment)
             _append_message(
                 project,
@@ -610,6 +621,7 @@ def register_studio_routes(app) -> None:
                     "executor": route["executor"],
                     "api": page["id"],
                     "page": page,
+                    "agentId": job["agentId"],
                     **_navigation_contract(page, route, source_segment),
                     "jobId": job["jobId"],
                     "segmentId": segment["id"],

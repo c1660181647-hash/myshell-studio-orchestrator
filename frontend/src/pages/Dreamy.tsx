@@ -122,6 +122,7 @@ interface ChatItem {
 
 const DEFAULT_DREAMY_SLUG = 'ai-porn-generator';
 const LOCAL_POSTERS = [exampleGood, exampleMultiple];
+const DEFAULT_STUDIO_AGENT_ID = 'dreamy-miniapp-executor';
 
 const EMPTY_GRAPH: StudioAgentNode[] = [
   { id: 'intent-router', label: 'Intent Router', status: 'idle', detail: 'Waiting for prompt' },
@@ -162,6 +163,12 @@ function actionLabel(action: StudioAction): string {
     restyle: 'Restyle',
     'retry-agent': 'Try agent',
   }[action];
+}
+
+function defaultAgentIdForPage(page?: StudioPageAdapter | null): string {
+  if (page?.executor === 'navigation') return 'miniapp-page-navigator';
+  if (page?.id === 'myshell-art') return 'myshell-art-cdp-executor';
+  return DEFAULT_STUDIO_AGENT_ID;
 }
 
 function getSegmentMedia(segment?: StudioSegment | null): string {
@@ -1452,6 +1459,7 @@ export default function Dreamy() {
   const [agents, setAgents] = useState<StudioAgentCapability[]>([]);
   const [hubJobs, setHubJobs] = useState<StudioJob[]>([]);
   const [selectedPageId, setSelectedPageId] = useState<StudioApi | string>('dreamy-miniapp');
+  const [selectedAgentId, setSelectedAgentId] = useState(DEFAULT_STUDIO_AGENT_ID);
 
   const selectedSegment = useMemo(() => {
     const id = project?.selectedSegmentId;
@@ -1467,6 +1475,10 @@ export default function Dreamy() {
   const selectedPage = useMemo(
     () => pages.find((page) => page.id === selectedPageId) || pages[0] || null,
     [pages, selectedPageId],
+  );
+  const selectedAgent = useMemo(
+    () => agents.find((agent) => agent.id === selectedAgentId) || null,
+    [agents, selectedAgentId],
   );
 
   useEffect(() => {
@@ -1486,11 +1498,21 @@ export default function Dreamy() {
       setSelectedPageId((current) =>
         nextPages.length && !nextPages.some((page) => page.id === current) ? nextPages[0].id : current,
       );
+      setSelectedAgentId((current) => (nextAgents.some((agent) => agent.id === current) ? current : DEFAULT_STUDIO_AGENT_ID));
     });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!selectedPage || !agents.length) return;
+    setSelectedAgentId((current) => {
+      if (agents.some((agent) => agent.id === current)) return current;
+      const fallback = defaultAgentIdForPage(selectedPage);
+      return agents.some((agent) => agent.id === fallback) ? fallback : agents[0].id;
+    });
+  }, [agents, selectedPage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1690,6 +1712,7 @@ export default function Dreamy() {
         action,
         mode,
         page_id: selectedPageId,
+        agent_id: selectedAgentId,
         has_image: Boolean(fileForRequest),
         source_segment_id: sourceSegment?.id || '',
       });
@@ -1706,6 +1729,7 @@ export default function Dreamy() {
           projectId: project?.projectId,
           sourceSegmentId: sourceSegment?.id,
           pageId: selectedPageId,
+          agentId: selectedAgentId,
           agentGraph: project?.agentGraph,
           imageFile: fileForRequest,
           signal: controller.signal,
@@ -1837,6 +1861,7 @@ export default function Dreamy() {
       prompt,
       registerClientExecution,
       selectedFile,
+      selectedAgentId,
       selectedPage,
       selectedPageId,
       selectedSegment,
@@ -1973,12 +1998,27 @@ export default function Dreamy() {
         <div className="flex items-center gap-2">
           <select
             value={selectedPageId}
-            onChange={(event) => setSelectedPageId(event.target.value)}
+            onChange={(event) => {
+              const nextPageId = event.target.value;
+              const nextPage = pages.find((page) => page.id === nextPageId) || null;
+              setSelectedPageId(nextPageId);
+              setSelectedAgentId(defaultAgentIdForPage(nextPage));
+            }}
             className="hidden h-9 max-w-[160px] rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 text-xs font-semibold text-Cr-text-subtle-v2 outline-none sm:block"
             aria-label="Studio page adapter"
           >
             {(pages.length ? pages : [{ id: 'dreamy-miniapp', name: 'Dreamy Miniapp' } as StudioPageAdapter]).map((page) => (
               <option key={page.id} value={page.id}>{page.name}</option>
+            ))}
+          </select>
+          <select
+            value={selectedAgentId}
+            onChange={(event) => setSelectedAgentId(event.target.value)}
+            className="hidden h-9 max-w-[170px] rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 text-xs font-semibold text-Cr-text-subtle-v2 outline-none md:block"
+            aria-label="Studio agent"
+          >
+            {(agents.length ? agents : [{ id: DEFAULT_STUDIO_AGENT_ID, label: 'Dreamy Miniapp Executor', pageId: 'dreamy-miniapp', role: '', capabilities: [] }]).map((agent) => (
+              <option key={agent.id} value={agent.id}>{agent.label}</option>
             ))}
           </select>
           <button
@@ -2044,7 +2084,7 @@ export default function Dreamy() {
               <div>
                 <div className="text-sm font-semibold">Conversation</div>
                 <div className="text-[11px] text-Cr-text-subtler-v2">
-                  {project?.conversationId || 'No session'} · {selectedPage?.name || 'Dreamy Miniapp'} · {agents.length} agents · {hubJobs.length} jobs
+                  {project?.conversationId || 'No session'} · {selectedPage?.name || 'Dreamy Miniapp'} · {selectedAgent?.label || selectedAgentId} · {hubJobs.length} jobs
                 </div>
               </div>
             </div>
