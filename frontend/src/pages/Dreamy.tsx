@@ -892,6 +892,7 @@ function StudioHandoffSnapshotStrip({
       {bundle && (
         <>
           <Pill tone={bundle.summary.acceptedJobs ? 'success' : 'default'}>{`${bundle.summary.acceptedJobs} accepted jobs`}</Pill>
+          <Pill tone={bundle.summary.remainingTargets ? 'hot' : 'success'}>{`${bundle.summary.remainingTargets || 0} remaining`}</Pill>
           <Pill>{`${bundle.summary.artifacts} bundle artifacts`}</Pill>
         </>
       )}

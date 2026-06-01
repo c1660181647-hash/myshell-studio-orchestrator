@@ -2474,6 +2474,7 @@ async def _project_delivery_bundle(
 
     all_targets = [target for session in dispatch_sessions for target in session.get("targets", [])]
     skipped_targets = [target for session in dispatch_sessions for target in session.get("skippedTargets", [])]
+    remaining_targets = [target for target in all_targets if target.get("status", "pending") in {"pending", "visited"}]
     target_status_counts = {
         "pending": sum(1 for target in all_targets if target.get("status", "pending") == "pending"),
         "visited": sum(1 for target in all_targets if target.get("status") == "visited"),
@@ -2481,6 +2482,7 @@ async def _project_delivery_bundle(
         "skipped": sum(1 for target in all_targets if target.get("status") == "skipped"),
         "error": sum(1 for target in all_targets if target.get("status") == "error"),
         "blocked": len(skipped_targets),
+        "remaining": len(remaining_targets),
         "total": len(all_targets) + len(skipped_targets),
     }
     artifacts = _delivery_bundle_artifacts(project_id, dispatch_sessions, coverage.get("sourceSegmentId"))
@@ -2502,6 +2504,7 @@ async def _project_delivery_bundle(
             "acceptedJobs": len(accepted_jobs),
             "dispatchSessions": len(dispatch_sessions),
             "dispatchTargets": target_status_counts["total"],
+            "remainingTargets": target_status_counts["remaining"],
             "pendingTargets": target_status_counts["pending"],
             "visitedTargets": target_status_counts["visited"],
             "completedTargets": target_status_counts["completed"],
@@ -2516,7 +2519,7 @@ async def _project_delivery_bundle(
         "artifacts": artifacts,
         "dispatchSessions": dispatch_sessions,
         "acceptedJobs": accepted_jobs,
-        "remainingTargets": [target for target in all_targets if target.get("status", "pending") == "pending"],
+        "remainingTargets": remaining_targets,
         "skippedTargets": skipped_targets,
         "reports": {
             "deliveryReport": delivery_report,

@@ -433,6 +433,7 @@ export interface StudioDeliveryBundle {
     acceptedJobs: number;
     dispatchSessions: number;
     dispatchTargets: number;
+    remainingTargets: number;
     pendingTargets: number;
     visitedTargets: number;
     completedTargets: number;

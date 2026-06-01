@@ -1830,6 +1830,69 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(download_body["projectId"], meta["projectId"])
         self.assertEqual(download_body["reports"]["handoffSnapshot"]["projectId"], meta["projectId"])
 
+    def test_project_delivery_bundle_keeps_visited_targets_remaining(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            with self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={"message": "create visited remaining source image"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                events = _sse_events("".join(response.iter_text()))
+
+            meta = next(payload for name, payload in events if name == "meta")
+            execution = next(payload for name, payload in events if name == "execution_request")
+            update = self.client.post(
+                f"/api/studio/projects/{meta['projectId']}/client-result",
+                json={
+                    "segmentId": execution["segmentId"],
+                    "jobId": execution["jobId"],
+                    "status": "done",
+                    "taskId": "task_visited_remaining_source",
+                    "url": "https://example.com/visited-remaining-source.png",
+                    "posterUrl": "https://example.com/visited-remaining-source.png",
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            session_response = self.client.post(
+                "/api/studio/dispatch-sessions",
+                json={
+                    "project_id": meta["projectId"],
+                    "source_segment_id": execution["segmentId"],
+                    "limit": 50,
+                },
+            )
+            self.assertEqual(session_response.status_code, 200)
+            session = session_response.json()
+            visited_target = session["nextTarget"]
+            visited = self.client.post(
+                f"/api/studio/dispatch-sessions/{session['sessionId']}/targets/{visited_target['id']}",
+                json={"status": "visited", "evidence": {"openedFrom": "bundle-remaining-test"}},
+            )
+            self.assertEqual(visited.status_code, 200)
+
+            bundle = self.client.get(
+                f"/api/studio/projects/{meta['projectId']}/delivery-bundle",
+                params={"source_segment_id": execution["segmentId"]},
+            )
+
+        self.assertEqual(bundle.status_code, 200)
+        body = bundle.json()
+        self.assertEqual(body["summary"]["visitedTargets"], 1)
+        self.assertEqual(
+            body["summary"]["remainingTargets"],
+            body["summary"]["pendingTargets"] + body["summary"]["visitedTargets"],
+        )
+        remaining_by_id = {target["id"]: target for target in body["remainingTargets"]}
+        self.assertIn(visited_target["id"], remaining_by_id)
+        self.assertEqual(remaining_by_id[visited_target["id"]]["status"], "visited")
+
     def test_job_queue_can_filter_by_page_and_agent(self) -> None:
         with self.client.stream(
             "POST",
