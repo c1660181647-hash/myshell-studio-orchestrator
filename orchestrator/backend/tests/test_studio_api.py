@@ -429,6 +429,18 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("/api/studio/delivery-audit", artifact_endpoints)
         self.assertIn("/api/studio/projects/{project_id}/delivery-bundle", artifact_endpoints)
         self.assertIn("download=1", str(body["artifacts"]))
+        artifact_urls = {artifact["id"]: artifact.get("url") for artifact in body["artifacts"]}
+        self.assertTrue(all(artifact_urls.values()), artifact_urls)
+        self.assertEqual(
+            artifact_urls["delivery-audit"],
+            f"/api/studio/delivery-audit?project_id={meta['projectId']}&source_segment_id={execution['segmentId']}",
+        )
+        self.assertEqual(artifact_urls["project"], f"/api/studio/projects/{meta['projectId']}")
+        self.assertEqual(
+            artifact_urls["delivery-bundle-download"],
+            f"/api/studio/projects/{meta['projectId']}/delivery-bundle?source_segment_id={execution['segmentId']}&download=1",
+        )
+        self.assertNotIn("{project_id}", str(artifact_urls))
         self.assertEqual(body["reports"]["dispatchMatrix"]["summary"]["total"], body["summary"]["pages"])
         self.assertEqual(body["reports"]["handoffSnapshot"]["projectId"], meta["projectId"])
         self.assertEqual(body["summary"]["actions"], len(body["actions"]))
@@ -1199,6 +1211,17 @@ class StudioApiTest(unittest.TestCase):
         artifact_endpoints = {artifact["endpoint"] for artifact in body["artifacts"]}
         self.assertIn("/api/studio/coverage", artifact_endpoints)
         self.assertIn("/api/studio/projects/{project_id}/delivery-report", artifact_endpoints)
+        artifact_urls = {artifact["id"]: artifact.get("url") for artifact in body["artifacts"]}
+        self.assertTrue(all(artifact_urls.values()), artifact_urls)
+        self.assertEqual(
+            artifact_urls["handoff-snapshot"],
+            f"/api/studio/handoff-snapshot?project_id={source_meta['projectId']}&source_segment_id={source_execution['segmentId']}",
+        )
+        self.assertEqual(
+            artifact_urls["delivery-report"],
+            f"/api/studio/projects/{source_meta['projectId']}/delivery-report",
+        )
+        self.assertNotIn("{project_id}", str(artifact_urls))
 
         gap_by_page = {gap.get("pageId"): gap for gap in body["gaps"] if gap.get("pageId")}
         self.assertIn("myshell-art", gap_by_page)
@@ -1646,6 +1669,18 @@ class StudioApiTest(unittest.TestCase):
         artifact_endpoints = {artifact["endpoint"] for artifact in body["artifacts"]}
         self.assertIn("/api/studio/projects/{project_id}/delivery-bundle", artifact_endpoints)
         self.assertIn("/api/studio/dispatch-sessions/{session_id}", artifact_endpoints)
+        artifact_urls = {artifact["id"]: artifact.get("url") for artifact in body["artifacts"]}
+        self.assertTrue(all(artifact_urls.values()), artifact_urls)
+        self.assertEqual(artifact_urls["project"], f"/api/studio/projects/{meta['projectId']}")
+        self.assertEqual(
+            artifact_urls["delivery-bundle"],
+            f"/api/studio/projects/{meta['projectId']}/delivery-bundle?source_segment_id={execution['segmentId']}",
+        )
+        self.assertEqual(
+            artifact_urls[f"dispatch-session:{session['sessionId']}"],
+            f"/api/studio/dispatch-sessions/{session['sessionId']}",
+        )
+        self.assertNotIn("{session_id}", str(artifact_urls))
 
         download = self.client.get(
             f"/api/studio/projects/{meta['projectId']}/delivery-bundle",

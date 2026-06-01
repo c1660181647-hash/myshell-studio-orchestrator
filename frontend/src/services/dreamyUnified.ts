@@ -374,8 +374,9 @@ export interface StudioHandoffArtifact {
   id: string;
   label: string;
   endpoint: string;
+  url: string;
   projectId?: string;
-  url?: string;
+  sessionId?: string;
   query?: Record<string, unknown>;
   filename?: string;
 }

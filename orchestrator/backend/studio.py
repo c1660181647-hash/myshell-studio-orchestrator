@@ -882,58 +882,120 @@ def _gate_status_from_report(status: str) -> str:
     return "needs_attention"
 
 
-def _handoff_artifacts(project_id: str | None) -> list[dict[str, Any]]:
+def _artifact_url(
+    endpoint: str,
+    *,
+    project_id: str | None = None,
+    session_id: str | None = None,
+    query: dict[str, Any] | None = None,
+) -> str:
+    url = endpoint
+    if project_id is not None:
+        url = url.replace("{project_id}", quote(str(project_id), safe=""))
+    if session_id is not None:
+        url = url.replace("{session_id}", quote(str(session_id), safe=""))
+    clean_query = {
+        key: value
+        for key, value in (query or {}).items()
+        if value is not None and value != ""
+    }
+    if clean_query:
+        delimiter = "&" if "?" in url else "?"
+        url = f"{url}{delimiter}{urlencode(clean_query)}"
+    return url
+
+
+def _artifact(
+    artifact_id: str,
+    label: str,
+    endpoint: str,
+    *,
+    project_id: str | None = None,
+    session_id: str | None = None,
+    query: dict[str, Any] | None = None,
+    filename: str | None = None,
+) -> dict[str, Any]:
+    artifact = {
+        "id": artifact_id,
+        "label": label,
+        "endpoint": endpoint,
+        "url": _artifact_url(endpoint, project_id=project_id, session_id=session_id, query=query),
+    }
+    if project_id is not None:
+        artifact["projectId"] = project_id
+    if session_id is not None:
+        artifact["sessionId"] = session_id
+    clean_query = {
+        key: value
+        for key, value in (query or {}).items()
+        if value is not None and value != ""
+    }
+    if clean_query:
+        artifact["query"] = clean_query
+    if filename:
+        artifact["filename"] = filename
+    return artifact
+
+
+def _context_query(project_id: str | None = None, source_segment_id: str | None = None) -> dict[str, Any]:
+    query: dict[str, Any] = {}
+    if project_id:
+        query["project_id"] = project_id
+    if source_segment_id:
+        query["source_segment_id"] = source_segment_id
+    return query
+
+
+def _handoff_artifacts(project_id: str | None, source_segment_id: str | None = None) -> list[dict[str, Any]]:
+    context_query = _context_query(project_id, source_segment_id)
     artifacts = [
-        {"id": "health", "label": "Health", "endpoint": "/api/health"},
-        {"id": "readiness", "label": "Readiness", "endpoint": "/api/studio/readiness"},
-        {"id": "overview", "label": "Overview", "endpoint": "/api/studio/overview"},
-        {"id": "dispatch-matrix", "label": "Dispatch Matrix", "endpoint": "/api/studio/dispatch-matrix"},
-        {"id": "coverage", "label": "Coverage", "endpoint": "/api/studio/coverage"},
+        _artifact("health", "Health", "/api/health"),
+        _artifact("readiness", "Readiness", "/api/studio/readiness"),
+        _artifact("overview", "Overview", "/api/studio/overview"),
+        _artifact("dispatch-matrix", "Dispatch Matrix", "/api/studio/dispatch-matrix", query=context_query),
+        _artifact("coverage", "Coverage", "/api/studio/coverage", query=context_query),
+        _artifact("handoff-snapshot", "Handoff Snapshot", "/api/studio/handoff-snapshot", query=context_query),
     ]
     if project_id:
         artifacts.append(
-            {
-                "id": "delivery-report",
-                "label": "Project Delivery Report",
-                "endpoint": "/api/studio/projects/{project_id}/delivery-report",
-                "projectId": project_id,
-            }
+            _artifact(
+                "delivery-report",
+                "Project Delivery Report",
+                "/api/studio/projects/{project_id}/delivery-report",
+                project_id=project_id,
+            )
         )
     return artifacts
 
 
-def _delivery_bundle_artifacts(project_id: str, sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _delivery_bundle_artifacts(
+    project_id: str,
+    sessions: list[dict[str, Any]],
+    source_segment_id: str | None = None,
+) -> list[dict[str, Any]]:
+    bundle_query = _context_query(source_segment_id=source_segment_id)
     artifacts = [
-        *_handoff_artifacts(project_id),
-        {
-            "id": "project",
-            "label": "Project",
-            "endpoint": "/api/studio/projects/{project_id}",
-            "projectId": project_id,
-        },
-        {
-            "id": "delivery-bundle",
-            "label": "Delivery Bundle",
-            "endpoint": "/api/studio/projects/{project_id}/delivery-bundle",
-            "projectId": project_id,
-        },
-        {
-            "id": "jobs",
-            "label": "Jobs",
-            "endpoint": "/api/studio/jobs",
-            "projectId": project_id,
-            "query": {"project_id": project_id},
-        },
+        *_handoff_artifacts(project_id, source_segment_id),
+        _artifact("project", "Project", "/api/studio/projects/{project_id}", project_id=project_id),
+        _artifact(
+            "delivery-bundle",
+            "Delivery Bundle",
+            "/api/studio/projects/{project_id}/delivery-bundle",
+            project_id=project_id,
+            query=bundle_query,
+        ),
+        _artifact("jobs", "Jobs", "/api/studio/jobs", project_id=project_id, query={"project_id": project_id}),
     ]
     for session in sessions:
+        session_id = str(session.get("sessionId") or "")
         artifacts.append(
-            {
-                "id": f"dispatch-session:{session.get('sessionId')}",
-                "label": f"Dispatch Session {session.get('sessionId')}",
-                "endpoint": "/api/studio/dispatch-sessions/{session_id}",
-                "sessionId": session.get("sessionId"),
-                "projectId": project_id,
-            }
+            _artifact(
+                f"dispatch-session:{session_id}",
+                f"Dispatch Session {session_id}",
+                "/api/studio/dispatch-sessions/{session_id}",
+                project_id=project_id,
+                session_id=session_id,
+            )
         )
     return artifacts
 
@@ -1122,7 +1184,7 @@ async def _studio_handoff_snapshot(
         "gates": gates,
         "gaps": gaps,
         "actions": actions,
-        "artifacts": _handoff_artifacts(project.get("projectId") if project else None),
+        "artifacts": _handoff_artifacts(project.get("projectId") if project else None, coverage.get("sourceSegmentId")),
         "reports": {
             "health": health,
             "readiness": readiness,
@@ -1415,29 +1477,24 @@ async def _studio_readiness() -> dict[str, Any]:
     }
 
 
-def _delivery_audit_artifacts(project_id: str | None) -> list[dict[str, Any]]:
+def _delivery_audit_artifacts(project_id: str | None, source_segment_id: str | None = None) -> list[dict[str, Any]]:
+    context_query = _context_query(project_id, source_segment_id)
     artifacts = [
-        {"id": "delivery-audit", "label": "Delivery Audit", "endpoint": "/api/studio/delivery-audit"},
-        *_handoff_artifacts(project_id),
+        _artifact("delivery-audit", "Delivery Audit", "/api/studio/delivery-audit", query=context_query),
+        *_handoff_artifacts(project_id, source_segment_id),
     ]
     if project_id:
         artifacts.extend(
             [
-                {
-                    "id": "project",
-                    "label": "Project",
-                    "endpoint": "/api/studio/projects/{project_id}",
-                    "projectId": project_id,
-                },
-                {
-                    "id": "delivery-bundle-download",
-                    "label": "Downloadable Delivery Bundle",
-                    "endpoint": "/api/studio/projects/{project_id}/delivery-bundle",
-                    "url": f"/api/studio/projects/{project_id}/delivery-bundle?download=1",
-                    "projectId": project_id,
-                    "query": {"download": 1},
-                    "filename": f"myshell-studio-delivery-{project_id}.json",
-                },
+                _artifact("project", "Project", "/api/studio/projects/{project_id}", project_id=project_id),
+                _artifact(
+                    "delivery-bundle-download",
+                    "Downloadable Delivery Bundle",
+                    "/api/studio/projects/{project_id}/delivery-bundle",
+                    project_id=project_id,
+                    query={**_context_query(source_segment_id=source_segment_id), "download": 1},
+                    filename=f"myshell-studio-delivery-{project_id}.json",
+                ),
             ]
         )
     return artifacts
@@ -1518,7 +1575,7 @@ async def _studio_delivery_audit(
             )
         )
 
-    artifacts = _delivery_audit_artifacts(project.get("projectId") if project else None)
+    artifacts = _delivery_audit_artifacts(project.get("projectId") if project else None, dispatch_matrix.get("sourceSegmentId"))
     actions = _delivery_audit_actions(requirements, handoff)
     return {
         "status": _audit_status(requirements),
@@ -2272,7 +2329,7 @@ async def _project_delivery_bundle(
         "blocked": len(skipped_targets),
         "total": len(all_targets) + len(skipped_targets),
     }
-    artifacts = _delivery_bundle_artifacts(project_id, dispatch_sessions)
+    artifacts = _delivery_bundle_artifacts(project_id, dispatch_sessions, coverage.get("sourceSegmentId"))
 
     return {
         "status": handoff.get("status"),
