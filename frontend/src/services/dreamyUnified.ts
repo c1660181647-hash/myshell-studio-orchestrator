@@ -194,6 +194,40 @@ export interface StudioProjectDeliveryReport {
   unresolvedActions: StudioDeliveryAction[];
 }
 
+export interface StudioDispatchMatrixEntry {
+  pageId: StudioApi | string;
+  pageName: string;
+  kind: string;
+  executor: StudioExecutor;
+  agentId: string;
+  recommendedAction: 'navigate' | 'execute-client' | 'execute-server' | string;
+  dispatchReady: boolean;
+  dispatchStatus: string;
+  dispatchMessage?: string;
+  authStatus: StudioAuthStatus;
+  clientAction?: 'navigate' | string;
+  navigationPath?: string;
+  studioReturnPath?: string;
+  routeParams: string[];
+  missingRouteParams: string[];
+  capabilities: string[];
+  registrySource?: string;
+}
+
+export interface StudioDispatchMatrix {
+  checkedAt: string;
+  summary: {
+    total: number;
+    ready: number;
+    blocked: number;
+    missingParams: number;
+    navigation: number;
+    client: number;
+    server: number;
+  };
+  entries: StudioDispatchMatrixEntry[];
+}
+
 export interface StudioPageAdapter {
   id: StudioApi;
   name: string;
@@ -661,6 +695,12 @@ export async function fetchStudioOverview(limit = 50): Promise<StudioOverview> {
 export async function fetchStudioReadiness(): Promise<StudioReadiness> {
   const response = await fetch(getStudioRootEndpoint('/api/studio/readiness'));
   if (!response.ok) throw new Error(`Studio readiness ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function fetchStudioDispatchMatrix(): Promise<StudioDispatchMatrix> {
+  const response = await fetch(getStudioRootEndpoint('/api/studio/dispatch-matrix'));
+  if (!response.ok) throw new Error(`Studio dispatch matrix ${response.status}: ${response.statusText}`);
   return response.json();
 }
 

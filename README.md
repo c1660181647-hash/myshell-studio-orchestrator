@@ -14,6 +14,7 @@ MyShell Studio Orchestrator is a unified agent dispatch center for Dreamy miniap
 - Health checks that report backend, storage, Chrome CDP, MyShell cookies, cookie injection, and Dreamy auth delegation separately, with the same status visible in Studio.
 - Delivery readiness gates that combine health, registry coverage, dispatch preview, overview, MyShell Art auth, and job-store checks into a single Studio handoff status.
 - Project delivery reports that summarize accepted evidence, pending evidence, issue counts, unresolved actions, and per-segment evidence trails for operator handoff.
+- Dispatch matrix coverage for every registered MyShell page, including executor, default agent, route path, missing route params, auth status, and recommended dispatch action.
 
 ## Repository Layout
 
@@ -51,6 +52,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `GET /api/pages`
 - `GET /api/agents`
 - `GET /api/studio/overview`
+- `GET /api/studio/dispatch-matrix`
 - `GET /api/studio/readiness`
 - `GET /api/studio/dispatch-preview`
 - `POST /api/studio/run`
@@ -69,6 +71,8 @@ http://127.0.0.1:5174/?test_route=dreamy
 `/api/pages` returns registry metadata plus runtime `authStatus`, `dispatchReady`, `dispatchStatus`, and `dispatchMessage` for each MyShell page, so operators can tell whether a page is ready, client-delegated, or blocked by missing credentials before dispatch.
 
 `/api/studio/overview` aggregates pages, agents, latest jobs, and status counts for the Studio command center. Page summaries include runtime readiness, related agent ids, per-status job counts, and the latest job for that page.
+
+`/api/studio/dispatch-matrix` returns a full page-to-agent routing matrix for every registered MyShell surface. It includes the recommended action (`navigate`, `execute-client`, or `execute-server`), default agent id, executor, auth status, navigation path, route params, missing params, and readiness summary so operators can audit all dispatch targets at once.
 
 `/api/studio/readiness` returns delivery gates for the handoff surface: backend, storage, Chrome CDP, cookie injection, page registry, agent registry, dispatch preview, overview, MyShell Art auth, and job store. Required gate failures make the response `blocked`; optional auth/CDP gaps are surfaced as `degraded` or `auth_missing` rather than hidden as success.
 

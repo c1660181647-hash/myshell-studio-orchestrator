@@ -213,6 +213,73 @@ def _studio_overview(limit: int = 50) -> dict[str, Any]:
     }
 
 
+def _recommended_action_for_page(page: dict[str, Any]) -> str:
+    if page.get("executor") == "navigation":
+        return "navigate"
+    if page.get("executor") == "server":
+        return "execute-server"
+    return "execute-client"
+
+
+def _dispatch_matrix_entry(page: dict[str, Any], route: dict[str, Any]) -> dict[str, Any]:
+    runtime_page = _page_with_runtime_status(page)
+    contract = _navigation_contract(page, route)
+    navigation_path = contract.get("navigationPath", "")
+    missing_params = _missing_route_params(page, navigation_path)
+    dispatch_ready = bool(runtime_page["dispatchReady"]) and not missing_params
+    dispatch_status = "missing_params" if missing_params else runtime_page["dispatchStatus"]
+    return {
+        "pageId": page["id"],
+        "pageName": page["name"],
+        "kind": page.get("kind", ""),
+        "executor": page.get("executor", ""),
+        "agentId": _agent_id_for_page(page),
+        "recommendedAction": _recommended_action_for_page(page),
+        "dispatchReady": dispatch_ready,
+        "dispatchStatus": dispatch_status,
+        "dispatchMessage": "Missing route parameters: " + ", ".join(missing_params)
+        if missing_params
+        else runtime_page.get("dispatchMessage", ""),
+        "authStatus": runtime_page["authStatus"],
+        "clientAction": contract.get("clientAction"),
+        "navigationPath": navigation_path,
+        "studioReturnPath": contract.get("studioReturnPath"),
+        "routeParams": page.get("routeParams") or [],
+        "missingRouteParams": missing_params,
+        "capabilities": page.get("capabilities") or [],
+        "registrySource": page.get("registrySource", ""),
+    }
+
+
+def _dispatch_matrix() -> dict[str, Any]:
+    default_bot = get_bot_by_slug("seedream-multi-chart") or MYSHELL_BOTS[0]
+    route = {
+        "bot": {
+            "slug": default_bot["slug"],
+            "name": default_bot["name"],
+            "type": default_bot["type"],
+            "rating": default_bot.get("rating", 4.5),
+            "description": default_bot.get("desc", ""),
+            "pageUrl": f"https://art.myshell.ai/creative/{default_bot['slug']}",
+        }
+    }
+    entries = [_dispatch_matrix_entry(page, route) for page in list_studio_pages()]
+    summary = {
+        "total": len(entries),
+        "ready": sum(1 for entry in entries if entry["dispatchReady"]),
+        "blocked": sum(1 for entry in entries if entry["dispatchStatus"] in {"auth_missing", "error"}),
+        "missingParams": sum(1 for entry in entries if entry["missingRouteParams"]),
+        "navigation": sum(1 for entry in entries if entry["executor"] == "navigation"),
+        "client": sum(1 for entry in entries if entry["executor"] == "client"),
+        "server": sum(1 for entry in entries if entry["executor"] == "server"),
+    }
+    return {
+        "checkedAt": now_iso(),
+        "summary": summary,
+        "entries": entries,
+    }
+
+
 def _delivery_gate(
     gate_id: str,
     label: str,
@@ -1059,6 +1126,10 @@ def register_studio_routes(app) -> None:
     @app.get("/api/studio/overview")
     async def get_studio_overview(limit: int = Query(50, ge=1, le=100)):
         return _studio_overview(limit=limit)
+
+    @app.get("/api/studio/dispatch-matrix")
+    async def get_studio_dispatch_matrix():
+        return _dispatch_matrix()
 
     @app.get("/api/studio/readiness")
     async def get_studio_readiness():

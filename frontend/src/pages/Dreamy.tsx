@@ -42,6 +42,7 @@ import {
   bulkStudioJobs,
   cancelStudioJob,
   extractGenerateTaskMedia,
+  fetchStudioDispatchMatrix,
   fetchStudioDispatchPreview,
   fetchStudioAgents,
   fetchStudioHealth,
@@ -71,6 +72,7 @@ import type {
   StudioAction,
   StudioAgentNode,
   StudioApi,
+  StudioDispatchMatrix,
   StudioDispatchPreview,
   StudioExecutionRequest,
   StudioHealth,
@@ -545,6 +547,75 @@ function StudioDeliveryReportStrip({
         </span>
       ))}
       {actions.length > 4 && <Pill tone="hot">{`+${actions.length - 4} actions`}</Pill>}
+    </div>
+  );
+}
+
+function StudioDispatchMatrixPanel({
+  matrix,
+  selectedPageId,
+  onSelectPage,
+}: {
+  matrix: StudioDispatchMatrix | null;
+  selectedPageId: string;
+  onSelectPage: (pageId: string) => void;
+}) {
+  const entries = matrix?.entries || [];
+  if (!entries.length) return null;
+  const summary = matrix?.summary;
+
+  return (
+    <div className="shrink-0 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-xs font-semibold text-Cr-text-subtle-v2">
+          <GitBranch size={14} />
+          Dispatch Matrix
+        </div>
+        <div className="flex max-w-full items-center gap-2 overflow-x-auto [-webkit-overflow-scrolling:touch]">
+          {summary && (
+            <>
+              <Pill tone={summary.ready === summary.total ? 'success' : 'hot'}>{`${summary.ready}/${summary.total} ready`}</Pill>
+              <Pill tone={summary.missingParams ? 'hot' : 'default'}>{`${summary.missingParams} missing params`}</Pill>
+              <Pill>{`${summary.navigation} nav`}</Pill>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+        {entries.map((entry) => {
+          const active = entry.pageId === selectedPageId;
+          return (
+            <button
+              key={entry.pageId}
+              type="button"
+              onClick={() => onSelectPage(entry.pageId)}
+              className={`grid min-w-[230px] gap-2 rounded-lg-v2 border p-2 text-left text-xs transition-colors ${
+                active
+                  ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
+                  : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 active:bg-Cr-beta-white-8-v2'
+              }`}
+              aria-label={`Select ${entry.pageName} dispatch target`}
+            >
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <div className="min-w-0 truncate font-semibold text-Cr-text-default-v2">{entry.pageName}</div>
+                <Pill tone={healthPillTone(entry.dispatchStatus)}>{entry.dispatchStatus}</Pill>
+              </div>
+              <div className="flex min-w-0 items-center justify-between gap-2 text-[11px] text-Cr-text-subtler-v2">
+                <span className="truncate">{entry.agentId}</span>
+                <span className="shrink-0">{entry.executor}</span>
+              </div>
+              <div className="flex min-w-0 items-center justify-between gap-2 text-[11px] text-Cr-text-subtlest-v2">
+                <span className="truncate">{entry.navigationPath || entry.recommendedAction}</span>
+                {!!entry.missingRouteParams.length && (
+                  <span className="shrink-0 font-semibold text-dreamy-brand-hot-v2">
+                    {entry.missingRouteParams.join(', ')}
+                  </span>
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1621,6 +1692,7 @@ export default function Dreamy() {
   const [studioOverview, setStudioOverview] = useState<StudioOverview | null>(null);
   const [studioReadiness, setStudioReadiness] = useState<StudioReadiness | null>(null);
   const [deliveryReport, setDeliveryReport] = useState<StudioProjectDeliveryReport | null>(null);
+  const [dispatchMatrix, setDispatchMatrix] = useState<StudioDispatchMatrix | null>(null);
   const [queueStatusFilter, setQueueStatusFilter] = useState<StudioStatus | 'all'>('all');
   const [queuePageFilter, setQueuePageFilter] = useState<StudioApi | string>('all');
   const [queueAgentFilter, setQueueAgentFilter] = useState('all');
@@ -1702,13 +1774,15 @@ export default function Dreamy() {
       fetchStudioHealth().catch(() => null),
       fetchStudioOverview().catch(() => null),
       fetchStudioReadiness().catch(() => null),
-    ]).then(([nextPages, nextAgents, nextHealth, nextOverview, nextReadiness]) => {
+      fetchStudioDispatchMatrix().catch(() => null),
+    ]).then(([nextPages, nextAgents, nextHealth, nextOverview, nextReadiness, nextMatrix]) => {
       if (cancelled) return;
       setPages(nextPages);
       setAgents(nextAgents);
       setStudioHealth(nextHealth);
       setStudioOverview(nextOverview);
       setStudioReadiness(nextReadiness);
+      setDispatchMatrix(nextMatrix);
       setSelectedPageId((current) =>
         nextPages.length && !nextPages.some((page) => page.id === current) ? nextPages[0].id : current,
       );
@@ -1780,10 +1854,12 @@ export default function Dreamy() {
     void Promise.all([
       fetchStudioOverview().catch(() => null),
       fetchStudioReadiness().catch(() => null),
-    ]).then(([overview, readiness]) => {
+      fetchStudioDispatchMatrix().catch(() => null),
+    ]).then(([overview, readiness, matrix]) => {
       if (cancelled) return;
       if (overview) setStudioOverview(overview);
       if (readiness) setStudioReadiness(readiness);
+      if (matrix) setDispatchMatrix(matrix);
     }).catch(() => undefined);
     return () => {
       cancelled = true;
@@ -2291,6 +2367,7 @@ export default function Dreamy() {
       }).then((jobs) => setHubJobs(jobs)).catch(() => undefined),
       fetchStudioOverview().then((overview) => setStudioOverview(overview)).catch(() => undefined),
       fetchStudioReadiness().then((readiness) => setStudioReadiness(readiness)).catch(() => undefined),
+      fetchStudioDispatchMatrix().then((matrix) => setDispatchMatrix(matrix)).catch(() => undefined),
       project?.projectId
         ? fetchStudioProjectDeliveryReport(project.projectId).then((report) => setDeliveryReport(report)).catch(() => undefined)
         : Promise.resolve(),
@@ -2458,6 +2535,12 @@ export default function Dreamy() {
           })}
         </div>
       </div>
+
+      <StudioDispatchMatrixPanel
+        matrix={dispatchMatrix}
+        selectedPageId={selectedPageId}
+        onSelectPage={selectOverviewPage}
+      />
 
       <div className="shrink-0 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">
         <div className="mb-2 flex items-center justify-between gap-2">

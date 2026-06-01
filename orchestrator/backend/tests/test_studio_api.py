@@ -368,6 +368,48 @@ class StudioApiTest(unittest.TestCase):
         self.assertFalse(gates["myshell-art-auth"]["required"])
         self.assertEqual(gates["job-store"]["status"], "ready")
 
+    def test_dispatch_matrix_covers_all_pages_agents_and_paths(self) -> None:
+        matrix = self.client.get("/api/studio/dispatch-matrix")
+
+        self.assertEqual(matrix.status_code, 200)
+        self.assertEqual(matrix.headers.get("content-type", "").split(";")[0], "application/json")
+        body = matrix.json()
+        self.assertIn("checkedAt", body)
+        self.assertGreaterEqual(body["summary"]["total"], 13)
+        self.assertGreaterEqual(body["summary"]["ready"], 11)
+        self.assertGreaterEqual(body["summary"]["missingParams"], 1)
+
+        entries = {entry["pageId"]: entry for entry in body["entries"]}
+        self.assertIn("dreamy-miniapp", entries)
+        self.assertIn("myshell-art", entries)
+        self.assertIn("library", entries)
+        self.assertIn("tag-generator", entries)
+
+        dreamy = entries["dreamy-miniapp"]
+        self.assertEqual(dreamy["executor"], "client")
+        self.assertEqual(dreamy["agentId"], "dreamy-miniapp-executor")
+        self.assertEqual(dreamy["recommendedAction"], "execute-client")
+        self.assertTrue(dreamy["dispatchReady"])
+
+        library = entries["library"]
+        self.assertEqual(library["executor"], "navigation")
+        self.assertEqual(library["agentId"], "miniapp-page-navigator")
+        self.assertEqual(library["recommendedAction"], "navigate")
+        self.assertEqual(library["navigationPath"], "/library")
+        self.assertEqual(library["missingRouteParams"], [])
+
+        tag_generator = entries["tag-generator"]
+        self.assertTrue(tag_generator["navigationPath"].startswith("/tag-generator?slug_id="), tag_generator["navigationPath"])
+        self.assertEqual(tag_generator["routeParams"], ["slug_id", "img"])
+        self.assertEqual(tag_generator["missingRouteParams"], ["img"])
+
+        art = entries["myshell-art"]
+        self.assertEqual(art["executor"], "server")
+        self.assertEqual(art["agentId"], "myshell-art-cdp-executor")
+        self.assertEqual(art["recommendedAction"], "execute-server")
+        self.assertIn(art["authStatus"]["status"], {"ready", "auth_missing"})
+        self.assertEqual(art["dispatchReady"], art["authStatus"]["status"] == "ready")
+
     def test_pages_cover_existing_myshell_miniapp_routes(self) -> None:
         pages = self.client.get("/api/pages")
         self.assertEqual(pages.status_code, 200)
