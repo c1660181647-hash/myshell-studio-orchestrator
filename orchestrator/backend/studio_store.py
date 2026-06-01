@@ -129,7 +129,14 @@ class StudioStore:
             ).fetchone()
         return json.loads(row["payload"]) if row else None
 
-    def list_jobs(self, project_id: str | None = None, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    def list_jobs(
+        self,
+        project_id: str | None = None,
+        status: str | None = None,
+        page_id: str | None = None,
+        agent_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
         query = "SELECT payload FROM jobs"
         params: tuple[Any, ...] = ()
         if project_id:
@@ -141,6 +148,10 @@ class StudioStore:
         jobs = [json.loads(row["payload"]) for row in rows]
         if status:
             jobs = [job for job in jobs if job.get("status") == status]
+        if page_id:
+            jobs = [job for job in jobs if job.get("pageId") == page_id or job.get("api") == page_id]
+        if agent_id:
+            jobs = [job for job in jobs if job.get("agentId") == agent_id]
         return jobs[: max(1, min(limit, 500))]
 
     def save_evidence(self, job: dict[str, Any], evidence: dict[str, Any]) -> None:

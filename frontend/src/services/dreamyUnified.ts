@@ -546,10 +546,20 @@ export async function fetchStudioJob(jobId: string): Promise<StudioJob> {
   return response.json();
 }
 
-export async function fetchStudioJobs(options: { projectId?: string; status?: StudioStatus | string; limit?: number } = {}): Promise<StudioJob[]> {
+export async function fetchStudioJobs(
+  options: {
+    projectId?: string;
+    status?: StudioStatus | string;
+    pageId?: StudioApi | string;
+    agentId?: string;
+    limit?: number;
+  } = {},
+): Promise<StudioJob[]> {
   const params = new URLSearchParams();
   if (options.projectId) params.set('project_id', options.projectId);
   if (options.status) params.set('status', options.status);
+  if (options.pageId) params.set('page_id', options.pageId);
+  if (options.agentId) params.set('agent_id', options.agentId);
   params.set('limit', String(options.limit || 100));
   const query = params.toString();
   const response = await fetch(getStudioRootEndpoint(`/api/studio/jobs${query ? `?${query}` : ''}`));

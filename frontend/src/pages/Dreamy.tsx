@@ -76,6 +76,7 @@ import type {
   StudioRouteEvent,
   StudioRunEvent,
   StudioSegment,
+  StudioStatus,
 } from '../services/dreamyUnified';
 import { trackEvent } from '../services/tracking';
 
@@ -125,6 +126,16 @@ interface ChatItem {
 const DEFAULT_DREAMY_SLUG = 'ai-porn-generator';
 const LOCAL_POSTERS = [exampleGood, exampleMultiple];
 const DEFAULT_STUDIO_AGENT_ID = 'dreamy-miniapp-executor';
+const QUEUE_STATUS_OPTIONS: Array<StudioStatus | 'all'> = [
+  'all',
+  'queued',
+  'running',
+  'done',
+  'timeout',
+  'auth_missing',
+  'error',
+  'cancelled',
+];
 
 const EMPTY_GRAPH: StudioAgentNode[] = [
   { id: 'intent-router', label: 'Intent Router', status: 'idle', detail: 'Waiting for prompt' },
@@ -1513,6 +1524,9 @@ export default function Dreamy() {
   const [selectedPageId, setSelectedPageId] = useState<StudioApi | string>('dreamy-miniapp');
   const [selectedAgentId, setSelectedAgentId] = useState(DEFAULT_STUDIO_AGENT_ID);
   const [studioHealth, setStudioHealth] = useState<StudioHealth | null>(null);
+  const [queueStatusFilter, setQueueStatusFilter] = useState<StudioStatus | 'all'>('all');
+  const [queuePageFilter, setQueuePageFilter] = useState<StudioApi | string>('all');
+  const [queueAgentFilter, setQueueAgentFilter] = useState('all');
 
   const selectedSegment = useMemo(() => {
     const id = project?.selectedSegmentId;
@@ -1550,6 +1564,15 @@ export default function Dreamy() {
     setSelectedPageId(nextPageId);
     setSelectedAgentId(defaultAgentIdForPage(nextPage));
   }, [pages]);
+  const displayedHubJobs = useMemo(
+    () => hubJobs.filter((job) => {
+      if (queueStatusFilter !== 'all' && job.status !== queueStatusFilter) return false;
+      if (queuePageFilter !== 'all' && job.pageId !== queuePageFilter && job.api !== queuePageFilter) return false;
+      if (queueAgentFilter !== 'all' && job.agentId !== queueAgentFilter) return false;
+      return true;
+    }),
+    [hubJobs, queueAgentFilter, queuePageFilter, queueStatusFilter],
+  );
 
   useEffect(() => {
     if (!previewUrl) return;
@@ -1588,23 +1611,34 @@ export default function Dreamy() {
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([
-      fetchStudioProjects(20).catch(() => []),
-      fetchStudioJobs({ limit: 50 }).catch(() => []),
-    ]).then(([storedProjects, storedJobs]) => {
+    void fetchStudioProjects(20).then((storedProjects) => {
       if (cancelled) return;
-      setHubJobs(storedJobs);
       if (!storedProjects.length) return;
       const lastProjectId = readLastStudioProjectId();
       const restored = storedProjects.find((item) => item.projectId === lastProjectId) || storedProjects[0];
       setProject((current) => current || restored);
       saveLastStudioProjectId(restored.projectId);
       setMode(restored.mode || 'player');
-    });
+    }).catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchStudioJobs({
+      limit: 50,
+      status: queueStatusFilter === 'all' ? undefined : queueStatusFilter,
+      pageId: queuePageFilter === 'all' ? undefined : queuePageFilter,
+      agentId: queueAgentFilter === 'all' ? undefined : queueAgentFilter,
+    }).then((storedJobs) => {
+      if (!cancelled) setHubJobs(storedJobs);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [queueAgentFilter, queuePageFilter, queueStatusFilter]);
 
   const mergeProject = useCallback((incoming: StudioProject) => {
     setProject(incoming);
@@ -2127,6 +2161,88 @@ export default function Dreamy() {
         </button>
       </div>
 
+      <div className="shrink-0 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs font-semibold text-Cr-text-subtle-v2">
+            <GitBranch size={14} />
+            Dispatch Queue
+          </div>
+          <Pill>{`${displayedHubJobs.length} jobs`}</Pill>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <select
+            value={queueStatusFilter}
+            onChange={(event) => setQueueStatusFilter(event.target.value as StudioStatus | 'all')}
+            className="h-9 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 text-xs font-semibold text-Cr-text-subtle-v2 outline-none"
+            aria-label="Queue status filter"
+          >
+            {QUEUE_STATUS_OPTIONS.map((status) => (
+              <option key={status} value={status}>{status === 'all' ? 'All statuses' : status}</option>
+            ))}
+          </select>
+          <select
+            value={queuePageFilter}
+            onChange={(event) => setQueuePageFilter(event.target.value)}
+            className="h-9 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 text-xs font-semibold text-Cr-text-subtle-v2 outline-none"
+            aria-label="Queue page filter"
+          >
+            <option value="all">All pages</option>
+            {pageOptions.map((page) => (
+              <option key={page.id} value={page.id}>{page.name}</option>
+            ))}
+          </select>
+          <select
+            value={queueAgentFilter}
+            onChange={(event) => setQueueAgentFilter(event.target.value)}
+            className="h-9 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 text-xs font-semibold text-Cr-text-subtle-v2 outline-none"
+            aria-label="Queue agent filter"
+          >
+            <option value="all">All agents</option>
+            {agentOptions.map((agent) => (
+              <option key={agent.id} value={agent.id}>{agent.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="mt-2 flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+          {displayedHubJobs.slice(0, 6).map((job) => (
+            <div
+              key={job.jobId}
+              className="grid min-w-[240px] gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 p-2 text-xs"
+            >
+              <div className="min-w-0">
+                <div className="truncate font-semibold text-Cr-text-default-v2">{job.pageName}</div>
+                <div className="truncate text-[11px] text-Cr-text-subtler-v2">{job.agentId} / {job.botName}</div>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <Pill tone={statusPillTone(job.status)}>{job.status}</Pill>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={job.status === 'cancelled'}
+                    onClick={() => void cancelJob(job.jobId)}
+                    className="h-7 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:opacity-40"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void retryJob(job.jobId)}
+                    className="h-7 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2"
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {!displayedHubJobs.length && (
+            <div className="flex h-16 min-w-[220px] items-center justify-center rounded-lg-v2 border border-dashed border-Cr-border-default-v2 text-xs text-Cr-text-subtler-v2">
+              No jobs match filters
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="grid h-11 shrink-0 grid-cols-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-1 lg:hidden">
         {(['chat', 'preview'] as TabKey[]).map((tab) => (
           <button
@@ -2162,7 +2278,7 @@ export default function Dreamy() {
               <div>
                 <div className="text-sm font-semibold">Conversation</div>
                 <div className="text-[11px] text-Cr-text-subtler-v2">
-                  {project?.conversationId || 'No session'} · {selectedPage?.name || 'Dreamy Miniapp'} · {selectedAgent?.label || selectedAgentId} · {hubJobs.length} jobs
+                  {project?.conversationId || 'No session'} · {selectedPage?.name || 'Dreamy Miniapp'} · {selectedAgent?.label || selectedAgentId} · {displayedHubJobs.length} jobs
                 </div>
               </div>
             </div>

@@ -914,9 +914,17 @@ def register_studio_routes(app) -> None:
     async def list_studio_jobs(
         project_id: Optional[str] = Query(None),
         status: Optional[str] = Query(None),
+        page_id: Optional[str] = Query(None),
+        agent_id: Optional[str] = Query(None),
         limit: int = Query(100, ge=1, le=500),
     ):
-        jobs = STUDIO_STORE.list_jobs(project_id=project_id, status=status, limit=limit)
+        jobs = STUDIO_STORE.list_jobs(
+            project_id=project_id,
+            status=status,
+            page_id=page_id,
+            agent_id=agent_id,
+            limit=limit,
+        )
         return {"jobs": [_job_with_evidence(job) for job in jobs], "count": len(jobs)}
 
     @app.get("/api/studio/jobs/{job_id}/evidence")

@@ -379,6 +379,38 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(evidence.status_code, 200)
         self.assertEqual(evidence.json()["evidence"][0]["status"], "queued")
 
+    def test_job_queue_can_filter_by_page_and_agent(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "queue planner job", "agent_id": "asset-planner"},
+        ) as response:
+            planner_events = _sse_events("".join(response.iter_text()))
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "open my generated library", "page_id": "library"},
+        ) as response:
+            library_events = _sse_events("".join(response.iter_text()))
+
+        planner_job_id = next(payload for name, payload in planner_events if name == "execution_request")["jobId"]
+        library_job_id = next(payload for name, payload in library_events if name == "execution_request")["jobId"]
+
+        by_agent = self.client.get("/api/studio/jobs", params={"agent_id": "asset-planner"})
+        self.assertEqual(by_agent.status_code, 200)
+        self.assertEqual([job["jobId"] for job in by_agent.json()["jobs"]], [planner_job_id])
+
+        by_page = self.client.get("/api/studio/jobs", params={"page_id": "library"})
+        self.assertEqual(by_page.status_code, 200)
+        self.assertEqual([job["jobId"] for job in by_page.json()["jobs"]], [library_job_id])
+
+        combined = self.client.get(
+            "/api/studio/jobs",
+            params={"page_id": "library", "agent_id": "asset-planner"},
+        )
+        self.assertEqual(combined.status_code, 200)
+        self.assertEqual(combined.json()["jobs"], [])
+
     def test_retry_returns_client_execution_request(self) -> None:
         with self.client.stream(
             "POST",
