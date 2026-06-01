@@ -9,6 +9,7 @@ from typing import Any, Optional
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from fastapi import Body, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from bot_catalog import MYSHELL_BOTS, get_bot_by_slug
@@ -2493,11 +2494,20 @@ def register_studio_routes(app) -> None:
     async def get_studio_project_delivery_bundle(
         project_id: str,
         source_segment_id: Optional[str] = Query(None),
+        download: bool = Query(False),
     ):
         project = _get_project(project_id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
-        return await _project_delivery_bundle(project, source_segment_id=source_segment_id)
+        bundle = await _project_delivery_bundle(project, source_segment_id=source_segment_id)
+        if download:
+            return JSONResponse(
+                bundle,
+                headers={
+                    "Content-Disposition": f'attachment; filename="myshell-studio-delivery-{project_id}.json"',
+                },
+            )
+        return bundle
 
     @app.post("/api/studio/projects/{project_id}/client-result")
     async def post_studio_client_result(project_id: str, payload: dict[str, Any] = Body(...)):

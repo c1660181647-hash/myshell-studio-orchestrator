@@ -193,6 +193,27 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function downloadJsonText(jsonText: string, filename: string): void {
+  if (typeof document === 'undefined') return;
+  const blob = new Blob([jsonText], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function downloadJsonPayload(payload: unknown, filename: string): void {
+  downloadJsonText(JSON.stringify(payload, null, 2), filename);
+}
+
+function deliveryBundleFilename(bundle: StudioDeliveryBundle): string {
+  return `myshell-studio-delivery-${bundle.projectId}.json`;
+}
+
 function statusTone(status?: string): string {
   if (status === 'done') return 'text-Cr-text-success-default-v2';
   if (status === 'error' || status === 'timeout' || status === 'auth_missing') return 'text-Cr-text-critical-default-v2';
@@ -1556,13 +1577,7 @@ function CanvasWorkspace({
   };
 
   const downloadJson = () => {
-    const blob = new Blob([canvasStateJson()], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `${project?.projectId || 'dreamy-canvas'}.json`;
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadJsonText(canvasStateJson(), `${project?.projectId || 'dreamy-canvas'}.json`);
   };
 
   const resetView = () => {
@@ -2168,12 +2183,14 @@ export default function Dreamy() {
       applyHandoffSnapshot(bundle.reports.handoffSnapshot);
       setDeliveryReport(bundle.reports.deliveryReport);
       setCoverageReport(bundle.reports.coverage);
+      const filename = deliveryBundleFilename(bundle);
+      downloadJsonPayload(bundle, filename);
       setMessages((prev) => [
         ...prev,
         {
           id: makeId('assistant'),
           role: 'assistant',
-          content: `Delivery bundle ${bundle.status}: ${bundle.summary.acceptedJobs} accepted jobs, ${bundle.summary.completedTargets} completed targets, ${bundle.summary.artifacts} artifacts.`,
+          content: `Delivery bundle ${bundle.status}: ${bundle.summary.acceptedJobs} accepted jobs, ${bundle.summary.completedTargets} completed targets, ${bundle.summary.artifacts} artifacts. Downloaded ${filename}.`,
           createdAt: nowIso(),
         },
       ]);

@@ -9,6 +9,7 @@ The backend exposes the Studio API for MyShell page and agent dispatch. It keeps
 - `GET /api/agents` lists the dispatch graph agents.
 - `POST /api/studio/run` routes a prompt, creates a persisted job, and streams Studio SSE events.
 - `GET /api/studio/projects` lists recent persisted projects for Studio restore.
+- `GET /api/studio/projects/{project_id}/delivery-bundle?download=1` returns the operator handoff bundle as a downloadable JSON attachment.
 - `GET /api/studio/jobs` lists the persisted queue with optional `project_id` and `status` filters.
 - `GET /api/studio/jobs/{job_id}` and `/evidence` return current state plus evidence history.
 - `POST /api/studio/jobs/{job_id}/cancel` and `/retry` manage persisted jobs. Retry returns an `executionRequest` for client-side miniapp execution when needed.

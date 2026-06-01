@@ -1423,6 +1423,19 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("/api/studio/projects/{project_id}/delivery-bundle", artifact_endpoints)
         self.assertIn("/api/studio/dispatch-sessions/{session_id}", artifact_endpoints)
 
+        download = self.client.get(
+            f"/api/studio/projects/{meta['projectId']}/delivery-bundle",
+            params={"source_segment_id": execution["segmentId"], "download": "1"},
+        )
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(download.headers.get("content-type", "").split(";")[0], "application/json")
+        disposition = download.headers.get("content-disposition", "")
+        self.assertIn("attachment", disposition)
+        self.assertIn(f"myshell-studio-delivery-{meta['projectId']}.json", disposition)
+        download_body = download.json()
+        self.assertEqual(download_body["projectId"], meta["projectId"])
+        self.assertEqual(download_body["reports"]["handoffSnapshot"]["projectId"], meta["projectId"])
+
     def test_job_queue_can_filter_by_page_and_agent(self) -> None:
         with self.client.stream(
             "POST",
