@@ -604,6 +604,49 @@ class StudioApiTest(unittest.TestCase):
         self.assertNotIn("explore", {action.get("targetId") for action in body["audit"]["actions"]})
         self.assertNotIn("ai-picks", {action.get("targetId") for action in body["audit"]["actions"]})
 
+    def test_studio_action_resolve_explains_all_operator_action_types(self) -> None:
+        action_targets = [
+            ("provide-route-params", "tag-generator"),
+            ("wait-or-refresh", "library"),
+            ("retry-or-inspect", "job_timeout"),
+            ("restore-readiness", "myshell-art"),
+            ("inspect-gap", "dispatch-matrix"),
+            ("wait-for-adapter", "job_queued"),
+            ("poll-result", "job_running"),
+            ("retry-or-cancel", "job_timeout"),
+            ("inspect-error", "job_error"),
+            ("verify-evidence", "job_done_without_evidence"),
+        ]
+
+        for action, target_id in action_targets:
+            with self.subTest(action=action):
+                response = self.client.post(
+                    "/api/studio/actions/resolve",
+                    json={"action": action, "target_id": target_id},
+                )
+                self.assertEqual(response.status_code, 200)
+                body = response.json()
+                self.assertEqual(body["status"], "manual_required")
+                self.assertEqual(body["action"], action)
+                self.assertEqual(body["targetId"], target_id)
+                self.assertEqual(body["resultType"], "operator-instruction")
+                self.assertIn(target_id, body["next"]["targetId"])
+                self.assertTrue(body["next"]["message"])
+                self.assertIn("audit", body)
+
+        batch = self.client.post(
+            "/api/studio/actions/resolve-batch",
+            json={"actions": [{"action": action, "target_id": target_id} for action, target_id in action_targets]},
+        )
+        self.assertEqual(batch.status_code, 200)
+        batch_body = batch.json()
+        self.assertEqual(batch_body["status"], "manual_required")
+        self.assertEqual(batch_body["summary"]["requested"], len(action_targets))
+        self.assertEqual(batch_body["summary"]["manualRequired"], len(action_targets))
+        self.assertEqual(batch_body["summary"]["skipped"], 0)
+        self.assertEqual(batch_body["skippedActions"], [])
+        self.assertEqual({item["action"] for item in batch_body["manualActions"]}, {action for action, _target_id in action_targets})
+
     def test_dispatch_matrix_covers_all_pages_agents_and_paths(self) -> None:
         matrix = self.client.get("/api/studio/dispatch-matrix")
 

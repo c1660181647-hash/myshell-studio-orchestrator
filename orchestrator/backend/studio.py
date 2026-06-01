@@ -67,6 +67,23 @@ READY_GATE_STATUSES = {"ok", "ready", "client_delegated"}
 BLOCKED_GATE_STATUSES = {"blocked", "error"}
 PENDING_DELIVERY_STATUSES = {"draft", "queued", "running"}
 ISSUE_DELIVERY_STATUSES = {"timeout", "auth_missing", "error"}
+MANUAL_STUDIO_ACTIONS = {
+    "restore-auth",
+    "start-chrome-cdp",
+    "provide-project-id",
+    "inspect-requirement",
+    "inspect-dispatch-matrix",
+    "provide-route-params",
+    "wait-or-refresh",
+    "retry-or-inspect",
+    "restore-readiness",
+    "inspect-gap",
+    "wait-for-adapter",
+    "poll-result",
+    "retry-or-cancel",
+    "inspect-error",
+    "verify-evidence",
+}
 
 PLACEHOLDER_POSTERS = {
     "generate": "/gallery/creative-whale.jpg",
@@ -1622,14 +1639,103 @@ def _manual_action_instruction(action: str, target_id: str) -> dict[str, Any]:
     if action == "start-chrome-cdp":
         return {
             "label": "Start Chrome CDP",
-            "message": "Start Chrome with remote debugging on port 9222 or set CHROME_CDP_URL, then refresh readiness.",
+            "message": "Start Chrome with remote debugging on port 9222 or set MYSHELL_CDP_URL, then refresh readiness.",
             "command": "Google Chrome --remote-debugging-port=9222",
+            "env": "MYSHELL_CDP_URL",
             "targetId": target_id,
         }
     if action == "provide-project-id":
         return {
             "label": "Select a Studio project",
             "message": "Create or restore a Studio project, then rerun the delivery audit with project_id.",
+            "endpoint": "/api/studio/projects",
+            "targetId": target_id,
+        }
+    if action == "provide-route-params":
+        return {
+            "label": "Provide route parameters",
+            "message": "Select a source media segment or provide the required route params, then rerun dispatch preview or coverage.",
+            "endpoint": "/api/studio/dispatch-preview",
+            "targetId": target_id,
+        }
+    if action == "wait-or-refresh":
+        return {
+            "label": "Wait or refresh evidence",
+            "message": "Wait for adapter evidence, then refresh coverage, handoff snapshot, or the delivery audit.",
+            "endpoint": "/api/studio/coverage",
+            "targetId": target_id,
+        }
+    if action == "retry-or-inspect":
+        return {
+            "label": "Retry or inspect target",
+            "message": "Inspect the latest job/evidence for this target, then retry the job or rerun dispatch when appropriate.",
+            "endpoint": "/api/studio/jobs/{job_id}",
+            "retryEndpoint": "/api/studio/jobs/{job_id}/retry",
+            "targetId": target_id,
+        }
+    if action == "restore-readiness":
+        return {
+            "label": "Restore dispatch readiness",
+            "message": "Inspect the page auth, route params, and dispatch matrix entry, then restore the missing readiness prerequisite.",
+            "endpoint": "/api/studio/dispatch-matrix",
+            "targetId": target_id,
+        }
+    if action == "inspect-dispatch-matrix":
+        return {
+            "label": "Inspect dispatch matrix",
+            "message": "Open the dispatch matrix and check auth status, missing route params, executor, and recommended action.",
+            "endpoint": "/api/studio/dispatch-matrix",
+            "targetId": target_id,
+        }
+    if action == "inspect-requirement":
+        return {
+            "label": "Inspect delivery requirement",
+            "message": "Inspect the named readiness or audit requirement and resolve the reported gate before retrying handoff.",
+            "endpoint": "/api/studio/delivery-audit",
+            "targetId": target_id,
+        }
+    if action == "inspect-gap":
+        return {
+            "label": "Inspect handoff gap",
+            "message": "Inspect the handoff snapshot gap and related coverage evidence before retrying the target.",
+            "endpoint": "/api/studio/handoff-snapshot",
+            "targetId": target_id,
+        }
+    if action == "wait-for-adapter":
+        return {
+            "label": "Wait for adapter",
+            "message": "The adapter has not produced accepted evidence yet. Wait, refresh the job queue, or cancel if it is stale.",
+            "endpoint": "/api/studio/jobs/{job_id}",
+            "cancelEndpoint": "/api/studio/jobs/{job_id}/cancel",
+            "targetId": target_id,
+        }
+    if action == "poll-result":
+        return {
+            "label": "Poll result",
+            "message": "Refresh the job evidence and adapter result until a terminal state or accepted media is available.",
+            "endpoint": "/api/studio/jobs/{job_id}/evidence",
+            "targetId": target_id,
+        }
+    if action == "retry-or-cancel":
+        return {
+            "label": "Retry or cancel job",
+            "message": "Retry the job if the adapter can run again, or cancel it to unblock the delivery queue.",
+            "retryEndpoint": "/api/studio/jobs/{job_id}/retry",
+            "cancelEndpoint": "/api/studio/jobs/{job_id}/cancel",
+            "targetId": target_id,
+        }
+    if action == "inspect-error":
+        return {
+            "label": "Inspect job error",
+            "message": "Open the job evidence trail, review the adapter error, then retry, cancel, or fix the adapter input.",
+            "endpoint": "/api/studio/jobs/{job_id}/evidence",
+            "targetId": target_id,
+        }
+    if action == "verify-evidence":
+        return {
+            "label": "Verify evidence",
+            "message": "Confirm the job has accepted fresh media or explicit failure evidence before treating it as deliverable.",
+            "endpoint": "/api/studio/jobs/{job_id}/evidence",
             "targetId": target_id,
         }
     return {
@@ -1675,8 +1781,7 @@ async def _resolve_studio_action(payload: dict[str, Any] | None) -> dict[str, An
             "audit": audit,
         }
 
-    manual_actions = {"restore-auth", "start-chrome-cdp", "provide-project-id", "inspect-requirement", "inspect-dispatch-matrix"}
-    if action in manual_actions:
+    if action in MANUAL_STUDIO_ACTIONS:
         audit = await _studio_delivery_audit(project_id=project_id, source_segment_id=source_segment_id)
         return {
             "status": "manual_required",
@@ -1723,7 +1828,7 @@ async def _resolve_studio_actions_batch(payload: dict[str, Any] | None) -> dict[
         target_id = item["targetId"]
         if action == "verify-ready":
             verify_page_ids.append(target_id)
-        elif action in {"restore-auth", "start-chrome-cdp", "provide-project-id", "inspect-requirement", "inspect-dispatch-matrix"}:
+        elif action in MANUAL_STUDIO_ACTIONS:
             manual_actions.append(
                 {
                     "status": "manual_required",

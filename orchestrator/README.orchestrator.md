@@ -9,8 +9,8 @@ The backend exposes the Studio API for MyShell page and agent dispatch. It keeps
 - `GET /api/agents` lists the dispatch graph agents.
 - `POST /api/studio/run` routes a prompt, creates a persisted job, and streams Studio SSE events.
 - `GET /api/studio/delivery-audit` returns machine-readable acceptance status, requirements, operator `actions`, artifacts, and embedded reports for deployment handoff. Artifacts include both stable template `endpoint` values and concrete `url` values with project/session/source context filled in. Add `download=1` to receive `myshell-studio-audit-{project_id|current}.json` as a JSON attachment.
-- `POST /api/studio/actions/resolve` executes safe audit actions such as targeted `verify-ready`, or returns explicit `manual_required` instructions for auth/CDP/project-selection actions.
-- `POST /api/studio/actions/resolve-batch` executes multiple safe audit actions, preserves manual actions with instructions, and returns a refreshed audit.
+- `POST /api/studio/actions/resolve` executes safe audit actions such as targeted `verify-ready`, or returns explicit `manual_required` instructions for every handoff/audit operator action.
+- `POST /api/studio/actions/resolve-batch` executes multiple safe audit actions, preserves every manual operator action with instructions, and returns a refreshed audit.
 - `GET /api/studio/projects` lists recent persisted projects for Studio restore.
 - `GET /api/studio/projects/{project_id}/delivery-bundle?download=1` returns the operator handoff bundle as a downloadable JSON attachment.
 - `GET /api/studio/jobs` lists the persisted queue with optional `project_id` and `status` filters.
