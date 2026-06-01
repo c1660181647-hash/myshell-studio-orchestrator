@@ -578,6 +578,7 @@ function StudioDeliveryAuditStrip({
 }) {
   const summary = audit?.summary;
   const gaps = (audit?.requirements || []).filter((item) => item.status !== 'ready');
+  const actions = audit?.actions || [];
 
   return (
     <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
@@ -608,9 +609,21 @@ function StudioDeliveryAuditStrip({
           <Pill tone={summary.missingCoreAgents ? 'danger' : 'success'}>{`${summary.agents} agents`}</Pill>
           <Pill tone={summary.readyTargets === summary.pages ? 'success' : 'hot'}>{`${summary.readyTargets}/${summary.pages} ready`}</Pill>
           <Pill tone={summary.missingParams ? 'hot' : 'default'}>{`${summary.missingParams} missing params`}</Pill>
+          <Pill tone={summary.actions ? 'hot' : 'success'}>{`${summary.actions || 0} actions`}</Pill>
           <Pill>{`${summary.artifacts} artifacts`}</Pill>
         </>
       )}
+      {actions.slice(0, 3).map((action) => (
+        <span
+          key={action.id}
+          title={action.message || action.reason || action.action}
+          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2"
+        >
+          <GitBranch size={12} className="text-dreamy-brand-hot-v2" />
+          <span className="max-w-[130px] truncate">{action.targetName || action.targetId || action.kind}</span>
+          <span className="text-Cr-text-subtlest-v2">{action.action}</span>
+        </span>
+      ))}
       {gaps.slice(0, 5).map((item) => {
         const tone = healthPillTone(item.status);
         const Icon = tone === 'success' ? CheckCircle2 : AlertTriangle;
@@ -635,6 +648,7 @@ function StudioDeliveryAuditStrip({
           </span>
         );
       })}
+      {actions.length > 3 && <Pill tone="hot">{`+${actions.length - 3} actions`}</Pill>}
     </div>
   );
 }

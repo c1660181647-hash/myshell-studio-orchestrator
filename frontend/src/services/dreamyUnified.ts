@@ -481,8 +481,10 @@ export interface StudioDeliveryAudit {
     readinessReady: number;
     jobs: number;
     artifacts: number;
+    actions: number;
   };
   requirements: StudioDeliveryAuditRequirement[];
+  actions: StudioHandoffAction[];
   artifacts: StudioHandoffArtifact[];
   reports: {
     health: StudioHealth;

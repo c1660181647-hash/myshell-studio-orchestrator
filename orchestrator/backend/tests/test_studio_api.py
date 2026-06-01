@@ -431,6 +431,12 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("download=1", str(body["artifacts"]))
         self.assertEqual(body["reports"]["dispatchMatrix"]["summary"]["total"], body["summary"]["pages"])
         self.assertEqual(body["reports"]["handoffSnapshot"]["projectId"], meta["projectId"])
+        self.assertEqual(body["summary"]["actions"], len(body["actions"]))
+        self.assertGreater(body["summary"]["actions"], 0)
+        action_by_target = {action.get("targetId"): action for action in body["actions"] if action.get("targetId")}
+        self.assertIn("myshell-art", action_by_target)
+        self.assertEqual(action_by_target["myshell-art"]["action"], "restore-auth")
+        self.assertEqual(body["actions"], body["reports"]["handoffSnapshot"]["actions"])
 
         download = self.client.get(
             "/api/studio/delivery-audit",

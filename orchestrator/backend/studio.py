@@ -1224,6 +1224,47 @@ def _requirement_from_gate(gate: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _audit_action_for_requirement(requirement: dict[str, Any]) -> dict[str, Any] | None:
+    status = str(requirement.get("status") or "")
+    if status == "ready":
+        return None
+    requirement_id = str(requirement.get("id") or "")
+    label = str(requirement.get("label") or requirement_id)
+    action = "inspect-requirement"
+    if status == "auth_missing" or "auth" in requirement_id or "cookie" in requirement_id:
+        action = "restore-auth"
+    elif requirement_id == "chrome-cdp":
+        action = "start-chrome-cdp"
+    elif requirement_id == "handoff-snapshot":
+        action = "provide-project-id"
+    elif requirement_id == "dispatch-matrix":
+        action = "inspect-dispatch-matrix"
+    return {
+        "id": f"audit:{action}:{requirement_id}",
+        "action": action,
+        "kind": "requirement",
+        "targetId": requirement_id,
+        "targetName": label,
+        "status": status,
+        "reason": status,
+        "message": str(requirement.get("message") or ""),
+    }
+
+
+def _delivery_audit_actions(
+    requirements: list[dict[str, Any]],
+    handoff: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if handoff and isinstance(handoff.get("actions"), list):
+        return list(handoff.get("actions") or [])
+    actions: list[dict[str, Any]] = []
+    for requirement in requirements:
+        action = _audit_action_for_requirement(requirement)
+        if action:
+            actions.append(action)
+    return actions
+
+
 async def _studio_readiness() -> dict[str, Any]:
     health = await runtime_health(STUDIO_STORE.path)
     components = health.get("components") or {}
@@ -1478,6 +1519,7 @@ async def _studio_delivery_audit(
         )
 
     artifacts = _delivery_audit_artifacts(project.get("projectId") if project else None)
+    actions = _delivery_audit_actions(requirements, handoff)
     return {
         "status": _audit_status(requirements),
         "checkedAt": now_iso(),
@@ -1495,8 +1537,10 @@ async def _studio_delivery_audit(
             "readinessReady": (readiness.get("summary") or {}).get("ready", 0),
             "jobs": (overview.get("totals") or {}).get("jobs", 0),
             "artifacts": len(artifacts),
+            "actions": len(actions),
         },
         "requirements": requirements,
+        "actions": actions,
         "artifacts": artifacts,
         "reports": {
             "health": readiness.get("health") or {},
