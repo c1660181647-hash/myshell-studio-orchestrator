@@ -12,7 +12,7 @@ from fastapi import Body, File, Form, HTTPException, Query, UploadFile
 from sse_starlette.sse import EventSourceResponse
 
 from bot_catalog import MYSHELL_BOTS, get_bot_by_slug
-from studio_registry import get_page, list_studio_agents, list_studio_pages, page_for_bot
+from studio_registry import get_page, list_studio_agents, list_studio_pages, page_for_dispatch
 from studio_runtime import adapter_auth_status
 from studio_store import STUDIO_STORE
 
@@ -559,7 +559,7 @@ def register_studio_routes(app) -> None:
             )
 
             route = await choose_route(prompt, has_image, normalized_action, source_segment)
-            page = page_for_bot(route["bot"], page_id)
+            page = page_for_dispatch(route["bot"], page_id, prompt)
             route["action"] = normalized_action
             route["sourceSegmentId"] = source_segment_id
             route["sourceSummary"] = (

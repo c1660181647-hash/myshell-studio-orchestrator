@@ -1,8 +1,127 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from bot_catalog import MYSHELL_BOTS
+
+DEFAULT_PAGE_ID = "dreamy-miniapp"
+
+PAGE_INTENT_KEYWORDS = {
+    "explore": [
+        "explore",
+        "discover",
+        "browse bots",
+        "bot discovery",
+        "首页",
+        "探索",
+        "发现",
+    ],
+    "ai-picks": [
+        "ai picks",
+        "aipicks",
+        "recommendations",
+        "recommended",
+        "featured",
+        "精选",
+        "推荐",
+    ],
+    "bot-detail": [
+        "bot detail",
+        "bot details",
+        "bot profile",
+        "agent detail",
+        "agent profile",
+        "详情",
+        "机器人详情",
+    ],
+    "upload": [
+        "upload",
+        "image upload",
+        "upload image",
+        "create with image",
+        "start from image",
+        "上传",
+        "上传图片",
+        "传图",
+    ],
+    "tag-generator": [
+        "tag generator",
+        "self director",
+        "director",
+        "prompt composer",
+        "compose tags",
+        "标签生成",
+        "标签",
+        "自导演",
+    ],
+    "library": [
+        "library",
+        "generated library",
+        "generated works",
+        "my works",
+        "my creations",
+        "results",
+        "gallery",
+        "history",
+        "作品库",
+        "生成历史",
+        "历史作品",
+        "我的作品",
+        "结果",
+    ],
+    "energy-store": [
+        "energy",
+        "energy store",
+        "buy energy",
+        "store",
+        "packs",
+        "credits",
+        "能量",
+        "能量商店",
+        "购买能量",
+        "充值",
+    ],
+    "earn": [
+        "earn",
+        "rewards",
+        "earn stats",
+        "bonus",
+        "赚取",
+        "奖励",
+        "收益",
+    ],
+    "share-invite": [
+        "share invite",
+        "invite",
+        "invite friends",
+        "referral",
+        "share link",
+        "邀请",
+        "分享邀请",
+        "推荐链接",
+    ],
+    "settings": [
+        "settings",
+        "preferences",
+        "profile settings",
+        "account settings",
+        "language",
+        "设置",
+        "偏好",
+        "语言",
+        "账号设置",
+    ],
+    "checkin": [
+        "checkin",
+        "check in",
+        "daily checkin",
+        "daily claim",
+        "签到",
+        "每日签到",
+        "打卡",
+    ],
+}
 
 
 def _navigation_page(
@@ -204,10 +323,52 @@ def get_page(page_id: str | None) -> dict[str, Any]:
     return pages[0]
 
 
+def _keyword_matches(normalized_message: str, keyword: str) -> bool:
+    normalized_keyword = keyword.lower().strip()
+    if not normalized_keyword:
+        return False
+    if re.fullmatch(r"[a-z0-9-]+", normalized_keyword):
+        return re.search(rf"(?<![a-z0-9]){re.escape(normalized_keyword)}(?![a-z0-9])", normalized_message) is not None
+    return normalized_keyword in normalized_message
+
+
+def infer_navigation_page_from_prompt(message: str) -> dict[str, Any] | None:
+    normalized = (message or "").lower()
+    if not normalized:
+        return None
+
+    best_page_id = ""
+    best_score = 0
+    for page_id, keywords in PAGE_INTENT_KEYWORDS.items():
+        score = sum(1 for keyword in keywords if _keyword_matches(normalized, keyword))
+        if score > best_score:
+            best_page_id = page_id
+            best_score = score
+
+    if not best_page_id:
+        return None
+    return get_page(best_page_id)
+
+
 def page_for_bot(bot: dict[str, Any], preferred_page_id: str | None = None) -> dict[str, Any]:
     preferred = get_page(preferred_page_id)
     if preferred["id"] == "myshell-art" or preferred.get("executor") == "navigation":
         return preferred
     # Dreamy stays the default because its authenticated miniapp APIs are already
     # used by the current frontend executor.
-    return get_page("dreamy-miniapp")
+    return get_page(DEFAULT_PAGE_ID)
+
+
+def page_for_dispatch(
+    bot: dict[str, Any],
+    preferred_page_id: str | None = None,
+    message: str = "",
+) -> dict[str, Any]:
+    preferred = get_page(preferred_page_id)
+    if preferred["id"] != DEFAULT_PAGE_ID:
+        return page_for_bot(bot, preferred_page_id)
+
+    inferred = infer_navigation_page_from_prompt(message)
+    if inferred:
+        return inferred
+    return page_for_bot(bot, preferred_page_id)

@@ -184,6 +184,40 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(job_payloads[-1]["status"], "done")
         self.assertEqual(job_payloads[-1]["evidence"]["accepted"], True)
 
+    def test_default_run_infers_navigation_page_from_prompt(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "open my generated library"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        route = next(payload for name, payload in events if name == "route")
+        execution = next(payload for name, payload in events if name == "execution_request")
+        job_payloads = [payload["job"] for name, payload in events if name == "job"]
+
+        self.assertEqual(route["page"]["id"], "library")
+        self.assertEqual(execution["executor"], "navigation")
+        self.assertEqual(execution["navigationPath"], "/library")
+        self.assertEqual(job_payloads[-1]["status"], "done")
+
+    def test_explicit_navigation_page_selection_wins_over_prompt_inference(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "open my generated library", "page_id": "upload"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        route = next(payload for name, payload in events if name == "route")
+        execution = next(payload for name, payload in events if name == "execution_request")
+
+        self.assertEqual(route["page"]["id"], "upload")
+        self.assertEqual(execution["executor"], "navigation")
+        self.assertTrue(execution["navigationPath"].startswith("/upload?slug_id="), execution["navigationPath"])
+
     def test_contextual_navigation_pages_include_required_query_params(self) -> None:
         expected = {
             "bot-detail": "/bot?slug_id=",
