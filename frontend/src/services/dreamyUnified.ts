@@ -412,6 +412,46 @@ export interface StudioHandoffSnapshot {
   };
 }
 
+export interface StudioDeliveryBundle {
+  status: 'ready' | 'needs_attention' | 'blocked' | string;
+  readyForDelivery: boolean;
+  checkedAt: string;
+  projectId: string;
+  conversationId: string;
+  sourceSegmentId?: string | null;
+  sourceMediaUrl?: string;
+  summary: {
+    pages: number;
+    covered: number;
+    readyUnverified: number;
+    blockedPages: number;
+    jobs: number;
+    acceptedJobs: number;
+    dispatchSessions: number;
+    dispatchTargets: number;
+    pendingTargets: number;
+    visitedTargets: number;
+    completedTargets: number;
+    skippedTargets: number;
+    errorTargets: number;
+    blockedTargets: number;
+    gaps: number;
+    actions: number;
+    artifacts: number;
+  };
+  targetStatusCounts: Record<string, number>;
+  artifacts: StudioHandoffArtifact[];
+  dispatchSessions: StudioDispatchSession[];
+  acceptedJobs: StudioJob[];
+  remainingTargets: StudioDispatchSessionTarget[];
+  skippedTargets: StudioDispatchBatchSkip[];
+  reports: {
+    deliveryReport: StudioProjectDeliveryReport;
+    coverage: StudioCoverageReport;
+    handoffSnapshot: StudioHandoffSnapshot;
+  };
+}
+
 export interface StudioDispatchBatchTarget {
   id: string;
   pageId: StudioApi | string;
@@ -895,6 +935,20 @@ export async function fetchStudioProjectDeliveryReport(projectId: string): Promi
   const response = await fetch(`${getStudioProjectEndpoint(projectId)}/delivery-report`);
   if (!response.ok) {
     throw new Error(`Studio delivery report ${response.status}: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+export async function fetchStudioProjectDeliveryBundle(options: {
+  projectId: string;
+  sourceSegmentId?: string;
+}): Promise<StudioDeliveryBundle> {
+  const params = new URLSearchParams();
+  if (options.sourceSegmentId) params.set('source_segment_id', options.sourceSegmentId);
+  const query = params.toString();
+  const response = await fetch(`${getStudioProjectEndpoint(options.projectId)}/delivery-bundle${query ? `?${query}` : ''}`);
+  if (!response.ok) {
+    throw new Error(`Studio delivery bundle ${response.status}: ${response.statusText}`);
   }
   return response.json();
 }

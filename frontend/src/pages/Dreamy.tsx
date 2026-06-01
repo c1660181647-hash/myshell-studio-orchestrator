@@ -52,6 +52,7 @@ import {
   fetchStudioJobs,
   fetchStudioOverview,
   fetchStudioPages,
+  fetchStudioProjectDeliveryBundle,
   fetchStudioProjectDeliveryReport,
   fetchStudioProjects,
   fetchStudioReadiness,
@@ -82,6 +83,7 @@ import type {
   StudioAgentNode,
   StudioApi,
   StudioCoverageReport,
+  StudioDeliveryBundle,
   StudioDispatchMatrix,
   StudioDispatchMatrixEntry,
   StudioDispatchBatchPlan,
@@ -631,12 +633,18 @@ function StudioCoverageStrip({
 
 function StudioHandoffSnapshotStrip({
   snapshot,
+  bundle,
   refreshing,
+  bundling,
   onRefresh,
+  onBundle,
 }: {
   snapshot: StudioHandoffSnapshot | null;
+  bundle: StudioDeliveryBundle | null;
   refreshing: boolean;
+  bundling: boolean;
   onRefresh: () => void;
+  onBundle: () => void;
 }) {
   const summary = snapshot?.summary;
   const gaps = snapshot?.gaps || [];
@@ -656,6 +664,15 @@ function StudioHandoffSnapshotStrip({
         <RefreshCcw size={12} className={refreshing ? 'animate-spin' : ''} />
         Refresh Handoff
       </button>
+      <button
+        type="button"
+        disabled={bundling}
+        onClick={onBundle}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <Download size={12} className={bundling ? 'animate-pulse' : ''} />
+        Bundle
+      </button>
       {summary && (
         <>
           <Pill tone={snapshot?.readyForDelivery ? 'success' : 'default'}>
@@ -669,6 +686,12 @@ function StudioHandoffSnapshotStrip({
           </Pill>
           <Pill>{`${summary.jobs} jobs`}</Pill>
           <Pill>{`${snapshot?.artifacts.length || 0} artifacts`}</Pill>
+        </>
+      )}
+      {bundle && (
+        <>
+          <Pill tone={bundle.summary.acceptedJobs ? 'success' : 'default'}>{`${bundle.summary.acceptedJobs} accepted jobs`}</Pill>
+          <Pill>{`${bundle.summary.artifacts} bundle artifacts`}</Pill>
         </>
       )}
       {gaps.slice(0, 4).map((gap) => (
@@ -1985,6 +2008,7 @@ export default function Dreamy() {
   const [dispatchMatrix, setDispatchMatrix] = useState<StudioDispatchMatrix | null>(null);
   const [coverageReport, setCoverageReport] = useState<StudioCoverageReport | null>(null);
   const [handoffSnapshot, setHandoffSnapshot] = useState<StudioHandoffSnapshot | null>(null);
+  const [deliveryBundle, setDeliveryBundle] = useState<StudioDeliveryBundle | null>(null);
   const [dispatchBatchPlan, setDispatchBatchPlan] = useState<StudioDispatchBatchPlan | null>(null);
   const [dispatchSession, setDispatchSession] = useState<StudioDispatchSession | null>(null);
   const [queueStatusFilter, setQueueStatusFilter] = useState<StudioStatus | 'all'>('all');
@@ -1994,6 +2018,7 @@ export default function Dreamy() {
   const [bulkActionRunning, setBulkActionRunning] = useState<'cancel' | 'retry' | null>(null);
   const [coverageVerifyRunning, setCoverageVerifyRunning] = useState(false);
   const [handoffRefreshing, setHandoffRefreshing] = useState(false);
+  const [deliveryBundleLoading, setDeliveryBundleLoading] = useState(false);
   const [dispatchBatchPlanning, setDispatchBatchPlanning] = useState(false);
   const [dispatchSessionRunning, setDispatchSessionRunning] = useState(false);
 
@@ -2117,6 +2142,58 @@ export default function Dreamy() {
     },
     [applyHandoffSnapshot, project?.projectId, studioContextSourceSegmentId],
   );
+
+  const refreshDeliveryBundle = useCallback(async () => {
+    if (deliveryBundleLoading) return null;
+    const projectId = project?.projectId || readLastStudioProjectId() || undefined;
+    if (!projectId) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: 'Delivery bundle needs a restored Studio project first.',
+          createdAt: nowIso(),
+        },
+      ]);
+      return null;
+    }
+    setDeliveryBundleLoading(true);
+    try {
+      const bundle = await fetchStudioProjectDeliveryBundle({
+        projectId,
+        sourceSegmentId: studioContextSourceSegmentId,
+      });
+      setDeliveryBundle(bundle);
+      applyHandoffSnapshot(bundle.reports.handoffSnapshot);
+      setDeliveryReport(bundle.reports.deliveryReport);
+      setCoverageReport(bundle.reports.coverage);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: `Delivery bundle ${bundle.status}: ${bundle.summary.acceptedJobs} accepted jobs, ${bundle.summary.completedTargets} completed targets, ${bundle.summary.artifacts} artifacts.`,
+          createdAt: nowIso(),
+        },
+      ]);
+      return bundle;
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: 'Delivery bundle refresh failed.',
+          error: error instanceof Error ? error.message : String(error),
+          createdAt: nowIso(),
+        },
+      ]);
+      return null;
+    } finally {
+      setDeliveryBundleLoading(false);
+    }
+  }, [applyHandoffSnapshot, deliveryBundleLoading, project?.projectId, studioContextSourceSegmentId]);
 
   const planDispatchBatch = useCallback(async () => {
     if (dispatchBatchPlanning) return;
@@ -2894,6 +2971,7 @@ export default function Dreamy() {
     setDeliveryReport(null);
     setCoverageReport(null);
     setHandoffSnapshot(null);
+    setDeliveryBundle(null);
     setDispatchBatchPlan(null);
     setDispatchSession(null);
     forgetLastStudioProjectId();
@@ -3148,8 +3226,11 @@ export default function Dreamy() {
       />
       <StudioHandoffSnapshotStrip
         snapshot={handoffSnapshot}
+        bundle={deliveryBundle}
         refreshing={handoffRefreshing}
+        bundling={deliveryBundleLoading}
         onRefresh={() => void refreshHandoffSnapshot({ interactive: true })}
+        onBundle={() => void refreshDeliveryBundle()}
       />
       <StudioDispatchBatchStrip
         plan={dispatchBatchPlan}

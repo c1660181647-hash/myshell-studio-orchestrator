@@ -71,6 +71,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `GET /api/studio/projects`
 - `GET /api/studio/projects/{project_id}`
 - `GET /api/studio/projects/{project_id}/delivery-report`
+- `GET /api/studio/projects/{project_id}/delivery-bundle`
 - `POST /api/studio/projects/{project_id}/client-result`
 - `POST /api/studio/projects/{project_id}/reset`
 - `GET /api/studio/jobs`
@@ -107,6 +108,8 @@ If a navigation target is missing required route params, the `execution_request`
 `/api/studio/projects` and `/api/studio/jobs` power restart recovery and queue views. Job responses include `evidenceTrail`, and retry responses include a client `executionRequest` when the adapter must run from the authenticated miniapp browser. The job queue supports `status`, `page_id`, and `agent_id` filters for the Studio dispatch center.
 
 `/api/studio/projects/{project_id}/delivery-report` turns a persisted project into a handoff report with `handoffStatus`, `readyForHandoff`, status counts, accepted/pending/issue evidence counts, unresolved actions, and each segment's evidence trail. The Studio UI surfaces this as the Project Delivery strip above the page registry.
+
+`/api/studio/projects/{project_id}/delivery-bundle` packages the current project into a single operator handoff payload. It includes the project delivery report, coverage report, handoff snapshot, recent dispatch sessions, accepted jobs, remaining targets, skipped targets, and artifact endpoints for reproducing each report. Pass optional `source_segment_id` to keep contextual page routes and source-media coverage aligned with the active segment. The Studio UI exposes this from the Handoff strip as Bundle.
 
 `POST /api/studio/jobs/bulk` applies `cancel` or `retry` to filtered queue slices using the same `status`, `page_id`, `agent_id`, and `project_id` filters. Bulk cancel skips terminal `done` and `cancelled` jobs by default unless `include_terminal` is set. It returns updated jobs, skipped jobs, touched projects, and retry execution requests when adapter execution must resume.
 

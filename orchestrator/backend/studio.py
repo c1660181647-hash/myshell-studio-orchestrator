@@ -870,6 +870,42 @@ def _handoff_artifacts(project_id: str | None) -> list[dict[str, Any]]:
     return artifacts
 
 
+def _delivery_bundle_artifacts(project_id: str, sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    artifacts = [
+        *_handoff_artifacts(project_id),
+        {
+            "id": "project",
+            "label": "Project",
+            "endpoint": "/api/studio/projects/{project_id}",
+            "projectId": project_id,
+        },
+        {
+            "id": "delivery-bundle",
+            "label": "Delivery Bundle",
+            "endpoint": "/api/studio/projects/{project_id}/delivery-bundle",
+            "projectId": project_id,
+        },
+        {
+            "id": "jobs",
+            "label": "Jobs",
+            "endpoint": "/api/studio/jobs",
+            "projectId": project_id,
+            "query": {"project_id": project_id},
+        },
+    ]
+    for session in sessions:
+        artifacts.append(
+            {
+                "id": f"dispatch-session:{session.get('sessionId')}",
+                "label": f"Dispatch Session {session.get('sessionId')}",
+                "endpoint": "/api/studio/dispatch-sessions/{session_id}",
+                "sessionId": session.get("sessionId"),
+                "projectId": project_id,
+            }
+        )
+    return artifacts
+
+
 def _coverage_gap_action(page: dict[str, Any]) -> tuple[str, str]:
     missing_params = page.get("missingRouteParams") or []
     dispatch_status = str(page.get("dispatchStatus") or "")
@@ -1755,6 +1791,76 @@ def _project_delivery_report(project: StudioProject) -> dict[str, Any]:
     }
 
 
+async def _project_delivery_bundle(
+    project: StudioProject,
+    source_segment_id: str | None = None,
+) -> dict[str, Any]:
+    _sync_project_jobs(project)
+    project_id = project["projectId"]
+    delivery_report = _project_delivery_report(project)
+    coverage = _studio_coverage(project_id=project_id, source_segment_id=source_segment_id)
+    handoff = await _studio_handoff_snapshot(project_id=project_id, source_segment_id=source_segment_id)
+    dispatch_sessions = [
+        _dispatch_session_view(session)
+        for session in STUDIO_STORE.list_dispatch_sessions(project_id=project_id, limit=50)
+    ]
+    jobs = [_job_with_evidence(job) for job in STUDIO_STORE.list_jobs(project_id=project_id, limit=500)]
+    accepted_jobs = [job for job in jobs if job and (job.get("evidence") or {}).get("accepted")]
+
+    all_targets = [target for session in dispatch_sessions for target in session.get("targets", [])]
+    skipped_targets = [target for session in dispatch_sessions for target in session.get("skippedTargets", [])]
+    target_status_counts = {
+        "pending": sum(1 for target in all_targets if target.get("status", "pending") == "pending"),
+        "visited": sum(1 for target in all_targets if target.get("status") == "visited"),
+        "completed": sum(1 for target in all_targets if target.get("status") == "completed"),
+        "skipped": sum(1 for target in all_targets if target.get("status") == "skipped"),
+        "error": sum(1 for target in all_targets if target.get("status") == "error"),
+        "blocked": len(skipped_targets),
+        "total": len(all_targets) + len(skipped_targets),
+    }
+    artifacts = _delivery_bundle_artifacts(project_id, dispatch_sessions)
+
+    return {
+        "status": handoff.get("status"),
+        "readyForDelivery": handoff.get("readyForDelivery", False),
+        "checkedAt": now_iso(),
+        "projectId": project_id,
+        "conversationId": project.get("conversationId", ""),
+        "sourceSegmentId": coverage.get("sourceSegmentId"),
+        "sourceMediaUrl": coverage.get("sourceMediaUrl", ""),
+        "summary": {
+            "pages": (coverage.get("summary") or {}).get("total", 0),
+            "covered": (coverage.get("summary") or {}).get("covered", 0),
+            "readyUnverified": (coverage.get("summary") or {}).get("readyUnverified", 0),
+            "blockedPages": (coverage.get("summary") or {}).get("blocked", 0),
+            "jobs": len([job for job in jobs if job]),
+            "acceptedJobs": len(accepted_jobs),
+            "dispatchSessions": len(dispatch_sessions),
+            "dispatchTargets": target_status_counts["total"],
+            "pendingTargets": target_status_counts["pending"],
+            "visitedTargets": target_status_counts["visited"],
+            "completedTargets": target_status_counts["completed"],
+            "skippedTargets": target_status_counts["skipped"],
+            "errorTargets": target_status_counts["error"],
+            "blockedTargets": target_status_counts["blocked"],
+            "gaps": len(handoff.get("gaps") or []),
+            "actions": len(handoff.get("actions") or []),
+            "artifacts": len(artifacts),
+        },
+        "targetStatusCounts": target_status_counts,
+        "artifacts": artifacts,
+        "dispatchSessions": dispatch_sessions,
+        "acceptedJobs": accepted_jobs,
+        "remainingTargets": [target for target in all_targets if target.get("status", "pending") == "pending"],
+        "skippedTargets": skipped_targets,
+        "reports": {
+            "deliveryReport": delivery_report,
+            "coverage": coverage,
+            "handoffSnapshot": handoff,
+        },
+    }
+
+
 def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dict[str, Any]:
     page = get_page(job.get("pageId"))
     segment = _find_segment(project, job.get("segmentId")) or {
@@ -2354,6 +2460,16 @@ def register_studio_routes(app) -> None:
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         return _project_delivery_report(project)
+
+    @app.get("/api/studio/projects/{project_id}/delivery-bundle")
+    async def get_studio_project_delivery_bundle(
+        project_id: str,
+        source_segment_id: Optional[str] = Query(None),
+    ):
+        project = _get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return await _project_delivery_bundle(project, source_segment_id=source_segment_id)
 
     @app.post("/api/studio/projects/{project_id}/client-result")
     async def post_studio_client_result(project_id: str, payload: dict[str, Any] = Body(...)):

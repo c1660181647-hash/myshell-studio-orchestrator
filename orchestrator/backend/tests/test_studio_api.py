@@ -1321,6 +1321,84 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(ready_body["segments"][0]["evidence"]["mediaUrl"], "https://example.com/fresh-delivery.png")
         self.assertEqual(ready_body["unresolvedActions"], [])
 
+    def test_project_delivery_bundle_packages_sessions_coverage_and_evidence(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            with self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={"message": "create delivery bundle source image"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                events = _sse_events("".join(response.iter_text()))
+
+            meta = next(payload for name, payload in events if name == "meta")
+            execution = next(payload for name, payload in events if name == "execution_request")
+            update = self.client.post(
+                f"/api/studio/projects/{meta['projectId']}/client-result",
+                json={
+                    "segmentId": execution["segmentId"],
+                    "jobId": execution["jobId"],
+                    "status": "done",
+                    "taskId": "task_delivery_bundle_source",
+                    "url": "https://example.com/delivery-bundle-source.png",
+                    "posterUrl": "https://example.com/delivery-bundle-source.png",
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            session_response = self.client.post(
+                "/api/studio/dispatch-sessions",
+                json={
+                    "project_id": meta["projectId"],
+                    "source_segment_id": execution["segmentId"],
+                    "limit": 50,
+                },
+            )
+            self.assertEqual(session_response.status_code, 200)
+            session = session_response.json()
+            target = session["nextTarget"]
+            completed = self.client.post(
+                f"/api/studio/dispatch-sessions/{session['sessionId']}/targets/{target['id']}",
+                json={"status": "completed", "evidence": {"accepted": True, "completedFrom": "bundle-test"}},
+            )
+            self.assertEqual(completed.status_code, 200)
+
+            bundle = self.client.get(
+                f"/api/studio/projects/{meta['projectId']}/delivery-bundle",
+                params={"source_segment_id": execution["segmentId"]},
+            )
+
+        self.assertEqual(bundle.status_code, 200)
+        self.assertEqual(bundle.headers.get("content-type", "").split(";")[0], "application/json")
+        body = bundle.json()
+        self.assertEqual(body["projectId"], meta["projectId"])
+        self.assertEqual(body["sourceSegmentId"], execution["segmentId"])
+        self.assertIn(body["status"], {"ready", "blocked", "needs_attention"})
+        self.assertEqual(body["summary"]["dispatchSessions"], 1)
+        self.assertEqual(body["summary"]["completedTargets"], 1)
+        self.assertGreaterEqual(body["summary"]["pendingTargets"], 10)
+        self.assertGreaterEqual(body["summary"]["acceptedJobs"], 2)
+        self.assertEqual(body["reports"]["deliveryReport"]["projectId"], meta["projectId"])
+        self.assertEqual(body["reports"]["coverage"]["projectId"], meta["projectId"])
+        self.assertEqual(body["reports"]["handoffSnapshot"]["projectId"], meta["projectId"])
+
+        first_session = body["dispatchSessions"][0]
+        self.assertEqual(first_session["sessionId"], session["sessionId"])
+        self.assertEqual(first_session["summary"]["completed"], 1)
+        accepted_job_ids = {job["jobId"] for job in body["acceptedJobs"]}
+        completed_target = next(item for item in first_session["targets"] if item["id"] == target["id"])
+        self.assertIn(completed_target["evidenceJobId"], accepted_job_ids)
+        self.assertEqual(completed_target["evidence"]["dispatchSessionId"], session["sessionId"])
+
+        artifact_endpoints = {artifact["endpoint"] for artifact in body["artifacts"]}
+        self.assertIn("/api/studio/projects/{project_id}/delivery-bundle", artifact_endpoints)
+        self.assertIn("/api/studio/dispatch-sessions/{session_id}", artifact_endpoints)
+
     def test_job_queue_can_filter_by_page_and_agent(self) -> None:
         with self.client.stream(
             "POST",
