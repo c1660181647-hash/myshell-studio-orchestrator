@@ -451,6 +451,79 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(download_body["projectId"], meta["projectId"])
         self.assertEqual(download_body["requirements"][0]["id"], body["requirements"][0]["id"])
 
+    def test_studio_action_resolve_executes_verification_and_explains_manual_auth(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            with self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={"message": "create action resolve source image"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                events = _sse_events("".join(response.iter_text()))
+
+            meta = next(payload for name, payload in events if name == "meta")
+            execution = next(payload for name, payload in events if name == "execution_request")
+            source_url = "https://example.com/action-resolve-source.png"
+            update = self.client.post(
+                f"/api/studio/projects/{meta['projectId']}/client-result",
+                json={
+                    "segmentId": execution["segmentId"],
+                    "jobId": execution["jobId"],
+                    "status": "done",
+                    "taskId": "task_action_resolve_source",
+                    "url": source_url,
+                    "posterUrl": source_url,
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            verify_action = self.client.post(
+                "/api/studio/actions/resolve",
+                json={
+                    "action": "verify-ready",
+                    "target_id": "explore",
+                    "project_id": meta["projectId"],
+                    "source_segment_id": execution["segmentId"],
+                },
+            )
+
+            auth_action = self.client.post(
+                "/api/studio/actions/resolve",
+                json={
+                    "action": "restore-auth",
+                    "target_id": "myshell-art",
+                    "project_id": meta["projectId"],
+                    "source_segment_id": execution["segmentId"],
+                },
+            )
+
+        self.assertEqual(verify_action.status_code, 200)
+        verify_body = verify_action.json()
+        self.assertEqual(verify_body["status"], "executed")
+        self.assertEqual(verify_body["action"], "verify-ready")
+        self.assertEqual(verify_body["targetId"], "explore")
+        self.assertEqual(verify_body["resultType"], "coverage-verify")
+        self.assertEqual(verify_body["result"]["createdCount"], 1)
+        self.assertEqual(verify_body["result"]["jobs"][0]["pageId"], "explore")
+        self.assertEqual(verify_body["result"]["coverage"]["projectId"], meta["projectId"])
+        self.assertEqual(verify_body["audit"]["projectId"], meta["projectId"])
+        self.assertEqual(verify_body["audit"]["summary"]["actions"], len(verify_body["audit"]["actions"]))
+        self.assertNotIn("explore", {action.get("targetId") for action in verify_body["audit"]["actions"]})
+
+        self.assertEqual(auth_action.status_code, 200)
+        auth_body = auth_action.json()
+        self.assertEqual(auth_body["status"], "manual_required")
+        self.assertEqual(auth_body["action"], "restore-auth")
+        self.assertEqual(auth_body["targetId"], "myshell-art")
+        self.assertEqual(auth_body["resultType"], "operator-instruction")
+        self.assertIn("MYSHELL_COOKIES", auth_body["next"]["message"])
+        self.assertEqual(auth_body["audit"]["projectId"], meta["projectId"])
+
     def test_dispatch_matrix_covers_all_pages_agents_and_paths(self) -> None:
         matrix = self.client.get("/api/studio/dispatch-matrix")
 

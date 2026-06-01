@@ -62,6 +62,7 @@ import {
   planStudioDispatchBatch,
   postStudioClientResult,
   resetStudioProject,
+  resolveStudioAction,
   retryStudioJob,
   resolveStudioAssetUrl,
   streamStudioRun,
@@ -95,6 +96,7 @@ import type {
   StudioDispatchPreview,
   StudioExecutor,
   StudioExecutionRequest,
+  StudioHandoffAction,
   StudioHandoffSnapshot,
   StudioHealth,
   StudioJob,
@@ -568,13 +570,17 @@ function StudioReadinessStrip({ readiness }: { readiness: StudioReadiness | null
 function StudioDeliveryAuditStrip({
   audit,
   refreshing,
+  resolvingActionId,
   onRefresh,
   onDownload,
+  onResolveAction,
 }: {
   audit: StudioDeliveryAudit | null;
   refreshing: boolean;
+  resolvingActionId: string | null;
   onRefresh: () => void;
   onDownload: () => void;
+  onResolveAction: (action: StudioHandoffAction) => void;
 }) {
   const summary = audit?.summary;
   const gaps = (audit?.requirements || []).filter((item) => item.status !== 'ready');
@@ -613,17 +619,27 @@ function StudioDeliveryAuditStrip({
           <Pill>{`${summary.artifacts} artifacts`}</Pill>
         </>
       )}
-      {actions.slice(0, 3).map((action) => (
-        <span
-          key={action.id}
-          title={action.message || action.reason || action.action}
-          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2"
-        >
-          <GitBranch size={12} className="text-dreamy-brand-hot-v2" />
-          <span className="max-w-[130px] truncate">{action.targetName || action.targetId || action.kind}</span>
-          <span className="text-Cr-text-subtlest-v2">{action.action}</span>
-        </span>
-      ))}
+      {actions.slice(0, 3).map((action) => {
+        const resolving = resolvingActionId === action.id;
+        return (
+          <button
+            type="button"
+            key={action.id}
+            title={action.message || action.reason || action.action}
+            disabled={Boolean(resolvingActionId)}
+            onClick={() => onResolveAction(action)}
+            className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2 disabled:opacity-60"
+          >
+            {resolving ? (
+              <Loader2 size={12} className="animate-spin text-dreamy-brand-hot-v2" />
+            ) : (
+              <GitBranch size={12} className="text-dreamy-brand-hot-v2" />
+            )}
+            <span className="max-w-[130px] truncate">{action.targetName || action.targetId || action.kind}</span>
+            <span className="text-Cr-text-subtlest-v2">{action.action}</span>
+          </button>
+        );
+      })}
       {gaps.slice(0, 5).map((item) => {
         const tone = healthPillTone(item.status);
         const Icon = tone === 'success' ? CheckCircle2 : AlertTriangle;
@@ -2128,6 +2144,7 @@ export default function Dreamy() {
   const [bulkActionRunning, setBulkActionRunning] = useState<'cancel' | 'retry' | null>(null);
   const [coverageVerifyRunning, setCoverageVerifyRunning] = useState(false);
   const [deliveryAuditRefreshing, setDeliveryAuditRefreshing] = useState(false);
+  const [resolvingAuditActionId, setResolvingAuditActionId] = useState<string | null>(null);
   const [handoffRefreshing, setHandoffRefreshing] = useState(false);
   const [deliveryBundleLoading, setDeliveryBundleLoading] = useState(false);
   const [dispatchBatchPlanning, setDispatchBatchPlanning] = useState(false);
@@ -2792,6 +2809,60 @@ export default function Dreamy() {
     });
   }, []);
 
+  const resolveAuditAction = useCallback(async (action: StudioHandoffAction) => {
+    if (resolvingAuditActionId) return;
+    const targetId = action.targetId || action.pageId || action.segmentId || action.jobId || action.id;
+    if (!targetId) return;
+    setResolvingAuditActionId(action.id);
+    try {
+      const result = await resolveStudioAction({
+        action: action.action,
+        targetId,
+        projectId: project?.projectId || deliveryAudit?.projectId || undefined,
+        sourceSegmentId: studioContextSourceSegmentId || deliveryAudit?.sourceSegmentId || undefined,
+      });
+      if (result.result?.project) mergeProject(result.result.project);
+      result.result?.jobs?.forEach((job) => mergeJob(job));
+      applyDeliveryAudit(result.audit);
+      const nextMessage = result.next?.message ? ` ${result.next.message}` : '';
+      const created = result.result?.createdCount ?? 0;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content:
+            result.resultType === 'coverage-verify'
+              ? `Audit action ${result.action} resolved for ${result.targetId}; verified ${created} target${created === 1 ? '' : 's'}.`
+              : `Audit action ${result.action} needs operator follow-up.${nextMessage}`,
+          createdAt: nowIso(),
+        },
+      ]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: `Audit action ${action.action} could not be resolved.`,
+          error: error instanceof Error ? error.message : String(error),
+          createdAt: nowIso(),
+        },
+      ]);
+    } finally {
+      setResolvingAuditActionId(null);
+    }
+  }, [
+    applyDeliveryAudit,
+    deliveryAudit?.projectId,
+    deliveryAudit?.sourceSegmentId,
+    mergeJob,
+    mergeProject,
+    project?.projectId,
+    resolvingAuditActionId,
+    studioContextSourceSegmentId,
+  ]);
+
   const updateAssistant = useCallback((id: string, patch: Partial<ChatItem>) => {
     setMessages((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }, []);
@@ -3410,8 +3481,10 @@ export default function Dreamy() {
       <StudioDeliveryAuditStrip
         audit={deliveryAudit}
         refreshing={deliveryAuditRefreshing}
+        resolvingActionId={resolvingAuditActionId}
         onRefresh={() => void refreshDeliveryAudit({ interactive: true })}
         onDownload={downloadDeliveryAudit}
+        onResolveAction={(action) => void resolveAuditAction(action)}
       />
       <StudioDeliveryReportStrip projectId={project?.projectId} report={deliveryReport} />
       <StudioCoverageStrip

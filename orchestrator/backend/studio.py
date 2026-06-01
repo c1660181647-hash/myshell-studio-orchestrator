@@ -1554,6 +1554,89 @@ async def _studio_delivery_audit(
     }
 
 
+def _manual_action_instruction(action: str, target_id: str) -> dict[str, Any]:
+    if action == "restore-auth":
+        return {
+            "label": "Restore MyShell auth",
+            "message": "Set MYSHELL_COOKIES or myshell-cookies.json, then restart the backend and refresh readiness.",
+            "env": "MYSHELL_COOKIES",
+            "targetId": target_id,
+        }
+    if action == "start-chrome-cdp":
+        return {
+            "label": "Start Chrome CDP",
+            "message": "Start Chrome with remote debugging on port 9222 or set CHROME_CDP_URL, then refresh readiness.",
+            "command": "Google Chrome --remote-debugging-port=9222",
+            "targetId": target_id,
+        }
+    if action == "provide-project-id":
+        return {
+            "label": "Select a Studio project",
+            "message": "Create or restore a Studio project, then rerun the delivery audit with project_id.",
+            "targetId": target_id,
+        }
+    return {
+        "label": "Inspect Studio action",
+        "message": "Inspect the related requirement, dispatch target, or job evidence before retrying.",
+        "targetId": target_id,
+    }
+
+
+async def _resolve_studio_action(payload: dict[str, Any] | None) -> dict[str, Any]:
+    body = payload or {}
+    action = str(body.get("action") or "").strip()
+    target_id = str(body.get("target_id") or body.get("targetId") or "").strip()
+    project_id = body.get("project_id") or body.get("projectId")
+    source_segment_id = body.get("source_segment_id") or body.get("sourceSegmentId")
+    if not action:
+        raise HTTPException(status_code=400, detail="action is required")
+    if not target_id:
+        raise HTTPException(status_code=400, detail="target_id is required")
+
+    if action == "verify-ready":
+        result = _verify_studio_coverage(
+            project_id=project_id,
+            source_segment_id=source_segment_id,
+            page_ids=[target_id],
+            limit=1,
+        )
+        audit = await _studio_delivery_audit(
+            project_id=result.get("projectId") or project_id,
+            source_segment_id=result.get("sourceSegmentId") or source_segment_id,
+        )
+        created_count = int(result.get("createdCount") or 0)
+        return {
+            "status": "executed" if created_count else "skipped",
+            "checkedAt": now_iso(),
+            "action": action,
+            "targetId": target_id,
+            "projectId": result.get("projectId") or project_id,
+            "sourceSegmentId": result.get("sourceSegmentId") or source_segment_id,
+            "resultType": "coverage-verify",
+            "message": f"Verified {created_count} ready target(s).",
+            "result": result,
+            "audit": audit,
+        }
+
+    manual_actions = {"restore-auth", "start-chrome-cdp", "provide-project-id", "inspect-requirement", "inspect-dispatch-matrix"}
+    if action in manual_actions:
+        audit = await _studio_delivery_audit(project_id=project_id, source_segment_id=source_segment_id)
+        return {
+            "status": "manual_required",
+            "checkedAt": now_iso(),
+            "action": action,
+            "targetId": target_id,
+            "projectId": project_id,
+            "sourceSegmentId": source_segment_id,
+            "resultType": "operator-instruction",
+            "message": "Manual operator action is required.",
+            "next": _manual_action_instruction(action, target_id),
+            "audit": audit,
+        }
+
+    raise HTTPException(status_code=400, detail=f"Unsupported Studio action: {action}")
+
+
 def _cancel_job_record(job: dict[str, Any]) -> tuple[dict[str, Any], StudioProject | None]:
     updated_job = _update_job(
         job,
@@ -2321,6 +2404,10 @@ def register_studio_routes(app) -> None:
             page_ids=[str(page_id) for page_id in page_ids],
             limit=max(1, min(int(body.get("limit") or 50), 100)),
         )
+
+    @app.post("/api/studio/actions/resolve")
+    async def post_studio_action_resolve(payload: Optional[dict[str, Any]] = Body(None)):
+        return await _resolve_studio_action(payload)
 
     @app.post("/api/studio/dispatch-batch")
     async def post_studio_dispatch_batch(payload: Optional[dict[str, Any]] = Body(None)):

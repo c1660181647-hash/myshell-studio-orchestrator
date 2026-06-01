@@ -497,6 +497,26 @@ export interface StudioDeliveryAudit {
   };
 }
 
+export interface StudioActionResolveResult {
+  status: 'executed' | 'skipped' | 'manual_required' | string;
+  checkedAt: string;
+  action: string;
+  targetId: string;
+  projectId?: string | null;
+  sourceSegmentId?: string | null;
+  resultType: 'coverage-verify' | 'operator-instruction' | string;
+  message?: string;
+  next?: {
+    label?: string;
+    message?: string;
+    env?: string;
+    command?: string;
+    targetId?: string;
+  };
+  result?: StudioCoverageVerifyResult;
+  audit: StudioDeliveryAudit;
+}
+
 export interface StudioDispatchBatchTarget {
   id: string;
   pageId: StudioApi | string;
@@ -1175,6 +1195,26 @@ export async function verifyStudioCoverage(options: {
     }),
   });
   if (!response.ok) throw new Error(`Studio coverage verify ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function resolveStudioAction(options: {
+  action: string;
+  targetId: string;
+  projectId?: string;
+  sourceSegmentId?: string;
+}): Promise<StudioActionResolveResult> {
+  const response = await fetch(getStudioRootEndpoint('/api/studio/actions/resolve'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: options.action,
+      target_id: options.targetId,
+      project_id: options.projectId,
+      source_segment_id: options.sourceSegmentId,
+    }),
+  });
+  if (!response.ok) throw new Error(`Studio action resolve ${response.status}: ${response.statusText}`);
   return response.json();
 }
 
