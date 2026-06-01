@@ -279,6 +279,39 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(retry_body["jobs"][0]["attempt"], 2)
         self.assertEqual(retry_body["executionRequests"][0]["jobId"], library_job_id)
 
+    def test_bulk_cancel_skips_terminal_jobs_by_default(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "queue dreamy segment"},
+        ) as response:
+            dreamy_events = _sse_events("".join(response.iter_text()))
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "open my generated library", "page_id": "library"},
+        ) as response:
+            library_events = _sse_events("".join(response.iter_text()))
+
+        dreamy_job_id = next(payload for name, payload in dreamy_events if name == "execution_request")["jobId"]
+        library_job_id = next(payload for name, payload in library_events if name == "execution_request")["jobId"]
+
+        cancelled = self.client.post("/api/studio/jobs/bulk", json={"action": "cancel"})
+        self.assertEqual(cancelled.status_code, 200)
+        body = cancelled.json()
+        self.assertEqual(body["matchedCount"], 1)
+        self.assertEqual(body["skippedCount"], 1)
+        self.assertEqual([job["jobId"] for job in body["jobs"]], [dreamy_job_id])
+        self.assertEqual(body["jobs"][0]["status"], "cancelled")
+        self.assertEqual([job["jobId"] for job in body["skippedJobs"]], [library_job_id])
+        self.assertEqual(body["skippedJobs"][0]["status"], "done")
+        self.assertEqual(self.client.get(f"/api/studio/jobs/{library_job_id}").json()["status"], "done")
+
+        forced = self.client.post("/api/studio/jobs/bulk", json={"action": "cancel", "include_terminal": True})
+        self.assertEqual(forced.status_code, 200)
+        self.assertEqual(forced.json()["matchedCount"], 2)
+        self.assertEqual(self.client.get(f"/api/studio/jobs/{library_job_id}").json()["status"], "cancelled")
+
     def test_health_reports_delivery_components(self) -> None:
         health = self.client.get("/api/health")
         self.assertEqual(health.status_code, 200)

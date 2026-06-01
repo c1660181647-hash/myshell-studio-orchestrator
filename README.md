@@ -72,7 +72,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 
 `/api/studio/projects` and `/api/studio/jobs` power restart recovery and queue views. Job responses include `evidenceTrail`, and retry responses include a client `executionRequest` when the adapter must run from the authenticated miniapp browser. The job queue supports `status`, `page_id`, and `agent_id` filters for the Studio dispatch center.
 
-`POST /api/studio/jobs/bulk` applies `cancel` or `retry` to filtered queue slices using the same `status`, `page_id`, `agent_id`, and `project_id` filters. It returns updated jobs, touched projects, and retry execution requests when adapter execution must resume.
+`POST /api/studio/jobs/bulk` applies `cancel` or `retry` to filtered queue slices using the same `status`, `page_id`, `agent_id`, and `project_id` filters. Bulk cancel skips terminal `done` and `cancelled` jobs by default unless `include_terminal` is set. It returns updated jobs, skipped jobs, touched projects, and retry execution requests when adapter execution must resume.
 
 Contextual miniapp pages receive route parameters automatically: Bot Detail, Upload, and Tag Generator include the selected `slug_id`; Tag Generator also carries source media as `img` when the dispatch starts from an existing segment.
 

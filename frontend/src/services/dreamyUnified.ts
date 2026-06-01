@@ -680,11 +680,14 @@ export async function bulkStudioJobs(options: {
   status?: StudioStatus | string;
   pageId?: StudioApi | string;
   agentId?: string;
+  includeTerminal?: boolean;
   limit?: number;
 }): Promise<{
   action: 'cancel' | 'retry';
   matchedCount: number;
+  skippedCount?: number;
   jobs: StudioJob[];
+  skippedJobs?: StudioJob[];
   projects?: StudioProject[];
   executionRequests?: StudioExecutionRequest[];
 }> {
@@ -697,6 +700,7 @@ export async function bulkStudioJobs(options: {
       status: options.status,
       page_id: options.pageId,
       agent_id: options.agentId,
+      include_terminal: options.includeTerminal,
       limit: options.limit || 100,
     }),
   });

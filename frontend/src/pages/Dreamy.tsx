@@ -2182,7 +2182,9 @@ export default function Dreamy() {
       {
         id: makeId('assistant'),
         role: 'assistant',
-        content: `Bulk ${action} applied to ${result.matchedCount} job${result.matchedCount === 1 ? '' : 's'}.`,
+        content: `Bulk ${action} applied to ${result.matchedCount} job${result.matchedCount === 1 ? '' : 's'}${
+          result.skippedCount ? `; skipped ${result.skippedCount} terminal job${result.skippedCount === 1 ? '' : 's'}` : ''
+        }.`,
         createdAt: nowIso(),
       },
     ]);

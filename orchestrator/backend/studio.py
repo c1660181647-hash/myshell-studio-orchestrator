@@ -33,6 +33,7 @@ VALID_ACTIONS = {"generate", "extend", "restyle", "retry-agent"}
 VALID_STATUSES = {"draft", "queued", "running", "done", "timeout", "auth_missing", "error", "cancelled"}
 READY_AUTH_STATUSES = {"ok", "ready", "client_delegated"}
 STATUS_COUNT_KEYS = ("draft", "queued", "running", "done", "timeout", "auth_missing", "error", "cancelled")
+TERMINAL_CANCEL_STATUSES = {"done", "cancelled"}
 
 PLACEHOLDER_POSTERS = {
     "generate": "/gallery/creative-whale.jpg",
@@ -1150,10 +1151,15 @@ def register_studio_routes(app) -> None:
             agent_id=payload.get("agent_id"),
             limit=int(payload.get("limit") or 100),
         )
+        include_terminal = bool(payload.get("include_terminal"))
         updated_jobs: list[dict[str, Any]] = []
+        skipped_jobs: list[dict[str, Any]] = []
         projects_by_id: dict[str, StudioProject] = {}
         execution_requests: list[dict[str, Any]] = []
         for job in jobs:
+            if action == "cancel" and not include_terminal and job.get("status") in TERMINAL_CANCEL_STATUSES:
+                skipped_jobs.append(_job_with_evidence(job))
+                continue
             if action == "cancel":
                 updated_job, project = _cancel_job_record(job)
                 execution_request = None
@@ -1167,7 +1173,9 @@ def register_studio_routes(app) -> None:
         return {
             "action": action,
             "matchedCount": len(updated_jobs),
+            "skippedCount": len(skipped_jobs),
             "jobs": updated_jobs,
+            "skippedJobs": skipped_jobs,
             "projects": list(projects_by_id.values()),
             "executionRequests": execution_requests,
         }
