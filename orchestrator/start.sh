@@ -2,6 +2,7 @@
 # Art Chat Orchestrator - Start Script
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(cd "$PROJECT_DIR/.." && pwd)"
 SECRETS_FILE="$HOME/.openclaw/personal-secrets.json"
 
 # Load GEMINI_API_KEY
@@ -19,9 +20,9 @@ pkill -f "uvicorn main:app.*8090" 2>/dev/null
 sleep 1
 
 # Build frontend if needed
-if [ ! -d "$PROJECT_DIR/frontend/dist" ]; then
+if [ ! -d "$REPO_DIR/frontend/dist" ]; then
     echo "📦 Building frontend..."
-    cd "$PROJECT_DIR/frontend" && npx vite build
+    cd "$REPO_DIR/frontend" && npx vite build
 fi
 
 # Start backend (serves frontend too)

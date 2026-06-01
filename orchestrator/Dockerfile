@@ -26,23 +26,17 @@ RUN wget -q -O /tmp/chrome-key.pub https://dl.google.com/linux/linux_signing_key
 WORKDIR /app
 
 # Install Python dependencies
-COPY backend/requirements.txt ./
+COPY orchestrator/backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend code
-COPY backend/ ./
+COPY orchestrator/backend/ ./
 
 # Copy built frontend
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
-# Copy static assets
-COPY frontend/public/gallery /app/frontend/dist/gallery
-COPY frontend/public/myshell-logo.svg /app/frontend/dist/myshell-logo.svg
-COPY frontend/public/favicon.ico /app/frontend/dist/favicon.ico
-COPY frontend/public/favicon.svg /app/frontend/dist/favicon.svg
-
 # Copy startup script
-COPY start-cloud.sh /app/start-cloud.sh
+COPY orchestrator/start-cloud.sh /app/start-cloud.sh
 RUN chmod +x /app/start-cloud.sh
 
 # Create directories

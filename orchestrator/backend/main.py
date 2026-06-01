@@ -18,6 +18,8 @@ from sse_starlette.sse import EventSourceResponse
 from orchestrator import orchestrate_stream
 from bot_catalog import MYSHELL_BOTS, PROMPT_GALLERY, get_bots_by_type
 from studio import register_studio_routes
+from studio_runtime import runtime_health
+from studio_store import STUDIO_STORE
 
 
 app = FastAPI(title="Art Chat Orchestrator", version="0.1.0")
@@ -36,7 +38,7 @@ conversations: dict = {}
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "version": "0.1.0"}
+    return await runtime_health(STUDIO_STORE.path)
 
 
 @app.post("/api/chat")
@@ -153,15 +155,27 @@ register_studio_routes(app)
 
 
 # Serve frontend static files
-# Frontend paths — works both locally (backend/ dir) and in Docker (/app/ dir)
+# Frontend paths — works locally from the monorepo and in Docker (/app/ dir)
 _base = os.path.dirname(os.path.abspath(__file__))
-frontend_dist = os.path.join(_base, "..", "frontend", "dist")
-if not os.path.exists(frontend_dist):
-    # Docker layout: /app/main.py + /app/frontend/dist/
-    frontend_dist = os.path.join(_base, "frontend", "dist")
-frontend_public = os.path.join(_base, "..", "frontend", "public")
-if not os.path.exists(frontend_public):
-    frontend_public = os.path.join(_base, "frontend", "public")
+
+
+def _first_existing_path(*paths: str) -> str:
+    for path in paths:
+        if os.path.exists(path):
+            return path
+    return paths[0]
+
+
+frontend_dist = _first_existing_path(
+    os.path.join(_base, "..", "..", "frontend", "dist"),
+    os.path.join(_base, "..", "frontend", "dist"),
+    os.path.join(_base, "frontend", "dist"),
+)
+frontend_public = _first_existing_path(
+    os.path.join(_base, "..", "..", "frontend", "public"),
+    os.path.join(_base, "..", "frontend", "public"),
+    os.path.join(_base, "frontend", "public"),
+)
 
 if os.path.exists(frontend_dist):
     assets_dir = os.path.join(frontend_dist, "assets")

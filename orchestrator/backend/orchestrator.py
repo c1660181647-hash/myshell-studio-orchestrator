@@ -11,8 +11,10 @@ from bot_catalog import (
 
 # Directory for generated images served as static files
 _base = os.path.dirname(os.path.abspath(__file__))
-GENERATED_DIR = os.path.join(_base, "..", "frontend", "dist", "generated")
-if not os.path.exists(os.path.join(_base, "..", "frontend")):
+GENERATED_DIR = os.path.join(_base, "..", "..", "frontend", "dist", "generated")
+if not os.path.exists(os.path.join(_base, "..", "..", "frontend")):
+    GENERATED_DIR = os.path.join(_base, "..", "frontend", "dist", "generated")
+if not os.path.exists(os.path.dirname(GENERATED_DIR)):
     GENERATED_DIR = os.path.join(_base, "frontend", "dist", "generated")
 os.makedirs(GENERATED_DIR, exist_ok=True)
 

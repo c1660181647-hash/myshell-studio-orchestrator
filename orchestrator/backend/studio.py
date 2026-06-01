@@ -3,13 +3,17 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime
+import base64
+from datetime import UTC, datetime
 from typing import Any, Optional
 
 from fastapi import Body, File, Form, HTTPException, UploadFile
 from sse_starlette.sse import EventSourceResponse
 
 from bot_catalog import MYSHELL_BOTS, get_bot_by_slug
+from studio_registry import list_studio_agents, list_studio_pages, page_for_bot
+from studio_runtime import adapter_auth_status
+from studio_store import STUDIO_STORE
 
 try:
     from orchestrator import understand_intent
@@ -25,6 +29,7 @@ PROJECTS: dict[str, StudioProject] = {}
 
 VALID_MODES = {"player", "canvas"}
 VALID_ACTIONS = {"generate", "extend", "restyle", "retry-agent"}
+VALID_STATUSES = {"draft", "queued", "running", "done", "timeout", "auth_missing", "error", "cancelled"}
 
 PLACEHOLDER_POSTERS = {
     "generate": "/gallery/creative-whale.jpg",
@@ -35,7 +40,7 @@ PLACEHOLDER_POSTERS = {
 
 
 def now_iso() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def make_id(prefix: str) -> str:
@@ -50,6 +55,26 @@ def _normalize_action(action: str) -> str:
     return action if action in VALID_ACTIONS else "generate"
 
 
+def _normalize_status(status: str | None) -> str:
+    if status in {"completed", "success"}:
+        return "done"
+    return status if status in VALID_STATUSES else "running"
+
+
+def _save_project(project: StudioProject) -> None:
+    PROJECTS[project["projectId"]] = project
+    STUDIO_STORE.save_project(project)
+
+
+def _get_project(project_id: str) -> Optional[StudioProject]:
+    if project_id in PROJECTS:
+        return PROJECTS[project_id]
+    project = STUDIO_STORE.get_project(project_id)
+    if project:
+        PROJECTS[project_id] = project
+    return project
+
+
 def _segment_type_for_bot(bot: dict[str, Any]) -> str:
     return "video" if bot.get("type") == "image-to-video" else "image"
 
@@ -59,7 +84,17 @@ def _project(project_id: Optional[str] = None, mode: str = "player") -> StudioPr
         project = PROJECTS[project_id]
         project["mode"] = _normalize_mode(mode or project.get("mode", "player"))
         project["updatedAt"] = now_iso()
+        _save_project(project)
         return project
+
+    if project_id:
+        stored = STUDIO_STORE.get_project(project_id)
+        if stored:
+            stored["mode"] = _normalize_mode(mode or stored.get("mode", "player"))
+            stored["updatedAt"] = now_iso()
+            stored["jobs"] = STUDIO_STORE.list_jobs(project_id)
+            _save_project(stored)
+            return stored
 
     new_id = project_id or make_id("project")
     project = {
@@ -70,9 +105,10 @@ def _project(project_id: Optional[str] = None, mode: str = "player") -> StudioPr
         "segments": [],
         "selectedSegmentId": None,
         "agentGraph": default_agent_graph(),
+        "jobs": [],
         "updatedAt": now_iso(),
     }
-    PROJECTS[new_id] = project
+    _save_project(project)
     return project
 
 
@@ -117,7 +153,7 @@ def _set_graph_status(
     graph[1]["detail"] = route.get("sourceSummary") or "Using current prompt"
     graph[2]["status"] = "running" if segment and segment.get("status") in {"queued", "running"} else "done"
     graph[2]["detail"] = f"{route['bot']['name']} via {route['executor']}"
-    graph[3]["status"] = "queued" if segment else "idle"
+    graph[3]["status"] = "queued" if segment and segment.get("status") in {"queued", "running"} else "idle"
     graph[3]["detail"] = "Segment queued in project timeline" if segment else "Waiting for output"
     project["agentGraph"] = graph
     return graph
@@ -217,7 +253,86 @@ def _append_message(project: StudioProject, role: str, content: str, **extra: An
     }
     project["messages"].append(message)
     project["updatedAt"] = now_iso()
+    _save_project(project)
     return message
+
+
+def _evidence(
+    status: str,
+    source: str,
+    *,
+    accepted: bool = False,
+    message: str = "",
+    media_url: str = "",
+    task_id: str = "",
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "source": source,
+        "accepted": accepted,
+        "mediaUrl": media_url,
+        "taskId": task_id,
+        "message": message,
+        "checkedAt": now_iso(),
+    }
+
+
+def _sync_project_jobs(project: StudioProject) -> None:
+    project["jobs"] = STUDIO_STORE.list_jobs(project["projectId"])
+    _save_project(project)
+
+
+def _create_job(
+    project: StudioProject,
+    segment: StudioSegment,
+    route: dict[str, Any],
+    page: dict[str, Any],
+    status: str = "queued",
+) -> dict[str, Any]:
+    auth_status = adapter_auth_status(page["id"])
+    evidence = _evidence(
+        status,
+        page["id"],
+        accepted=False,
+        message="Waiting for fresh adapter result; placeholders are not accepted as completion evidence.",
+    )
+    job = {
+        "jobId": make_id("job"),
+        "projectId": project["projectId"],
+        "segmentId": segment["id"],
+        "pageId": page["id"],
+        "pageName": page["name"],
+        "agentId": "myshell-art-cdp-executor" if page["id"] == "myshell-art" else "dreamy-miniapp-executor",
+        "executor": page["executor"],
+        "api": page["id"],
+        "status": status,
+        "action": segment["action"],
+        "botSlug": segment["botSlug"],
+        "botName": segment["botName"],
+        "botType": route["bot"].get("type"),
+        "prompt": segment["prompt"],
+        "taskId": "",
+        "mediaUrl": "",
+        "posterUrl": segment.get("posterUrl", ""),
+        "authStatus": auth_status,
+        "evidence": evidence,
+        "attempt": 1,
+        "createdAt": now_iso(),
+        "updatedAt": now_iso(),
+    }
+    segment["jobId"] = job["jobId"]
+    segment["authStatus"] = auth_status
+    segment["evidence"] = evidence
+    STUDIO_STORE.save_job(job)
+    _sync_project_jobs(project)
+    return job
+
+
+def _update_job(job: dict[str, Any], **patch: Any) -> dict[str, Any]:
+    job.update({key: value for key, value in patch.items() if value is not None})
+    job["updatedAt"] = now_iso()
+    STUDIO_STORE.save_job(job)
+    return job
 
 
 def _append_queued_segment(
@@ -240,12 +355,20 @@ def _append_queued_segment(
         "parentSegmentId": source_segment_id,
         "status": "queued",
         "taskId": "",
+        "jobId": "",
+        "authStatus": {},
+        "evidence": _evidence(
+            "queued",
+            "placeholder",
+            message="Placeholder poster only; waiting for real adapter output.",
+        ),
         "createdAt": now_iso(),
         "updatedAt": now_iso(),
     }
     project["segments"].append(segment)
     project["selectedSegmentId"] = segment["id"]
     project["updatedAt"] = now_iso()
+    _save_project(project)
     return segment
 
 
@@ -255,6 +378,14 @@ def _event(event: str, payload: StudioEvent) -> dict[str, str]:
 
 
 def register_studio_routes(app) -> None:
+    @app.get("/api/pages")
+    async def get_studio_pages():
+        return {"pages": list_studio_pages()}
+
+    @app.get("/api/agents")
+    async def get_studio_agents():
+        return {"agents": list_studio_agents()}
+
     @app.post("/api/studio/run")
     async def run_studio(
         message: str = Form(""),
@@ -262,6 +393,7 @@ def register_studio_routes(app) -> None:
         mode: str = Form("player"),
         action: str = Form("generate"),
         source_segment_id: Optional[str] = Form(None),
+        page_id: str = Form("dreamy-miniapp"),
         agent_graph: Optional[str] = Form(None),
         image: Optional[UploadFile] = File(None),
     ):
@@ -283,7 +415,10 @@ def register_studio_routes(app) -> None:
             except json.JSONDecodeError:
                 pass
 
-        has_image = image is not None
+        image_data = None
+        if image is not None:
+            image_data = base64.b64encode(await image.read()).decode()
+        has_image = image_data is not None
         source_segment = _find_segment(project, source_segment_id)
         _append_message(
             project,
@@ -305,11 +440,15 @@ def register_studio_routes(app) -> None:
             )
 
             route = await choose_route(prompt, has_image, normalized_action, source_segment)
+            page = page_for_bot(route["bot"], page_id)
             route["action"] = normalized_action
             route["sourceSegmentId"] = source_segment_id
             route["sourceSummary"] = (
                 f"Using segment {source_segment_id}" if source_segment_id else "Starting from prompt"
             )
+            route["page"] = page
+            route["api"] = page["id"]
+            route["executor"] = page["executor"]
             yield _event("route", route)
 
             yield _event(
@@ -328,6 +467,7 @@ def register_studio_routes(app) -> None:
                 normalized_action,
                 source_segment_id,
             )
+            job = _create_job(project, segment, route, page)
             graph = _set_graph_status(project, route, segment)
             _append_message(
                 project,
@@ -335,13 +475,16 @@ def register_studio_routes(app) -> None:
                 f"Queued {route['bot']['name']} for {normalized_action}.",
                 route=route,
                 segmentId=segment["id"],
+                jobId=job["jobId"],
             )
 
             yield _event(
                 "execution_request",
                 {
                     "executor": route["executor"],
-                    "api": "dreamy-miniapp",
+                    "api": page["id"],
+                    "page": page,
+                    "jobId": job["jobId"],
                     "segmentId": segment["id"],
                     "botSlug": route["bot"]["slug"],
                     "botName": route["bot"]["name"],
@@ -351,8 +494,102 @@ def register_studio_routes(app) -> None:
                     "sourceSegment": source_segment,
                     "agentGraph": graph,
                     "segment": segment,
+                    "authStatus": job["authStatus"],
+                    "evidence": job["evidence"],
                 },
             )
+            yield _event("job", {"job": job})
+
+            if page["id"] == "myshell-art":
+                auth_status = adapter_auth_status(page["id"])
+                if auth_status["status"] == "auth_missing":
+                    segment["status"] = "auth_missing"
+                    segment["authStatus"] = auth_status
+                    segment["evidence"] = _evidence(
+                        "auth_missing",
+                        "myshell-art",
+                        message="MyShell Art cookies are missing; no generation was attempted.",
+                    )
+                    segment["updatedAt"] = now_iso()
+                    _update_job(
+                        job,
+                        status="auth_missing",
+                        authStatus=auth_status,
+                        evidence=segment["evidence"],
+                    )
+                    _set_graph_status(project, route, segment)
+                    _save_project(project)
+                    _sync_project_jobs(project)
+                    yield _event("job", {"job": STUDIO_STORE.get_job(job["jobId"])})
+                elif route["bot"]["type"] in {"image-to-image", "image-to-video"} and not image_data:
+                    segment["status"] = "error"
+                    segment["evidence"] = _evidence(
+                        "error",
+                        "myshell-art",
+                        message="This MyShell Art bot requires an uploaded source image.",
+                    )
+                    segment["updatedAt"] = now_iso()
+                    _update_job(job, status="error", evidence=segment["evidence"])
+                    _set_graph_status(project, route, segment)
+                    _save_project(project)
+                    _sync_project_jobs(project)
+                    yield _event("job", {"job": STUDIO_STORE.get_job(job["jobId"])})
+                else:
+                    segment["status"] = "running"
+                    segment["updatedAt"] = now_iso()
+                    _update_job(job, status="running")
+                    _save_project(project)
+                    _sync_project_jobs(project)
+                    yield _event(
+                        "progress",
+                        {
+                            "step": "myshell-art",
+                            "message": "Running MyShell Art through the CDP bridge",
+                            "progress": 45,
+                        },
+                    )
+                    try:
+                        from myshell_bridge import generate_via_bot
+
+                        result = await generate_via_bot(
+                            bot_slug=route["bot"]["slug"],
+                            prompt=route.get("optimizedPrompt") or prompt,
+                            gen_button=(get_bot_by_slug(route["bot"]["slug"]) or {}).get("gen_button", ""),
+                            image_data=image_data,
+                        )
+                        if result.get("status") == "done" and result.get("output_url"):
+                            segment["status"] = "done"
+                            segment["url"] = result["output_url"]
+                            segment["posterUrl"] = result["output_url"]
+                            segment["evidence"] = _evidence(
+                                "done",
+                                "myshell-art",
+                                accepted=True,
+                                media_url=result["output_url"],
+                                message="Fresh output URL extracted after generation.",
+                            )
+                            _update_job(
+                                job,
+                                status="done",
+                                mediaUrl=result["output_url"],
+                                posterUrl=result["output_url"],
+                                evidence=segment["evidence"],
+                            )
+                        else:
+                            error_message = result.get("message", "MyShell Art generation did not return output media.")
+                            status = "timeout" if "timed out" in error_message.lower() else "error"
+                            segment["status"] = status
+                            segment["evidence"] = _evidence(status, "myshell-art", message=error_message)
+                            _update_job(job, status=status, evidence=segment["evidence"])
+                    except Exception as exc:
+                        segment["status"] = "error"
+                        segment["evidence"] = _evidence("error", "myshell-art", message=str(exc))
+                        _update_job(job, status="error", evidence=segment["evidence"])
+                    segment["updatedAt"] = now_iso()
+                    _set_graph_status(project, route, segment)
+                    _save_project(project)
+                    _sync_project_jobs(project)
+                    yield _event("job", {"job": STUDIO_STORE.get_job(job["jobId"])})
 
             yield _event(
                 "project",
@@ -367,6 +604,7 @@ def register_studio_routes(app) -> None:
                     "status": "queued",
                     "projectId": project["projectId"],
                     "segmentId": segment["id"],
+                    "jobId": job["jobId"],
                 },
             )
 
@@ -374,14 +612,15 @@ def register_studio_routes(app) -> None:
 
     @app.get("/api/studio/projects/{project_id}")
     async def get_studio_project(project_id: str):
-        project = PROJECTS.get(project_id)
+        project = _get_project(project_id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
+        _sync_project_jobs(project)
         return project
 
     @app.post("/api/studio/projects/{project_id}/client-result")
     async def post_studio_client_result(project_id: str, payload: dict[str, Any] = Body(...)):
-        project = PROJECTS.get(project_id)
+        project = _get_project(project_id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
@@ -402,10 +641,26 @@ def register_studio_routes(app) -> None:
                 "parentSegmentId": payload.get("parentSegmentId"),
                 "status": "running",
                 "taskId": "",
+                "jobId": payload.get("jobId", ""),
+                "authStatus": payload.get("authStatus") or adapter_auth_status("dreamy-miniapp"),
+                "evidence": {},
                 "createdAt": now_iso(),
                 "updatedAt": now_iso(),
             }
             project["segments"].append(segment)
+
+        normalized_status = _normalize_status(payload.get("status"))
+        if normalized_status == "done" and not payload.get("url"):
+            normalized_status = "error"
+            payload = {
+                **payload,
+                "status": "error",
+                "evidence": _evidence(
+                    "error",
+                    payload.get("source") or "dreamy-miniapp",
+                    message="Done status rejected because no media URL was supplied.",
+                ),
+            }
 
         for key in (
             "type",
@@ -418,9 +673,27 @@ def register_studio_routes(app) -> None:
             "parentSegmentId",
             "status",
             "taskId",
+            "jobId",
+            "authStatus",
+            "evidence",
         ):
             if key in payload and payload[key] is not None:
                 segment[key] = payload[key]
+        segment["status"] = normalized_status
+        if "evidence" not in payload:
+            segment["evidence"] = _evidence(
+                normalized_status,
+                payload.get("source") or "dreamy-miniapp",
+                accepted=normalized_status == "done" and bool(segment.get("url")),
+                media_url=segment.get("url") or "",
+                task_id=segment.get("taskId") or "",
+                message=(
+                    "Fresh Dreamy task media accepted."
+                    if normalized_status == "done" and segment.get("url")
+                    else "Client result registered; waiting for final media."
+                ),
+            )
+        segment.setdefault("authStatus", adapter_auth_status("dreamy-miniapp"))
         segment["updatedAt"] = now_iso()
         project["selectedSegmentId"] = segment["id"]
         project["updatedAt"] = now_iso()
@@ -444,10 +717,79 @@ def register_studio_routes(app) -> None:
             f"Segment {segment['id']} is {segment.get('status', 'updated')}.",
             segmentId=segment["id"],
         )
-        return {"project": project, "segment": segment}
+        job = None
+        job_id = segment.get("jobId") or payload.get("jobId")
+        if job_id:
+            job = STUDIO_STORE.get_job(job_id)
+        if not job:
+            job = STUDIO_STORE.find_job_by_segment(project_id, segment["id"])
+        if job:
+            segment["jobId"] = job["jobId"]
+            job = _update_job(
+                job,
+                status=normalized_status,
+                taskId=segment.get("taskId") or job.get("taskId"),
+                mediaUrl=segment.get("url") or job.get("mediaUrl"),
+                posterUrl=segment.get("posterUrl") or job.get("posterUrl"),
+                evidence=segment.get("evidence"),
+                authStatus=segment.get("authStatus"),
+            )
+        _sync_project_jobs(project)
+        return {"project": project, "segment": segment, "job": job}
 
     @app.post("/api/studio/projects/{project_id}/reset")
     async def reset_studio_project(project_id: str):
         if project_id in PROJECTS:
             del PROJECTS[project_id]
+        STUDIO_STORE.delete_project(project_id)
         return {"projectId": project_id, "status": "reset"}
+
+    @app.get("/api/studio/jobs/{job_id}")
+    async def get_studio_job(job_id: str):
+        job = STUDIO_STORE.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job
+
+    @app.post("/api/studio/jobs/{job_id}/cancel")
+    async def cancel_studio_job(job_id: str):
+        job = STUDIO_STORE.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        job = _update_job(
+            job,
+            status="cancelled",
+            evidence=_evidence("cancelled", job.get("pageId", "studio"), message="Cancelled by Studio operator."),
+        )
+        project = _get_project(job["projectId"])
+        if project:
+            segment = _find_segment(project, job["segmentId"])
+            if segment:
+                segment["status"] = "cancelled"
+                segment["evidence"] = job["evidence"]
+                segment["updatedAt"] = now_iso()
+            project["updatedAt"] = now_iso()
+            _sync_project_jobs(project)
+        return {"job": job, "project": project}
+
+    @app.post("/api/studio/jobs/{job_id}/retry")
+    async def retry_studio_job(job_id: str):
+        job = STUDIO_STORE.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        job = _update_job(
+            job,
+            status="queued",
+            attempt=int(job.get("attempt") or 1) + 1,
+            evidence=_evidence("queued", job.get("pageId", "studio"), message="Retry queued; waiting for adapter execution."),
+        )
+        project = _get_project(job["projectId"])
+        if project:
+            segment = _find_segment(project, job["segmentId"])
+            if segment:
+                segment["status"] = "queued"
+                segment["evidence"] = job["evidence"]
+                segment["updatedAt"] = now_iso()
+            project["updatedAt"] = now_iso()
+            _sync_project_jobs(project)
+        return {"job": job, "project": project}

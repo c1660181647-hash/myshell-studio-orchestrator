@@ -11,6 +11,8 @@ import type { GenerateResponse, GenerateResultResponse } from '../types';
 export type UnifiedMode = 'orchestrator' | 'miniapp' | 'monitor';
 export type StudioMode = 'player' | 'canvas';
 export type StudioAction = 'generate' | 'extend' | 'restyle' | 'retry-agent';
+export type StudioStatus = 'draft' | 'queued' | 'running' | 'done' | 'timeout' | 'auth_missing' | 'error' | 'cancelled';
+export type StudioApi = 'dreamy-miniapp' | 'myshell-art';
 
 export interface OrchestratorBotRef {
   id?: string;
@@ -73,8 +75,69 @@ export interface MonitorSnapshot {
 export interface StudioAgentNode {
   id: string;
   label: string;
-  status: 'idle' | 'queued' | 'running' | 'done' | 'error';
+  status: 'idle' | StudioStatus;
   detail?: string;
+}
+
+export interface StudioEvidence {
+  status: StudioStatus | string;
+  source: string;
+  accepted: boolean;
+  mediaUrl?: string;
+  taskId?: string;
+  message?: string;
+  checkedAt?: string;
+}
+
+export interface StudioAuthStatus {
+  status: 'ready' | 'client_delegated' | 'auth_missing' | 'unavailable' | string;
+  mode?: string;
+  message?: string;
+}
+
+export interface StudioPageAdapter {
+  id: StudioApi;
+  name: string;
+  kind: string;
+  baseUrl: string;
+  executor: 'client' | 'server';
+  authMode: string;
+  status: string;
+  botCount?: number;
+  capabilities: string[];
+}
+
+export interface StudioAgentCapability {
+  id: string;
+  label: string;
+  pageId: string;
+  role: string;
+  capabilities: string[];
+}
+
+export interface StudioJob {
+  jobId: string;
+  projectId: string;
+  segmentId: string;
+  pageId: StudioApi | string;
+  pageName: string;
+  agentId: string;
+  executor: 'client' | 'server';
+  api: StudioApi;
+  status: StudioStatus;
+  action: StudioAction;
+  botSlug: string;
+  botName: string;
+  botType?: string;
+  prompt: string;
+  taskId?: string;
+  mediaUrl?: string;
+  posterUrl?: string;
+  authStatus?: StudioAuthStatus;
+  evidence?: StudioEvidence;
+  attempt?: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface StudioSegment {
@@ -87,8 +150,11 @@ export interface StudioSegment {
   botName: string;
   action: StudioAction;
   parentSegmentId?: string;
-  status: 'queued' | 'running' | 'done' | 'error';
+  status: StudioStatus;
   taskId?: string;
+  jobId?: string;
+  authStatus?: StudioAuthStatus;
+  evidence?: StudioEvidence;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -112,6 +178,7 @@ export interface StudioProject {
   segments: StudioSegment[];
   selectedSegmentId?: string | null;
   agentGraph: StudioAgentNode[];
+  jobs?: StudioJob[];
   updatedAt: string;
 }
 
@@ -125,6 +192,8 @@ export interface StudioRouteEvent {
   sourceSegmentId?: string;
   sourceSummary?: string;
   executor: 'client' | 'server';
+  api?: StudioApi;
+  page?: StudioPageAdapter;
   bot: {
     slug: string;
     name: string;
@@ -145,7 +214,9 @@ export interface StudioProgressEvent {
 export interface StudioExecutionRequest {
   type?: 'execution_request';
   executor: 'client' | 'server';
-  api: 'dreamy-miniapp' | 'myshell-art';
+  api: StudioApi;
+  page?: StudioPageAdapter;
+  jobId: string;
   segmentId: string;
   botSlug: string;
   botName: string;
@@ -155,6 +226,8 @@ export interface StudioExecutionRequest {
   sourceSegment?: StudioSegment | null;
   agentGraph?: StudioAgentNode[];
   segment: StudioSegment;
+  authStatus?: StudioAuthStatus;
+  evidence?: StudioEvidence;
 }
 
 export interface StudioProjectEvent {
@@ -168,7 +241,8 @@ export type StudioRunEvent =
   | StudioProgressEvent
   | StudioExecutionRequest
   | StudioProjectEvent
-  | ({ type?: 'done'; status: string; projectId: string; segmentId?: string })
+  | ({ type?: 'job'; job: StudioJob })
+  | ({ type?: 'done'; status: string; projectId: string; segmentId?: string; jobId?: string })
   | ({ type?: 'error'; message: string });
 
 export interface StreamStudioRunOptions {
@@ -177,6 +251,7 @@ export interface StreamStudioRunOptions {
   action: StudioAction;
   projectId?: string | null;
   sourceSegmentId?: string | null;
+  pageId?: StudioApi | string;
   agentGraph?: StudioAgentNode[];
   imageFile?: File | null;
   signal?: AbortSignal;
@@ -195,6 +270,10 @@ export interface StudioClientResultInput {
   action?: StudioAction;
   parentSegmentId?: string;
   taskId?: string;
+  jobId?: string;
+  source?: string;
+  evidence?: StudioEvidence;
+  authStatus?: StudioAuthStatus;
 }
 
 function stripTrailingSlash(value: string): string {
@@ -219,6 +298,17 @@ export function getStudioRunEndpoint(): string {
 export function getStudioProjectEndpoint(projectId: string): string {
   const base = getOrchestratorBaseUrl();
   const path = `/api/studio/projects/${encodeURIComponent(projectId)}`;
+  return base ? `${base}${path}` : path;
+}
+
+export function getStudioJobEndpoint(jobId: string): string {
+  const base = getOrchestratorBaseUrl();
+  const path = `/api/studio/jobs/${encodeURIComponent(jobId)}`;
+  return base ? `${base}${path}` : path;
+}
+
+function getStudioRootEndpoint(path: string): string {
+  const base = getOrchestratorBaseUrl();
   return base ? `${base}${path}` : path;
 }
 
@@ -334,6 +424,7 @@ export async function streamStudioRun({
   action,
   projectId,
   sourceSegmentId,
+  pageId,
   agentGraph,
   imageFile,
   signal,
@@ -345,6 +436,7 @@ export async function streamStudioRun({
   formData.append('action', action);
   if (projectId) formData.append('project_id', projectId);
   if (sourceSegmentId) formData.append('source_segment_id', sourceSegmentId);
+  if (pageId) formData.append('page_id', pageId);
   if (agentGraph) formData.append('agent_graph', JSON.stringify(agentGraph));
   if (imageFile) formData.append('image', imageFile);
 
@@ -364,10 +456,30 @@ export async function fetchStudioProject(projectId: string): Promise<StudioProje
   return response.json();
 }
 
+export async function fetchStudioPages(): Promise<StudioPageAdapter[]> {
+  const response = await fetch(getStudioRootEndpoint('/api/pages'));
+  if (!response.ok) throw new Error(`Studio pages ${response.status}: ${response.statusText}`);
+  const body = await response.json();
+  return body.pages || [];
+}
+
+export async function fetchStudioAgents(): Promise<StudioAgentCapability[]> {
+  const response = await fetch(getStudioRootEndpoint('/api/agents'));
+  if (!response.ok) throw new Error(`Studio agents ${response.status}: ${response.statusText}`);
+  const body = await response.json();
+  return body.agents || [];
+}
+
+export async function fetchStudioJob(jobId: string): Promise<StudioJob> {
+  const response = await fetch(getStudioJobEndpoint(jobId));
+  if (!response.ok) throw new Error(`Studio job ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
 export async function postStudioClientResult(
   projectId: string,
   result: StudioClientResultInput,
-): Promise<{ project: StudioProject; segment: StudioSegment }> {
+): Promise<{ project: StudioProject; segment: StudioSegment; job?: StudioJob | null }> {
   const response = await fetch(`${getStudioProjectEndpoint(projectId)}/client-result`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -376,6 +488,18 @@ export async function postStudioClientResult(
   if (!response.ok) {
     throw new Error(`Studio client result ${response.status}: ${response.statusText}`);
   }
+  return response.json();
+}
+
+export async function cancelStudioJob(jobId: string): Promise<{ project?: StudioProject | null; job: StudioJob }> {
+  const response = await fetch(`${getStudioJobEndpoint(jobId)}/cancel`, { method: 'POST' });
+  if (!response.ok) throw new Error(`Studio cancel ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function retryStudioJob(jobId: string): Promise<{ project?: StudioProject | null; job: StudioJob }> {
+  const response = await fetch(`${getStudioJobEndpoint(jobId)}/retry`, { method: 'POST' });
+  if (!response.ok) throw new Error(`Studio retry ${response.status}: ${response.statusText}`);
   return response.json();
 }
 

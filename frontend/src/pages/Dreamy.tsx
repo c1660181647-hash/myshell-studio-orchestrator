@@ -39,18 +39,26 @@ import exampleMultiple from '../assets/example-multiple.png';
 import { useEnergy } from '../contexts/EnergyContext';
 import { fetchGenerateResult } from '../services/api';
 import {
+  cancelStudioJob,
   extractGenerateTaskMedia,
+  fetchStudioAgents,
+  fetchStudioPages,
   postStudioClientResult,
   resetStudioProject,
+  retryStudioJob,
   resolveStudioAssetUrl,
   streamStudioRun,
   submitDreamyMiniappJob,
 } from '../services/dreamyUnified';
 import type {
+  StudioAgentCapability,
   StudioAction,
   StudioAgentNode,
+  StudioApi,
   StudioExecutionRequest,
+  StudioJob,
   StudioMode,
+  StudioPageAdapter,
   StudioProgressEvent,
   StudioProject,
   StudioRouteEvent,
@@ -126,9 +134,16 @@ function nowIso(): string {
 
 function statusTone(status?: string): string {
   if (status === 'done') return 'text-Cr-text-success-default-v2';
-  if (status === 'error') return 'text-Cr-text-critical-default-v2';
+  if (status === 'error' || status === 'timeout' || status === 'auth_missing') return 'text-Cr-text-critical-default-v2';
   if (status === 'running' || status === 'queued') return 'text-dreamy-brand-hot-v2';
   return 'text-Cr-text-subtler-v2';
+}
+
+function statusPillTone(status?: string): 'default' | 'hot' | 'success' | 'danger' {
+  if (status === 'done') return 'success';
+  if (status === 'error' || status === 'timeout' || status === 'auth_missing') return 'danger';
+  if (status === 'running' || status === 'queued') return 'hot';
+  return 'default';
 }
 
 function actionLabel(action: StudioAction): string {
@@ -281,7 +296,14 @@ function createLocalProject(mode: StudioMode, message: string, action: StudioAct
     botName: action === 'extend' ? 'Sora Video Generator' : 'Dreamy Agent',
     action,
     parentSegmentId: parent?.id,
-    status: 'queued',
+    status: 'draft',
+    evidence: {
+      status: 'draft',
+      source: 'local-fallback',
+      accepted: false,
+      message: 'Local draft only; not accepted as delivery evidence.',
+      checkedAt: nowIso(),
+    },
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -298,6 +320,7 @@ function createLocalProject(mode: StudioMode, message: string, action: StudioAct
       { id: 'dreamy-executor', label: 'Dreamy Executor', status: 'queued', detail: 'Waiting for Studio backend' },
       { id: 'timeline', label: 'Timeline', status: 'queued', detail: 'Draft segment added' },
     ],
+    jobs: [],
     updatedAt: nowIso(),
   };
 }
@@ -527,19 +550,25 @@ function SegmentCard({
 function PreviewPanel({
   project,
   selectedSegment,
+  selectedJob,
   agentsOpen,
   onToggleAgents,
   onSelectSegment,
   onDeleteSegment,
+  onCancelJob,
+  onRetryJob,
   onAction,
   submitting,
 }: {
   project: StudioProject | null;
   selectedSegment?: StudioSegment | null;
+  selectedJob?: StudioJob | null;
   agentsOpen: boolean;
   onToggleAgents: () => void;
   onSelectSegment: (segmentId: string) => void;
   onDeleteSegment: (segmentId: string) => void;
+  onCancelJob: (jobId: string) => void;
+  onRetryJob: (jobId: string) => void;
   onAction: (action: StudioAction, prompt?: string, source?: StudioSegment | null) => void;
   submitting: boolean;
 }) {
@@ -547,6 +576,9 @@ function PreviewPanel({
   const graph = project?.agentGraph?.length ? project.agentGraph : EMPTY_GRAPH;
   const runningAgents = graph.filter((node) => node.status === 'running' || node.status === 'queued').length;
   const segments = project?.segments || [];
+  const evidence = selectedSegment?.evidence || selectedJob?.evidence;
+  const authStatus = selectedSegment?.authStatus || selectedJob?.authStatus;
+  const activeJobId = selectedSegment?.jobId || selectedJob?.jobId;
 
   return (
     <section className="relative flex min-h-0 flex-col rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2">
@@ -596,9 +628,7 @@ function PreviewPanel({
 
           {selectedSegment && (
             <div className="absolute left-3 top-3 flex flex-wrap gap-2">
-              <Pill tone={selectedSegment.status === 'error' ? 'danger' : selectedSegment.status === 'done' ? 'success' : 'hot'}>
-                {selectedSegment.status}
-              </Pill>
+              <Pill tone={statusPillTone(selectedSegment.status)}>{selectedSegment.status}</Pill>
               <Pill>{selectedSegment.botName}</Pill>
             </div>
           )}
@@ -630,6 +660,46 @@ function PreviewPanel({
           </button>
         </div>
 
+        {selectedSegment && (
+          <div className="grid gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 p-3 text-xs text-Cr-text-subtle-v2 sm:grid-cols-[1fr_auto]">
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold text-Cr-text-default-v2">Evidence</span>
+                <Pill tone={evidence?.accepted ? 'success' : statusPillTone(selectedSegment.status)}>
+                  {evidence?.accepted ? 'accepted' : evidence?.status || selectedSegment.status}
+                </Pill>
+                {authStatus?.status && <Pill tone={authStatus.status === 'auth_missing' ? 'danger' : 'default'}>{authStatus.status}</Pill>}
+              </div>
+              <div className="truncate text-Cr-text-subtler-v2">
+                {evidence?.message || authStatus?.message || 'Waiting for adapter evidence.'}
+              </div>
+              <div className="truncate text-[11px] text-Cr-text-subtlest-v2">
+                {activeJobId || selectedSegment.taskId || 'No job id yet'}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={!activeJobId || selectedSegment.status === 'cancelled'}
+                onClick={() => activeJobId && onCancelJob(activeJobId)}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 font-semibold text-Cr-text-subtle-v2 disabled:opacity-40"
+              >
+                <X size={13} />
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!activeJobId || submitting}
+                onClick={() => activeJobId && onRetryJob(activeJobId)}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 font-semibold text-Cr-text-subtle-v2 disabled:opacity-40"
+              >
+                <RefreshCcw size={13} />
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="flex gap-2 overflow-x-auto pb-1">
           {segments.map((segment) => (
             <SegmentCard
@@ -646,6 +716,22 @@ function PreviewPanel({
             </div>
           )}
         </div>
+
+        {!!project?.jobs?.length && (
+          <div className="max-h-24 space-y-1 overflow-y-auto rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-3-v2 p-2">
+            {project.jobs.slice(0, 5).map((job) => (
+              <button
+                key={job.jobId}
+                type="button"
+                onClick={() => onSelectSegment(job.segmentId)}
+                className="flex h-7 w-full items-center justify-between gap-2 rounded-md-v2 px-2 text-left text-[11px] text-Cr-text-subtler-v2 active:bg-Cr-beta-white-8-v2"
+              >
+                <span className="min-w-0 truncate">{job.pageName} / {job.botName}</span>
+                <span className={statusTone(job.status)}>{job.status}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {agentsOpen && (
@@ -1345,20 +1431,75 @@ export default function Dreamy() {
   const [submitting, setSubmitting] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState('');
+  const [pages, setPages] = useState<StudioPageAdapter[]>([]);
+  const [agents, setAgents] = useState<StudioAgentCapability[]>([]);
+  const [selectedPageId, setSelectedPageId] = useState<StudioApi | string>('dreamy-miniapp');
 
   const selectedSegment = useMemo(() => {
     const id = project?.selectedSegmentId;
     return project?.segments.find((segment) => segment.id === id) || project?.segments[project.segments.length - 1] || null;
   }, [project]);
 
+  const selectedJob = useMemo(() => {
+    const jobId = selectedSegment?.jobId;
+    if (!jobId) return null;
+    return project?.jobs?.find((job) => job.jobId === jobId) || null;
+  }, [project?.jobs, selectedSegment?.jobId]);
+
+  const selectedPage = useMemo(
+    () => pages.find((page) => page.id === selectedPageId) || pages[0] || null,
+    [pages, selectedPageId],
+  );
+
   useEffect(() => {
     if (!previewUrl) return;
     return () => URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      fetchStudioPages().catch(() => []),
+      fetchStudioAgents().catch(() => []),
+    ]).then(([nextPages, nextAgents]) => {
+      if (cancelled) return;
+      setPages(nextPages);
+      setAgents(nextAgents);
+      if (nextPages.length && !nextPages.some((page) => page.id === selectedPageId)) {
+        setSelectedPageId(nextPages[0].id);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPageId]);
+
   const mergeProject = useCallback((incoming: StudioProject) => {
     setProject(incoming);
     setMode(incoming.mode || 'player');
+  }, []);
+
+  const mergeJob = useCallback((job: StudioJob) => {
+    setProject((prev) => {
+      if (!prev) return prev;
+      const jobs = [job, ...(prev.jobs || []).filter((item) => item.jobId !== job.jobId)];
+      const segments = prev.segments.map((segment) =>
+        segment.id === job.segmentId
+          ? {
+              ...segment,
+              jobId: job.jobId,
+              status: job.status,
+              taskId: job.taskId || segment.taskId,
+              url: job.mediaUrl || segment.url,
+              posterUrl: job.posterUrl || segment.posterUrl,
+              authStatus: job.authStatus || segment.authStatus,
+              evidence: job.evidence || segment.evidence,
+              updatedAt: job.updatedAt || segment.updatedAt,
+            }
+          : segment,
+      );
+      return { ...prev, jobs, segments, updatedAt: nowIso() };
+    });
   }, []);
 
   const updateAssistant = useCallback((id: string, patch: Partial<ChatItem>) => {
@@ -1392,6 +1533,7 @@ export default function Dreamy() {
       const expectedType: StudioSegment['type'] = request.botType === 'image-to-video' ? 'video' : 'image';
       await postStudioClientResult(projectId, {
         segmentId: request.segmentId,
+        jobId: request.jobId,
         status: 'running',
         type: expectedType,
         prompt: request.prompt,
@@ -1400,6 +1542,8 @@ export default function Dreamy() {
         action: request.action,
         parentSegmentId: request.sourceSegment?.id,
         posterUrl: request.segment.posterUrl,
+        authStatus: request.authStatus,
+        source: request.api,
       }).then((result) => mergeProject(result.project));
 
       try {
@@ -1430,6 +1574,7 @@ export default function Dreamy() {
         const status = media.status === 'completed' || media.status === 'success' || media.status === 'done' ? 'done' : 'running';
         const update = await postStudioClientResult(projectId, {
           segmentId: request.segmentId,
+          jobId: request.jobId,
           status,
           type: expectedType,
           url: media.url,
@@ -1440,6 +1585,7 @@ export default function Dreamy() {
           action: request.action,
           parentSegmentId: request.sourceSegment?.id,
           taskId: job.response.outputJobId,
+          source: request.api,
         });
         mergeProject(update.project);
         updateAssistant(assistantId, {
@@ -1451,6 +1597,7 @@ export default function Dreamy() {
       } catch (error) {
         const update = await postStudioClientResult(projectId, {
           segmentId: request.segmentId,
+          jobId: request.jobId,
           status: 'error',
           type: expectedType,
           posterUrl: request.segment.posterUrl,
@@ -1459,6 +1606,7 @@ export default function Dreamy() {
           botName: request.botName,
           action: request.action,
           parentSegmentId: request.sourceSegment?.id,
+          source: request.api,
         }).catch(() => null);
         if (update) mergeProject(update.project);
         updateAssistant(assistantId, {
@@ -1499,6 +1647,7 @@ export default function Dreamy() {
       trackEvent('dreamy_studio_run', {
         action,
         mode,
+        page_id: selectedPageId,
         has_image: Boolean(fileForRequest),
         source_segment_id: sourceSegment?.id || '',
       });
@@ -1514,6 +1663,7 @@ export default function Dreamy() {
           action,
           projectId: project?.projectId,
           sourceSegmentId: sourceSegment?.id,
+          pageId: selectedPageId,
           agentGraph: project?.agentGraph,
           imageFile: fileForRequest,
           signal: controller.signal,
@@ -1530,6 +1680,7 @@ export default function Dreamy() {
                   segments: [],
                   selectedSegmentId: null,
                   agentGraph: EMPTY_GRAPH,
+                  jobs: [],
                   updatedAt: nowIso(),
                 },
               );
@@ -1562,7 +1713,23 @@ export default function Dreamy() {
                 segmentId: executionEvent.segmentId,
                 content: `Queued ${executionEvent.botName}.`,
               });
-              await registerClientExecution(executionEvent, currentProjectId, fileForRequest, assistantId);
+              if (executionEvent.executor === 'client') {
+                await registerClientExecution(executionEvent, currentProjectId, fileForRequest, assistantId);
+              } else {
+                updateAssistant(assistantId, {
+                  pending: false,
+                  segmentId: executionEvent.segmentId,
+                  content:
+                    executionEvent.authStatus?.status === 'auth_missing'
+                      ? 'MyShell Art needs browser cookies before it can run.'
+                      : `Server adapter queued ${executionEvent.botName}.`,
+                  error: executionEvent.authStatus?.status === 'auth_missing' ? executionEvent.authStatus.message : undefined,
+                });
+              }
+              return;
+            }
+            if (rawEventName === 'job' && 'job' in event) {
+              mergeJob(event.job);
               return;
             }
             if (rawEventName === 'project' && 'project' in event) {
@@ -1599,10 +1766,12 @@ export default function Dreamy() {
       clearFile,
       mergeProject,
       mode,
+      mergeJob,
       project,
       prompt,
       registerClientExecution,
       selectedFile,
+      selectedPageId,
       selectedSegment,
       submitting,
       updateAssistant,
@@ -1653,13 +1822,29 @@ export default function Dreamy() {
     const status = media.status === 'completed' || media.status === 'success' || media.status === 'done' ? 'done' : selectedSegment.status;
     const update = await postStudioClientResult(project.projectId, {
       segmentId: selectedSegment.id,
+      jobId: selectedSegment.jobId,
       status,
       type: selectedSegment.type,
       url: media.url,
       posterUrl: media.posterUrl || selectedSegment.posterUrl,
       taskId: selectedSegment.taskId,
+      source: selectedJob?.api || 'dreamy-miniapp',
     }).catch(() => null);
     if (update) mergeProject(update.project);
+  };
+
+  const cancelJob = async (jobId: string) => {
+    const result = await cancelStudioJob(jobId).catch(() => null);
+    if (!result) return;
+    if (result.project) mergeProject(result.project);
+    else mergeJob(result.job);
+  };
+
+  const retryJob = async (jobId: string) => {
+    const result = await retryStudioJob(jobId).catch(() => null);
+    if (!result) return;
+    if (result.project) mergeProject(result.project);
+    else mergeJob(result.job);
   };
 
   return (
@@ -1680,6 +1865,16 @@ export default function Dreamy() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <select
+            value={selectedPageId}
+            onChange={(event) => setSelectedPageId(event.target.value)}
+            className="hidden h-9 max-w-[160px] rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 text-xs font-semibold text-Cr-text-subtle-v2 outline-none sm:block"
+            aria-label="Studio page adapter"
+          >
+            {(pages.length ? pages : [{ id: 'dreamy-miniapp', name: 'Dreamy Miniapp' } as StudioPageAdapter]).map((page) => (
+              <option key={page.id} value={page.id}>{page.name}</option>
+            ))}
+          </select>
           <button
             type="button"
             onClick={refreshSelectedTask}
@@ -1742,7 +1937,9 @@ export default function Dreamy() {
               </div>
               <div>
                 <div className="text-sm font-semibold">Conversation</div>
-                <div className="text-[11px] text-Cr-text-subtler-v2">{project?.conversationId || 'No session'}</div>
+                <div className="text-[11px] text-Cr-text-subtler-v2">
+                  {project?.conversationId || 'No session'} · {selectedPage?.name || 'Dreamy Miniapp'} · {agents.length} agents
+                </div>
               </div>
             </div>
             <Pill tone={submitting ? 'hot' : 'default'}>{submitting ? 'Running' : mode}</Pill>
@@ -1796,10 +1993,13 @@ export default function Dreamy() {
             <PreviewPanel
               project={project}
               selectedSegment={selectedSegment}
+              selectedJob={selectedJob}
               agentsOpen={agentsOpen}
               onToggleAgents={() => setAgentsOpen((value) => !value)}
               onSelectSegment={selectSegment}
               onDeleteSegment={deleteSegment}
+              onCancelJob={(jobId) => void cancelJob(jobId)}
+              onRetryJob={(jobId) => void retryJob(jobId)}
               onAction={runStudio}
               submitting={submitting}
             />

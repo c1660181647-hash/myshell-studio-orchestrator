@@ -1,45 +1,37 @@
-# Dreamy Studio Orchestrator
+# MyShell Studio Orchestrator
 
-Unified Dreamy Studio entry for natural-language creative routing, segment-based video material staging, and collapsed agent orchestration.
+MyShell Studio Orchestrator is a unified agent dispatch center for Dreamy miniapp flows and MyShell Art pages. It routes natural-language creative requests into registered page adapters, tracks jobs and evidence, and keeps project timelines recoverable after backend restarts.
 
-## Structure
+## What Is Included
 
-- `frontend/` - Dreamy miniapp frontend with the new `/dreamy` two-panel Studio UI.
-- `orchestrator/backend/` - FastAPI backend with the Studio SSE API and in-memory project/session state.
-- `orchestrator/docs/` - source notes from the art chat orchestrator repo.
+- `/dreamy` Studio UI with conversation, preview timeline, canvas mode, page adapter selection, job queue, cancel/retry, auth state, and evidence status.
+- FastAPI backend with persistent Studio projects/jobs, SSE routing, and typed MyShell page/agent registries.
+- Dreamy miniapp client executor for `generate`, `generate/result`, `task/running`, `task/cancel`, `task/retry`, and library-backed refresh flows.
+- MyShell Art CDP adapter surface for browser-cookie-backed page execution. Missing cookies become `auth_missing`, not fake success.
+- Health checks that report backend, storage, Chrome CDP, MyShell cookies, and Dreamy auth delegation separately.
 
-## What is included
+## Repository Layout
 
-- Player mode: chat-led next-step loop for generate, extend, restyle, source reuse, and retry-agent actions.
-- Canvas mode: editable linear agent chain exposed through the collapsed Agents drawer.
-- Studio APIs:
-  - `POST /api/studio/run`
-  - `GET /api/studio/projects/{project_id}`
-  - `POST /api/studio/projects/{project_id}/client-result`
-  - `POST /api/studio/projects/{project_id}/reset`
-- Client executor path for Dreamy miniapp API calls.
-- Server route memory for projects and segment timelines.
-
-V1 stages video as appendable segments. It does not concatenate final MP4 files and does not persist projects after backend restart.
+- `frontend/` - Vite + React miniapp frontend.
+- `orchestrator/backend/` - FastAPI backend, Studio API, registries, SQLite job store, and CDP bridge.
+- `orchestrator/Dockerfile` - Cloud Run image that builds the root frontend and backend together.
 
 ## Local Run
 
 Backend:
 
-```powershell
-cd orchestrator\backend
+```bash
+cd orchestrator/backend
 python -m pip install -r requirements.txt
-$env:PORT = "8090"
-python main.py
+PORT=8090 python main.py
 ```
 
 Frontend:
 
-```powershell
+```bash
 cd frontend
 npm install
-$env:VITE_DREAMY_ORCHESTRATOR_BASE_URL = "http://127.0.0.1:8090"
-npm run dev -- --host 0.0.0.0 --port 5174
+VITE_DREAMY_ORCHESTRATOR_BASE_URL=http://127.0.0.1:8090 npm run dev -- --host 0.0.0.0 --port 5174
 ```
 
 Open:
@@ -48,27 +40,53 @@ Open:
 http://127.0.0.1:5174/?test_route=dreamy
 ```
 
+## Studio APIs
+
+- `GET /api/health`
+- `GET /api/pages`
+- `GET /api/agents`
+- `POST /api/studio/run`
+- `GET /api/studio/projects/{project_id}`
+- `POST /api/studio/projects/{project_id}/client-result`
+- `POST /api/studio/projects/{project_id}/reset`
+- `GET /api/studio/jobs/{job_id}`
+- `POST /api/studio/jobs/{job_id}/cancel`
+- `POST /api/studio/jobs/{job_id}/retry`
+
+`/api/studio/run` streams `meta`, `route`, `progress`, `execution_request`, `job`, `project`, and `done` events. Placeholder posters are always evidence-only drafts; completion requires fresh media, a task result, or an explicit failure/auth/timeout state.
+
 ## Environment
 
-Copy the example files and fill values locally:
+Copy the example files and fill local values:
 
 - `frontend/.env.example`
 - `orchestrator/.env.example`
 
-No Gemini, MyShell, Dreamy, GitHub, or Cloudflare secret is committed in this repository.
+Important backend settings:
+
+- `STUDIO_STORE_PATH` - SQLite path for project/job persistence. Defaults to `orchestrator/backend/.studio/studio.sqlite3`.
+- `MYSHELL_COOKIES` - JSON cookie array for MyShell Art CDP execution. If omitted, MyShell Art jobs report `auth_missing`.
+- `MYSHELL_CDP_URL` - Chrome DevTools endpoint, default `http://127.0.0.1:9222`.
+- `STUDIO_ROUTER_MODE=local|gemini` - local catalog matching by default; Gemini requires `GEMINI_API_KEY`.
 
 ## Verification
 
 Frontend:
 
-```powershell
+```bash
 cd frontend
 npm run build
 ```
 
 Backend:
 
-```powershell
+```bash
 cd orchestrator
-python -m unittest discover -s backend\tests -v
+python -m unittest discover -s backend/tests -v
+```
+
+Cloud Run build from repository root:
+
+```bash
+gcloud builds submit --config orchestrator/cloudbuild.yaml .
 ```
