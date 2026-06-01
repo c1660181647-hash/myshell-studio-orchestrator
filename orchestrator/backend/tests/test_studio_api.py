@@ -177,7 +177,9 @@ class StudioApiTest(unittest.TestCase):
 
         self.assertEqual(route["page"]["id"], "library")
         self.assertEqual(execution["executor"], "navigation")
+        self.assertEqual(execution["clientAction"], "navigate")
         self.assertEqual(execution["navigationPath"], "/library")
+        self.assertEqual(execution["studioReturnPath"], "/dreamy")
         self.assertEqual(execution["page"]["appRoute"], "/library")
         self.assertEqual(job_payloads[-1]["status"], "done")
         self.assertEqual(job_payloads[-1]["evidence"]["accepted"], True)

@@ -162,6 +162,13 @@ function forgetLastStudioProjectId(): void {
   }
 }
 
+function normalizeStudioNavigationPath(path: string | undefined): string {
+  if (!path) return '';
+  if (!path.startsWith('/')) return '';
+  if (path.startsWith('//')) return '';
+  return path;
+}
+
 function statusTone(status?: string): string {
   if (status === 'done') return 'text-Cr-text-success-default-v2';
   if (status === 'error' || status === 'timeout' || status === 'auth_missing') return 'text-Cr-text-critical-default-v2';
@@ -1779,11 +1786,18 @@ export default function Dreamy() {
               if (executionEvent.executor === 'client') {
                 await registerClientExecution(executionEvent, currentProjectId, fileForRequest, assistantId);
               } else if (executionEvent.executor === 'navigation') {
+                const targetPath = normalizeStudioNavigationPath(executionEvent.navigationPath);
                 updateAssistant(assistantId, {
                   pending: false,
                   segmentId: executionEvent.segmentId,
-                  content: `Dispatch target ready: ${executionEvent.page?.name || executionEvent.api}.`,
+                  content: targetPath
+                    ? `Opening ${executionEvent.page?.name || executionEvent.api}.`
+                    : `Dispatch target ready: ${executionEvent.page?.name || executionEvent.api}.`,
                 });
+                if (targetPath) {
+                  saveLastStudioProjectId(currentProjectId);
+                  navigate(targetPath);
+                }
               } else {
                 updateAssistant(assistantId, {
                   pending: false,
@@ -1837,6 +1851,7 @@ export default function Dreamy() {
       mode,
       mergeJob,
       project,
+      navigate,
       prompt,
       registerClientExecution,
       selectedFile,

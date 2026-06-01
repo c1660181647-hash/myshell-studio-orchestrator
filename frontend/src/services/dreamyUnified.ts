@@ -140,7 +140,9 @@ export interface StudioJob {
   agentId: string;
   executor: StudioExecutor;
   api: StudioApi | string;
+  clientAction?: 'navigate' | string;
   navigationPath?: string;
+  studioReturnPath?: string;
   status: StudioStatus;
   action: StudioAction;
   botSlug: string;
@@ -211,7 +213,9 @@ export interface StudioRouteEvent {
   sourceSummary?: string;
   executor: StudioExecutor;
   api?: StudioApi;
+  clientAction?: 'navigate' | string;
   navigationPath?: string;
+  studioReturnPath?: string;
   page?: StudioPageAdapter;
   bot: {
     slug: string;
@@ -235,7 +239,9 @@ export interface StudioExecutionRequest {
   executor: StudioExecutor;
   api: StudioApi | string;
   page?: StudioPageAdapter;
+  clientAction?: 'navigate' | string;
   navigationPath?: string;
+  studioReturnPath?: string;
   jobId: string;
   segmentId: string;
   botSlug: string;

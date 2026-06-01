@@ -57,7 +57,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `POST /api/studio/jobs/{job_id}/cancel`
 - `POST /api/studio/jobs/{job_id}/retry`
 
-`/api/studio/run` streams `meta`, `route`, `progress`, `execution_request`, `job`, `project`, and `done` events. Placeholder posters are always evidence-only drafts; generation completion requires fresh media, a task result, or an explicit failure/auth/timeout state. Navigation pages return `executor: "navigation"` plus `navigationPath` and complete with accepted route evidence.
+`/api/studio/run` streams `meta`, `route`, `progress`, `execution_request`, `job`, `project`, and `done` events. Placeholder posters are always evidence-only drafts; generation completion requires fresh media, a task result, or an explicit failure/auth/timeout state. Navigation pages return `executor: "navigation"`, `clientAction: "navigate"`, and `navigationPath`; the Studio frontend executes the route switch and the backend stores accepted route evidence.
 
 `/api/studio/projects` and `/api/studio/jobs` power restart recovery and queue views. Job responses include `evidenceTrail`, and retry responses include a client `executionRequest` when the adapter must run from the authenticated miniapp browser.
 
