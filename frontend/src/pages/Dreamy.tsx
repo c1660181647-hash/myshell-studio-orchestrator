@@ -41,6 +41,7 @@ import { fetchGenerateResult } from '../services/api';
 import {
   cancelStudioJob,
   extractGenerateTaskMedia,
+  fetchStudioDispatchPreview,
   fetchStudioAgents,
   fetchStudioHealth,
   fetchStudioJobs,
@@ -66,6 +67,7 @@ import type {
   StudioAction,
   StudioAgentNode,
   StudioApi,
+  StudioDispatchPreview,
   StudioExecutionRequest,
   StudioHealth,
   StudioJob,
@@ -1527,6 +1529,7 @@ export default function Dreamy() {
   const [queueStatusFilter, setQueueStatusFilter] = useState<StudioStatus | 'all'>('all');
   const [queuePageFilter, setQueuePageFilter] = useState<StudioApi | string>('all');
   const [queueAgentFilter, setQueueAgentFilter] = useState('all');
+  const [dispatchPreview, setDispatchPreview] = useState<StudioDispatchPreview | null>(null);
 
   const selectedSegment = useMemo(() => {
     const id = project?.selectedSegmentId;
@@ -1547,6 +1550,13 @@ export default function Dreamy() {
     () => agents.find((agent) => agent.id === selectedAgentId) || null,
     [agents, selectedAgentId],
   );
+  const previewPage = dispatchPreview?.page || selectedPage;
+  const previewDispatchStatus = dispatchPreview?.dispatchStatus || previewPage?.dispatchStatus;
+  const previewDispatchReady = dispatchPreview?.dispatchReady ?? previewPage?.dispatchReady;
+  const previewDispatchMode = dispatchPreview?.executor || previewPage?.dispatchMode || previewPage?.executor;
+  const previewDispatchMessage = dispatchPreview?.dispatchMessage || previewPage?.dispatchMessage || previewPage?.authStatus?.message;
+  const previewMissingParams = dispatchPreview?.missingRouteParams || [];
+  const previewNavigationPath = dispatchPreview?.navigationPath || previewPage?.appRoute || '';
   const pageOptions = useMemo(
     () => (pages.length ? pages : [{ id: 'dreamy-miniapp', name: 'Dreamy Miniapp' } as StudioPageAdapter]),
     [pages],
@@ -1639,6 +1649,27 @@ export default function Dreamy() {
       cancelled = true;
     };
   }, [queueAgentFilter, queuePageFilter, queueStatusFilter]);
+
+  useEffect(() => {
+    if (!selectedPageId) return;
+    let cancelled = false;
+    void fetchStudioDispatchPreview({
+      message: prompt,
+      action: 'generate',
+      projectId: project?.projectId,
+      sourceSegmentId: selectedSegment?.id,
+      pageId: selectedPageId,
+      agentId: selectedAgentId,
+      hasImage: Boolean(selectedFile),
+    }).then((preview) => {
+      if (!cancelled) setDispatchPreview(preview);
+    }).catch(() => {
+      if (!cancelled) setDispatchPreview(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.projectId, prompt, selectedAgentId, selectedFile, selectedPageId, selectedSegment?.id]);
 
   const mergeProject = useCallback((incoming: StudioProject) => {
     setProject(incoming);
@@ -2160,17 +2191,25 @@ export default function Dreamy() {
           Refresh
         </button>
         <div className="flex min-w-0 items-center gap-2 overflow-x-auto rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 py-2 sm:col-span-3 [-webkit-overflow-scrolling:touch]">
-          {selectedPage?.dispatchReady ? (
+          {previewDispatchReady ? (
             <CheckCircle2 size={14} className="shrink-0 text-Cr-text-success-default-v2" />
           ) : (
             <AlertTriangle size={14} className="shrink-0 text-Cr-text-critical-default-v2" />
           )}
-          <Pill tone={healthPillTone(selectedPage?.dispatchStatus)}>{selectedPage?.dispatchStatus || 'unknown'}</Pill>
+          <Pill tone={healthPillTone(previewDispatchStatus)}>{previewDispatchStatus || 'unknown'}</Pill>
           <span className="shrink-0 text-[11px] font-semibold text-Cr-text-subtler-v2">
-            {selectedPage?.dispatchMode || selectedPage?.executor || 'dispatch'}
+            {previewDispatchMode || 'dispatch'}
           </span>
+          {previewNavigationPath && (
+            <span className="shrink-0 text-[11px] font-semibold text-Cr-text-subtle-v2">
+              {previewNavigationPath}
+            </span>
+          )}
+          {!!previewMissingParams.length && (
+            <Pill tone="hot">{`Missing ${previewMissingParams.join(', ')}`}</Pill>
+          )}
           <span className="min-w-[160px] truncate text-[11px] text-Cr-text-subtler-v2">
-            {selectedPage?.dispatchMessage || selectedPage?.authStatus?.message || selectedPage?.authMode || 'No runtime status'}
+            {previewDispatchMessage || previewPage?.authMode || 'No runtime status'}
           </span>
         </div>
       </div>

@@ -178,6 +178,33 @@ class StudioApiTest(unittest.TestCase):
         self.assertFalse(art["dispatchReady"])
         self.assertIn("cookies", art["dispatchMessage"].lower())
 
+    def test_dispatch_preview_reports_target_path_agent_and_missing_params(self) -> None:
+        library = self.client.get(
+            "/api/studio/dispatch-preview",
+            params={"page_id": "library", "message": "open my generated library"},
+        )
+        self.assertEqual(library.status_code, 200)
+        library_body = library.json()
+        self.assertEqual(library_body["page"]["id"], "library")
+        self.assertEqual(library_body["executor"], "navigation")
+        self.assertEqual(library_body["agentId"], "miniapp-page-navigator")
+        self.assertEqual(library_body["clientAction"], "navigate")
+        self.assertEqual(library_body["navigationPath"], "/library")
+        self.assertEqual(library_body["missingRouteParams"], [])
+        self.assertTrue(library_body["dispatchReady"])
+        self.assertEqual(library_body["authStatus"]["status"], "client_delegated")
+
+        tag_generator = self.client.get(
+            "/api/studio/dispatch-preview",
+            params={"page_id": "tag-generator", "message": "open this tattoo tag generator"},
+        )
+        self.assertEqual(tag_generator.status_code, 200)
+        tag_body = tag_generator.json()
+        self.assertEqual(tag_body["page"]["id"], "tag-generator")
+        self.assertTrue(tag_body["navigationPath"].startswith("/tag-generator?slug_id="), tag_body["navigationPath"])
+        self.assertIn("img", tag_body["missingRouteParams"])
+        self.assertEqual(tag_body["routeParams"], ["slug_id", "img"])
+
     def test_health_reports_delivery_components(self) -> None:
         health = self.client.get("/api/health")
         self.assertEqual(health.status_code, 200)

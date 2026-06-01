@@ -48,6 +48,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `GET /api/health`
 - `GET /api/pages`
 - `GET /api/agents`
+- `GET /api/studio/dispatch-preview`
 - `POST /api/studio/run`
 - `GET /api/studio/projects`
 - `GET /api/studio/projects/{project_id}`
@@ -60,6 +61,8 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `POST /api/studio/jobs/{job_id}/retry`
 
 `/api/pages` returns registry metadata plus runtime `authStatus`, `dispatchReady`, `dispatchStatus`, and `dispatchMessage` for each MyShell page, so operators can tell whether a page is ready, client-delegated, or blocked by missing credentials before dispatch.
+
+`/api/studio/dispatch-preview` preflights a target page without creating a job. It returns the resolved page, executor, agent, auth status, navigation path, route params, and `missingRouteParams`, which lets the Studio UI show exactly where a dispatch will go before it runs.
 
 `/api/studio/run` streams `meta`, `route`, `progress`, `execution_request`, `job`, `project`, and `done` events. Placeholder posters are always evidence-only drafts; generation completion requires fresh media, a task result, or an explicit failure/auth/timeout state. When no non-default page is selected, the intent router can infer registered miniapp pages directly from prompts like "open my generated library", "upload an image", or "go to settings". Navigation pages return `executor: "navigation"`, `clientAction: "navigate"`, and `navigationPath`; the Studio frontend executes the route switch, keeps a return dock available, and the backend stores accepted route evidence.
 

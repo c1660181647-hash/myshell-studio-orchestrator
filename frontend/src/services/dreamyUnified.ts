@@ -283,6 +283,23 @@ export interface StudioExecutionRequest {
   evidence?: StudioEvidence;
 }
 
+export interface StudioDispatchPreview {
+  page: StudioPageAdapter;
+  route: StudioRouteEvent;
+  executor: StudioExecutor;
+  agentId: string;
+  authStatus: StudioAuthStatus;
+  dispatchReady: boolean;
+  dispatchStatus: string;
+  dispatchMessage: string;
+  clientAction?: 'navigate' | string;
+  navigationPath?: string;
+  studioReturnPath?: string;
+  routeParams: string[];
+  missingRouteParams: string[];
+  prompt: string;
+}
+
 export interface StudioProjectEvent {
   type?: 'project';
   project: StudioProject;
@@ -529,6 +546,31 @@ export async function fetchStudioPages(): Promise<StudioPageAdapter[]> {
   if (!response.ok) throw new Error(`Studio pages ${response.status}: ${response.statusText}`);
   const body = await response.json();
   return body.pages || [];
+}
+
+export async function fetchStudioDispatchPreview(
+  options: {
+    message?: string;
+    projectId?: string;
+    action?: StudioAction;
+    sourceSegmentId?: string;
+    pageId?: StudioApi | string;
+    agentId?: string;
+    hasImage?: boolean;
+  } = {},
+): Promise<StudioDispatchPreview> {
+  const params = new URLSearchParams();
+  if (options.message) params.set('message', options.message);
+  if (options.projectId) params.set('project_id', options.projectId);
+  if (options.action) params.set('action', options.action);
+  if (options.sourceSegmentId) params.set('source_segment_id', options.sourceSegmentId);
+  if (options.pageId) params.set('page_id', options.pageId);
+  if (options.agentId) params.set('agent_id', options.agentId);
+  if (typeof options.hasImage === 'boolean') params.set('has_image', String(options.hasImage));
+  const query = params.toString();
+  const response = await fetch(getStudioRootEndpoint(`/api/studio/dispatch-preview${query ? `?${query}` : ''}`));
+  if (!response.ok) throw new Error(`Studio dispatch preview ${response.status}: ${response.statusText}`);
+  return response.json();
 }
 
 export async function fetchStudioAgents(): Promise<StudioAgentCapability[]> {

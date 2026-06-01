@@ -93,6 +93,15 @@ def _navigation_contract(
     }
 
 
+def _missing_route_params(page: dict[str, Any], navigation_path: str) -> list[str]:
+    route_params = page.get("routeParams") or []
+    if not route_params:
+        return []
+    parsed_path = urlsplit(navigation_path or "")
+    query_params = {key for key, _value in parse_qsl(parsed_path.query, keep_blank_values=True)}
+    return [param for param in route_params if param not in query_params]
+
+
 def _page_with_runtime_status(page: dict[str, Any]) -> dict[str, Any]:
     auth_status = adapter_auth_status(page["id"])
     auth_state = str(auth_status.get("status") or "unknown")
@@ -104,6 +113,61 @@ def _page_with_runtime_status(page: dict[str, Any]) -> dict[str, Any]:
         "dispatchReady": dispatch_ready,
         "dispatchStatus": dispatch_status,
         "dispatchMessage": auth_status.get("message") or page.get("dispatchMode") or "",
+    }
+
+
+async def _dispatch_preview(
+    *,
+    message: str,
+    action: str,
+    page_id: str,
+    agent_id: str | None = None,
+    project_id: str | None = None,
+    source_segment_id: str | None = None,
+    has_image: bool = False,
+) -> dict[str, Any]:
+    normalized_action = _normalize_action(action)
+    preferred_page = get_page(page_id)
+    prompt = (message or "").strip() or (
+        f"Open {preferred_page['name']}"
+        if preferred_page.get("executor") == "navigation"
+        else {
+            "generate": "Create a new Dreamy media segment.",
+            "extend": "Extend the selected video with a natural next shot.",
+            "restyle": "Restyle the selected segment while keeping the subject consistent.",
+            "retry-agent": "Try another agent for the selected segment.",
+        }[normalized_action]
+    )
+
+    project = _get_project(project_id) if project_id else None
+    source_segment = _find_segment(project, source_segment_id) if project else None
+    route = await choose_route(prompt, has_image, normalized_action, source_segment)
+    page = page_for_dispatch(route["bot"], page_id, prompt)
+    route["action"] = normalized_action
+    route["sourceSegmentId"] = source_segment_id
+    route["sourceSummary"] = f"Using segment {source_segment_id}" if source_segment_id else "Starting from prompt"
+    route["page"] = page
+    route["api"] = page["id"]
+    route["executor"] = page["executor"]
+    route["agentId"] = _agent_id_for_dispatch(page, agent_id)
+    contract = _navigation_contract(page, route, source_segment)
+    runtime_page = _page_with_runtime_status(page)
+    navigation_path = contract.get("navigationPath", "")
+    return {
+        "page": runtime_page,
+        "route": route,
+        "executor": page["executor"],
+        "agentId": route["agentId"],
+        "authStatus": runtime_page["authStatus"],
+        "dispatchReady": runtime_page["dispatchReady"],
+        "dispatchStatus": runtime_page["dispatchStatus"],
+        "dispatchMessage": runtime_page["dispatchMessage"],
+        "clientAction": contract.get("clientAction"),
+        "navigationPath": navigation_path,
+        "studioReturnPath": contract.get("studioReturnPath"),
+        "routeParams": page.get("routeParams") or [],
+        "missingRouteParams": _missing_route_params(page, navigation_path),
+        "prompt": route.get("optimizedPrompt") or prompt,
     }
 
 
@@ -530,6 +594,26 @@ def register_studio_routes(app) -> None:
     @app.get("/api/agents")
     async def get_studio_agents():
         return {"agents": list_studio_agents()}
+
+    @app.get("/api/studio/dispatch-preview")
+    async def get_dispatch_preview(
+        message: str = Query(""),
+        project_id: Optional[str] = Query(None),
+        action: str = Query("generate"),
+        source_segment_id: Optional[str] = Query(None),
+        page_id: str = Query("dreamy-miniapp"),
+        agent_id: Optional[str] = Query(None),
+        has_image: bool = Query(False),
+    ):
+        return await _dispatch_preview(
+            message=message,
+            action=action,
+            page_id=page_id,
+            agent_id=agent_id,
+            project_id=project_id,
+            source_segment_id=source_segment_id,
+            has_image=has_image,
+        )
 
     @app.post("/api/studio/run")
     async def run_studio(
