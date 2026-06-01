@@ -1,7 +1,10 @@
 import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -10,6 +13,7 @@ sys.path.insert(0, str(BACKEND_DIR))
 
 from main import app  # noqa: E402
 from studio import PROJECTS  # noqa: E402
+from studio_registry import page_for_dispatch  # noqa: E402
 from studio_store import STUDIO_STORE  # noqa: E402
 
 
@@ -161,6 +165,36 @@ class StudioApiTest(unittest.TestCase):
             self.assertIn(page_id, page_by_id)
             self.assertEqual(page_by_id[page_id]["appRoute"], route)
             self.assertEqual(page_by_id[page_id]["executor"], "navigation")
+            self.assertEqual(page_by_id[page_id]["registrySource"], "manifest")
+
+    def test_manifest_pages_extend_registry_and_prompt_routing(self) -> None:
+        manifest = {
+            "version": "test",
+            "pages": [
+                {
+                    "id": "daily-boost",
+                    "name": "Daily Boost",
+                    "appRoute": "/daily-boost",
+                    "capabilities": ["boost-status", "boost-claim"],
+                    "intentKeywords": ["daily boost", "boost reward"],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manifest_path = Path(tmp_dir) / "pages.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with patch.dict(os.environ, {"STUDIO_PAGES_MANIFEST": str(manifest_path)}):
+                pages = self.client.get("/api/pages")
+                self.assertEqual(pages.status_code, 200)
+                page_by_id = {page["id"]: page for page in pages.json()["pages"]}
+
+                self.assertIn("daily-boost", page_by_id)
+                self.assertEqual(page_by_id["daily-boost"]["appRoute"], "/daily-boost")
+                self.assertEqual(page_by_id["daily-boost"]["registrySource"], "manifest")
+
+                inferred = page_for_dispatch({}, "dreamy-miniapp", "open daily boost rewards")
+                self.assertEqual(inferred["id"], "daily-boost")
 
     def test_navigation_page_dispatch_returns_navigation_execution(self) -> None:
         with self.client.stream(

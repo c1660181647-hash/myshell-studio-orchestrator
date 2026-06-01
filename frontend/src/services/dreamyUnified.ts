@@ -12,7 +12,7 @@ export type UnifiedMode = 'orchestrator' | 'miniapp' | 'monitor';
 export type StudioMode = 'player' | 'canvas';
 export type StudioAction = 'generate' | 'extend' | 'restyle' | 'retry-agent';
 export type StudioStatus = 'draft' | 'queued' | 'running' | 'done' | 'timeout' | 'auth_missing' | 'error' | 'cancelled';
-export type StudioApi =
+export type KnownStudioApi =
   | 'dreamy-miniapp'
   | 'myshell-art'
   | 'explore'
@@ -26,6 +26,7 @@ export type StudioApi =
   | 'share-invite'
   | 'settings'
   | 'checkin';
+export type StudioApi = KnownStudioApi | (string & {});
 export type StudioExecutor = 'client' | 'server' | 'navigation';
 
 export interface OrchestratorBotRef {
@@ -120,6 +121,9 @@ export interface StudioPageAdapter {
   status: string;
   dispatchMode?: string;
   routeParams?: string[];
+  intentKeywords?: string[];
+  registrySource?: 'code' | 'manifest' | string;
+  manifestVersion?: string;
   botCount?: number;
   capabilities: string[];
 }

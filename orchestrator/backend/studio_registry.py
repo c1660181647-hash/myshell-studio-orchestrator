@@ -1,127 +1,16 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+from pathlib import Path
 from typing import Any
 
 from bot_catalog import MYSHELL_BOTS
 
 DEFAULT_PAGE_ID = "dreamy-miniapp"
-
-PAGE_INTENT_KEYWORDS = {
-    "explore": [
-        "explore",
-        "discover",
-        "browse bots",
-        "bot discovery",
-        "首页",
-        "探索",
-        "发现",
-    ],
-    "ai-picks": [
-        "ai picks",
-        "aipicks",
-        "recommendations",
-        "recommended",
-        "featured",
-        "精选",
-        "推荐",
-    ],
-    "bot-detail": [
-        "bot detail",
-        "bot details",
-        "bot profile",
-        "agent detail",
-        "agent profile",
-        "详情",
-        "机器人详情",
-    ],
-    "upload": [
-        "upload",
-        "image upload",
-        "upload image",
-        "create with image",
-        "start from image",
-        "上传",
-        "上传图片",
-        "传图",
-    ],
-    "tag-generator": [
-        "tag generator",
-        "self director",
-        "director",
-        "prompt composer",
-        "compose tags",
-        "标签生成",
-        "标签",
-        "自导演",
-    ],
-    "library": [
-        "library",
-        "generated library",
-        "generated works",
-        "my works",
-        "my creations",
-        "results",
-        "gallery",
-        "history",
-        "作品库",
-        "生成历史",
-        "历史作品",
-        "我的作品",
-        "结果",
-    ],
-    "energy-store": [
-        "energy",
-        "energy store",
-        "buy energy",
-        "store",
-        "packs",
-        "credits",
-        "能量",
-        "能量商店",
-        "购买能量",
-        "充值",
-    ],
-    "earn": [
-        "earn",
-        "rewards",
-        "earn stats",
-        "bonus",
-        "赚取",
-        "奖励",
-        "收益",
-    ],
-    "share-invite": [
-        "share invite",
-        "invite",
-        "invite friends",
-        "referral",
-        "share link",
-        "邀请",
-        "分享邀请",
-        "推荐链接",
-    ],
-    "settings": [
-        "settings",
-        "preferences",
-        "profile settings",
-        "account settings",
-        "language",
-        "设置",
-        "偏好",
-        "语言",
-        "账号设置",
-    ],
-    "checkin": [
-        "checkin",
-        "check in",
-        "daily checkin",
-        "daily claim",
-        "签到",
-        "每日签到",
-        "打卡",
-    ],
-}
+DEFAULT_MANIFEST_PATH = Path(__file__).with_name("studio_pages_manifest.json")
+MINIAPP_BASE_URL = "https://api.myshell.fun/v1/telegram/miniapp/dreamy"
 
 
 def _navigation_page(
@@ -132,12 +21,16 @@ def _navigation_page(
     *,
     kind: str = "miniapp-page",
     route_params: list[str] | None = None,
+    base_url: str = MINIAPP_BASE_URL,
+    intent_keywords: list[str] | None = None,
+    manifest_version: str = "",
+    registry_source: str = "code",
 ) -> dict[str, Any]:
-    return {
+    page = {
         "id": page_id,
         "name": name,
         "kind": kind,
-        "baseUrl": "https://api.myshell.fun/v1/telegram/miniapp/dreamy",
+        "baseUrl": base_url,
         "appRoute": app_route,
         "executor": "navigation",
         "authMode": "telegram-init-data",
@@ -145,22 +38,28 @@ def _navigation_page(
         "dispatchMode": "open-page",
         "routeParams": route_params or [],
         "capabilities": capabilities,
+        "registrySource": registry_source,
     }
+    if manifest_version:
+        page["manifestVersion"] = manifest_version
+    if intent_keywords:
+        page["intentKeywords"] = intent_keywords
+    return page
 
 
-def list_studio_pages() -> list[dict[str, Any]]:
-    """Return MyShell surfaces that the Studio hub can route into."""
+def _core_pages() -> list[dict[str, Any]]:
     return [
         {
             "id": "dreamy-miniapp",
             "name": "Dreamy Miniapp",
             "kind": "miniapp",
-            "baseUrl": "https://api.myshell.fun/v1/telegram/miniapp/dreamy",
+            "baseUrl": MINIAPP_BASE_URL,
             "executor": "client",
             "authMode": "telegram-init-data",
             "status": "available",
             "dispatchMode": "execute-client",
             "appRoute": "/dreamy",
+            "registrySource": "code",
             "capabilities": [
                 "generate",
                 "generate-result",
@@ -181,6 +80,7 @@ def list_studio_pages() -> list[dict[str, Any]]:
             "dispatchMode": "execute-server",
             "appRoute": "",
             "botCount": len(MYSHELL_BOTS),
+            "registrySource": "code",
             "capabilities": [
                 "page-open",
                 "image-upload",
@@ -189,76 +89,72 @@ def list_studio_pages() -> list[dict[str, Any]]:
                 "new-media-evidence",
             ],
         },
-        _navigation_page(
-            "explore",
-            "Explore",
-            "/",
-            ["explore", "category-browse", "bot-discovery"],
-        ),
-        _navigation_page(
-            "ai-picks",
-            "AI Picks",
-            "/ai-picks",
-            ["recommendations", "pick-opened", "bot-discovery"],
-        ),
-        _navigation_page(
-            "bot-detail",
-            "Bot Detail",
-            "/bot",
-            ["get-by-slug", "form-schema", "bot-profile"],
-            route_params=["slug_id"],
-        ),
-        _navigation_page(
-            "upload",
-            "Upload",
-            "/upload",
-            ["image-upload", "bot-generate", "custom-form"],
-            route_params=["slug_id"],
-        ),
-        _navigation_page(
-            "tag-generator",
-            "Tag Generator",
-            "/tag-generator",
-            ["self-director", "prompt-compose", "bot-generate"],
-            route_params=["slug_id", "img"],
-        ),
-        _navigation_page(
-            "library",
-            "Library",
-            "/library",
-            ["library", "task-retry", "task-delete", "task-like", "share"],
-        ),
-        _navigation_page(
-            "energy-store",
-            "Energy Store",
-            "/energy",
-            ["energy", "packs", "invoice"],
-        ),
-        _navigation_page(
-            "earn",
-            "Earn",
-            "/earn",
-            ["invite-code", "earn-stats"],
-        ),
-        _navigation_page(
-            "share-invite",
-            "Share Invite",
-            "/share-invite",
-            ["invite-share", "invite-opened"],
-        ),
-        _navigation_page(
-            "settings",
-            "Settings",
-            "/settings",
-            ["profile", "language", "preferences"],
-        ),
-        _navigation_page(
-            "checkin",
-            "Checkin",
-            "/checkin-demo",
-            ["checkin-status", "checkin-claim", "checkin-history"],
-        ),
     ]
+
+
+def _manifest_path() -> Path:
+    configured = os.environ.get("STUDIO_PAGES_MANIFEST")
+    return Path(configured) if configured else DEFAULT_MANIFEST_PATH
+
+
+def _load_pages_manifest() -> dict[str, Any]:
+    manifest_path = _manifest_path()
+    if not manifest_path.exists():
+        return {"version": "missing", "pages": []}
+    with manifest_path.open(encoding="utf-8") as manifest_file:
+        manifest = json.load(manifest_file)
+    if not isinstance(manifest, dict):
+        raise ValueError(f"Studio pages manifest must be an object: {manifest_path}")
+    pages = manifest.get("pages", [])
+    if not isinstance(pages, list):
+        raise ValueError(f"Studio pages manifest pages must be a list: {manifest_path}")
+    return manifest
+
+
+def _as_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item.strip()]
+
+
+def _page_from_manifest(raw_page: dict[str, Any], manifest_version: str) -> dict[str, Any]:
+    page_id = str(raw_page.get("id") or "").strip()
+    if not page_id:
+        raise ValueError("Studio manifest page is missing id")
+    name = str(raw_page.get("name") or page_id)
+    app_route = str(raw_page.get("appRoute") or "")
+    return _navigation_page(
+        page_id,
+        name,
+        app_route,
+        _as_str_list(raw_page.get("capabilities")),
+        kind=str(raw_page.get("kind") or "miniapp-page"),
+        route_params=_as_str_list(raw_page.get("routeParams")),
+        base_url=str(raw_page.get("baseUrl") or MINIAPP_BASE_URL),
+        intent_keywords=_as_str_list(raw_page.get("intentKeywords")),
+        manifest_version=manifest_version,
+        registry_source="manifest",
+    )
+
+
+def _manifest_pages() -> list[dict[str, Any]]:
+    manifest = _load_pages_manifest()
+    manifest_version = str(manifest.get("version") or "")
+    return [_page_from_manifest(page, manifest_version) for page in manifest.get("pages", []) if isinstance(page, dict)]
+
+
+def list_studio_pages() -> list[dict[str, Any]]:
+    """Return MyShell surfaces that the Studio hub can route into."""
+    pages_by_id: dict[str, dict[str, Any]] = {}
+    ordered_ids: list[str] = []
+
+    for page in [*_core_pages(), *_manifest_pages()]:
+        page_id = page["id"]
+        if page_id not in pages_by_id:
+            ordered_ids.append(page_id)
+        pages_by_id[page_id] = page
+
+    return [pages_by_id[page_id] for page_id in ordered_ids]
 
 
 def list_studio_agents() -> list[dict[str, Any]]:
@@ -337,17 +233,18 @@ def infer_navigation_page_from_prompt(message: str) -> dict[str, Any] | None:
     if not normalized:
         return None
 
-    best_page_id = ""
+    best_page: dict[str, Any] | None = None
     best_score = 0
-    for page_id, keywords in PAGE_INTENT_KEYWORDS.items():
+    for page in list_studio_pages():
+        if page.get("executor") != "navigation":
+            continue
+        keywords = _as_str_list(page.get("intentKeywords"))
         score = sum(1 for keyword in keywords if _keyword_matches(normalized, keyword))
         if score > best_score:
-            best_page_id = page_id
+            best_page = page
             best_score = score
 
-    if not best_page_id:
-        return None
-    return get_page(best_page_id)
+    return best_page
 
 
 def page_for_bot(bot: dict[str, Any], preferred_page_id: str | None = None) -> dict[str, Any]:
