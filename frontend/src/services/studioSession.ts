@@ -4,6 +4,8 @@ export const STUDIO_SESSION_CHANGED_EVENT = 'dreamy-studio:session-changed';
 
 export interface StudioDispatchSession {
   projectId: string;
+  sessionId?: string;
+  targetId?: string;
   pageId?: string;
   pageName?: string;
   navigationPath?: string;
@@ -74,6 +76,8 @@ export function readStudioDispatchSession(): StudioDispatchSession | null {
     if (!parsed.projectId) return null;
     return {
       projectId: parsed.projectId,
+      sessionId: parsed.sessionId,
+      targetId: parsed.targetId,
       pageId: parsed.pageId,
       pageName: parsed.pageName,
       navigationPath: parsed.navigationPath,

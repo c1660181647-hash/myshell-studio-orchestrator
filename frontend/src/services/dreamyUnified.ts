@@ -473,6 +473,36 @@ export interface StudioDispatchBatchPlan {
   handoffSnapshot: StudioHandoffSnapshot;
 }
 
+export type StudioDispatchSessionTargetStatus = 'pending' | 'visited' | 'completed' | 'skipped' | 'error' | string;
+
+export interface StudioDispatchSessionTarget extends StudioDispatchBatchTarget {
+  status: StudioDispatchSessionTargetStatus;
+  evidence?: Record<string, unknown>;
+  visitedAt?: string;
+  completedAt?: string;
+  skippedAt?: string;
+  erroredAt?: string;
+  updatedAt?: string;
+}
+
+export interface StudioDispatchSession extends Omit<StudioDispatchBatchPlan, 'status' | 'readyForDispatch' | 'targets'> {
+  sessionId: string;
+  status: 'active' | 'needs_review' | 'done' | 'blocked' | 'cancelled' | string;
+  readyForDispatch: boolean;
+  createdAt: string;
+  updatedAt: string;
+  planStatus?: string;
+  summary: StudioDispatchBatchPlan['summary'] & {
+    pending: number;
+    visited: number;
+    completed: number;
+    targetSkipped: number;
+    targetErrors: number;
+  };
+  targets: StudioDispatchSessionTarget[];
+  nextTarget?: StudioDispatchSessionTarget | null;
+}
+
 export interface StudioAgentCapability {
   id: string;
   label: string;
@@ -951,6 +981,68 @@ export async function planStudioDispatchBatch(options: {
     }),
   });
   if (!response.ok) throw new Error(`Studio dispatch batch ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function createStudioDispatchSession(options: {
+  projectId?: string;
+  sourceSegmentId?: string;
+  pageIds?: Array<StudioApi | string>;
+  limit?: number;
+} = {}): Promise<StudioDispatchSession> {
+  const response = await fetch(getStudioRootEndpoint('/api/studio/dispatch-sessions'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      project_id: options.projectId,
+      source_segment_id: options.sourceSegmentId,
+      page_ids: options.pageIds,
+      limit: options.limit || 50,
+    }),
+  });
+  if (!response.ok) throw new Error(`Studio dispatch session ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function fetchStudioDispatchSessions(options: {
+  projectId?: string;
+  limit?: number;
+} = {}): Promise<StudioDispatchSession[]> {
+  const params = new URLSearchParams();
+  if (options.projectId) params.set('project_id', options.projectId);
+  params.set('limit', String(options.limit || 20));
+  const response = await fetch(getStudioRootEndpoint(`/api/studio/dispatch-sessions?${params.toString()}`));
+  if (!response.ok) throw new Error(`Studio dispatch sessions ${response.status}: ${response.statusText}`);
+  const body = await response.json();
+  return body.sessions || [];
+}
+
+export async function fetchStudioDispatchSession(sessionId: string): Promise<StudioDispatchSession> {
+  const response = await fetch(getStudioRootEndpoint(`/api/studio/dispatch-sessions/${encodeURIComponent(sessionId)}`));
+  if (!response.ok) throw new Error(`Studio dispatch session ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function updateStudioDispatchSessionTarget(options: {
+  sessionId: string;
+  targetId: string;
+  status: StudioDispatchSessionTargetStatus;
+  evidence?: Record<string, unknown>;
+}): Promise<StudioDispatchSession> {
+  const response = await fetch(
+    getStudioRootEndpoint(
+      `/api/studio/dispatch-sessions/${encodeURIComponent(options.sessionId)}/targets/${encodeURIComponent(options.targetId)}`,
+    ),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: options.status,
+        evidence: options.evidence || {},
+      }),
+    },
+  );
+  if (!response.ok) throw new Error(`Studio dispatch target ${response.status}: ${response.statusText}`);
   return response.json();
 }
 

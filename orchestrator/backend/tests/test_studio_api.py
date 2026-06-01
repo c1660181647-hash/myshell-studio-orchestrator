@@ -1034,6 +1034,93 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(body["handoffSnapshot"]["status"], "blocked")
         self.assertEqual(body["handoffSnapshot"]["summary"]["readyUnverified"], 11)
 
+    def test_dispatch_session_persists_next_target_and_completion(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            with self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={"message": "create dispatch session source image"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                source_events = _sse_events("".join(response.iter_text()))
+
+            source_meta = next(payload for name, payload in source_events if name == "meta")
+            source_execution = next(payload for name, payload in source_events if name == "execution_request")
+            source_url = "https://example.com/dispatch-session-source.png"
+            update = self.client.post(
+                f"/api/studio/projects/{source_meta['projectId']}/client-result",
+                json={
+                    "segmentId": source_execution["segmentId"],
+                    "jobId": source_execution["jobId"],
+                    "status": "done",
+                    "taskId": "task_dispatch_session_source",
+                    "url": source_url,
+                    "posterUrl": source_url,
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            created = self.client.post(
+                "/api/studio/dispatch-sessions",
+                json={
+                    "project_id": source_meta["projectId"],
+                    "source_segment_id": source_execution["segmentId"],
+                    "limit": 50,
+                },
+            )
+
+        self.assertEqual(created.status_code, 200)
+        session = created.json()
+        self.assertTrue(session["sessionId"].startswith("dispatch_session_"))
+        self.assertEqual(session["status"], "active")
+        self.assertEqual(session["projectId"], source_meta["projectId"])
+        self.assertEqual(session["sourceSegmentId"], source_execution["segmentId"])
+        self.assertEqual(session["sourceMediaUrl"], source_url)
+        self.assertEqual(session["summary"]["pending"], session["summary"]["planned"])
+        self.assertEqual(session["summary"]["visited"], 0)
+        self.assertEqual(session["summary"]["completed"], 0)
+        self.assertGreaterEqual(session["summary"]["planned"], 12)
+        self.assertEqual(session["summary"]["blocked"], 1)
+        self.assertIsNotNone(session["nextTarget"])
+
+        first_target = session["nextTarget"]
+        self.assertEqual(first_target["status"], "pending")
+        first_target_id = first_target["id"]
+
+        visited = self.client.post(
+            f"/api/studio/dispatch-sessions/{session['sessionId']}/targets/{first_target_id}",
+            json={"status": "visited", "evidence": {"openedFrom": "studio-test"}},
+        )
+        self.assertEqual(visited.status_code, 200)
+        visited_body = visited.json()
+        self.assertEqual(visited_body["summary"]["visited"], 1)
+        self.assertEqual(visited_body["summary"]["pending"], session["summary"]["planned"] - 1)
+        self.assertNotEqual(visited_body["nextTarget"]["id"], first_target_id)
+
+        completed = self.client.post(
+            f"/api/studio/dispatch-sessions/{session['sessionId']}/targets/{first_target_id}",
+            json={"status": "completed", "evidence": {"accepted": True}},
+        )
+        self.assertEqual(completed.status_code, 200)
+        completed_body = completed.json()
+        self.assertEqual(completed_body["summary"]["visited"], 0)
+        self.assertEqual(completed_body["summary"]["completed"], 1)
+
+        PROJECTS.clear()
+        restored = self.client.get(f"/api/studio/dispatch-sessions/{session['sessionId']}")
+        self.assertEqual(restored.status_code, 200)
+        restored_body = restored.json()
+        self.assertEqual(restored_body["summary"]["completed"], 1)
+        restored_target = next(target for target in restored_body["targets"] if target["id"] == first_target_id)
+        self.assertEqual(restored_target["status"], "completed")
+        skipped_by_page = {target["pageId"]: target for target in restored_body["skippedTargets"]}
+        self.assertEqual(skipped_by_page["myshell-art"]["reason"], "auth_missing")
+
     def test_run_stream_preserves_selected_agent_id_through_retry(self) -> None:
         with self.client.stream(
             "POST",

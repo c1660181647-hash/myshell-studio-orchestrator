@@ -32,6 +32,10 @@ function getInitData(): string {
   return window.Telegram?.WebApp?.initData || '';
 }
 
+function shouldFlushTracking(): boolean {
+  return !(import.meta.env.DEV && !getInitData());
+}
+
 /** RFC4122 UUID v4. Falls back to a math-random variant if crypto is unavailable. */
 function generateUuid(): string {
   try {
@@ -80,6 +84,7 @@ function readAppVersion(): string {
 /** Best-effort flush via sendBeacon (for page unload). */
 function beaconFlush(events: TrackingEvent[]): void {
   if (events.length === 0) return;
+  if (!shouldFlushTracking()) return;
   try {
     const url =
       (import.meta.env.VITE_API_BASE_URL || 'https://api.myshell.fun') +
@@ -110,6 +115,7 @@ async function flushBuffer(): Promise<void> {
   if (buffer.length === 0) return;
   const batch = buffer;
   buffer = [];
+  if (!shouldFlushTracking()) return;
   try {
     await apiRequest(EVENTS_ENDPOINT, { events: batch });
   } catch {

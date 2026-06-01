@@ -31,6 +31,7 @@ PROJECTS: dict[str, StudioProject] = {}
 VALID_MODES = {"player", "canvas"}
 VALID_ACTIONS = {"generate", "extend", "restyle", "retry-agent"}
 VALID_STATUSES = {"draft", "queued", "running", "done", "timeout", "auth_missing", "error", "cancelled"}
+VALID_DISPATCH_TARGET_STATUSES = {"pending", "visited", "completed", "skipped", "error"}
 READY_AUTH_STATUSES = {"ok", "ready", "client_delegated"}
 STATUS_COUNT_KEYS = ("draft", "queued", "running", "done", "timeout", "auth_missing", "error", "cancelled")
 TERMINAL_CANCEL_STATUSES = {"done", "cancelled"}
@@ -651,6 +652,127 @@ async def _studio_dispatch_batch_plan(
         "matrix": matrix,
         "handoffSnapshot": handoff,
     }
+
+
+def _dispatch_session_next_target(targets: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return next((target for target in targets if target.get("status", "pending") == "pending"), None)
+
+
+def _dispatch_session_view(session: dict[str, Any]) -> dict[str, Any]:
+    targets = session.get("targets") or []
+    for target in targets:
+        target.setdefault("status", "pending")
+    completed = sum(1 for target in targets if target.get("status") == "completed")
+    visited = sum(1 for target in targets if target.get("status") == "visited")
+    pending = sum(1 for target in targets if target.get("status") == "pending")
+    skipped_targets = sum(1 for target in targets if target.get("status") == "skipped")
+    errors = sum(1 for target in targets if target.get("status") == "error")
+    summary = dict(session.get("summary") or {})
+    summary.update(
+        {
+            "pending": pending,
+            "visited": visited,
+            "completed": completed,
+            "targetSkipped": skipped_targets,
+            "targetErrors": errors,
+        }
+    )
+    if not targets:
+        status = "blocked"
+    elif pending > 0:
+        status = "active"
+    elif visited > 0 or errors > 0:
+        status = "needs_review"
+    else:
+        status = "done"
+
+    view = dict(session)
+    view["targets"] = targets
+    view["summary"] = summary
+    view["status"] = status if session.get("status") != "cancelled" else "cancelled"
+    view["readyForDispatch"] = bool(targets) and view["status"] in {"active", "needs_review", "done"}
+    view["nextTarget"] = _dispatch_session_next_target(targets)
+    return view
+
+
+async def _create_dispatch_session(
+    *,
+    project_id: str | None = None,
+    source_segment_id: str | None = None,
+    page_ids: list[str] | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    plan = await _studio_dispatch_batch_plan(
+        project_id=project_id,
+        source_segment_id=source_segment_id,
+        page_ids=page_ids,
+        limit=limit,
+    )
+    now = now_iso()
+    targets = [{**target, "status": "pending", "evidence": {}} for target in plan.get("targets", [])]
+    session = {
+        "sessionId": make_id("dispatch_session"),
+        "status": "active" if targets else "blocked",
+        "createdAt": now,
+        "updatedAt": now,
+        "checkedAt": plan.get("checkedAt") or now,
+        "projectId": plan.get("projectId"),
+        "sourceSegmentId": plan.get("sourceSegmentId"),
+        "sourceMediaUrl": plan.get("sourceMediaUrl", ""),
+        "summary": plan.get("summary") or {},
+        "targets": targets,
+        "skippedTargets": plan.get("skippedTargets") or [],
+        "matrix": plan.get("matrix") or {},
+        "handoffSnapshot": plan.get("handoffSnapshot") or {},
+        "planStatus": plan.get("status"),
+    }
+    view = _dispatch_session_view(session)
+    STUDIO_STORE.save_dispatch_session(view)
+    return view
+
+
+def _get_dispatch_session_or_404(session_id: str) -> dict[str, Any]:
+    session = STUDIO_STORE.get_dispatch_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Dispatch session not found")
+    return _dispatch_session_view(session)
+
+
+def _update_dispatch_session_target(
+    session_id: str,
+    target_id: str,
+    *,
+    status: str,
+    evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if status not in VALID_DISPATCH_TARGET_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid dispatch target status")
+    session = STUDIO_STORE.get_dispatch_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Dispatch session not found")
+
+    target = next((entry for entry in session.get("targets", []) if entry.get("id") == target_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Dispatch target not found")
+
+    now = now_iso()
+    target["status"] = status
+    target["updatedAt"] = now
+    if status == "visited":
+        target["visitedAt"] = now
+    if status == "completed":
+        target["completedAt"] = now
+    if status == "skipped":
+        target["skippedAt"] = now
+    if status == "error":
+        target["erroredAt"] = now
+    if evidence:
+        target["evidence"] = evidence
+
+    session["updatedAt"] = now
+    view = _dispatch_session_view(session)
+    STUDIO_STORE.save_dispatch_session(view)
+    return view
 
 
 def _gate_status_from_report(status: str) -> str:
@@ -1789,6 +1911,43 @@ def register_studio_routes(app) -> None:
             source_segment_id=body.get("source_segment_id") or body.get("sourceSegmentId"),
             page_ids=[str(page_id) for page_id in page_ids],
             limit=max(1, min(int(body.get("limit") or 50), 100)),
+        )
+
+    @app.post("/api/studio/dispatch-sessions")
+    async def post_studio_dispatch_session(payload: Optional[dict[str, Any]] = Body(None)):
+        body = payload or {}
+        page_ids = body.get("page_ids") or body.get("pageIds") or []
+        if isinstance(page_ids, str):
+            page_ids = [page_ids]
+        if not isinstance(page_ids, list):
+            raise HTTPException(status_code=400, detail="page_ids must be a list")
+        return await _create_dispatch_session(
+            project_id=body.get("project_id") or body.get("projectId"),
+            source_segment_id=body.get("source_segment_id") or body.get("sourceSegmentId"),
+            page_ids=[str(page_id) for page_id in page_ids],
+            limit=max(1, min(int(body.get("limit") or 50), 100)),
+        )
+
+    @app.get("/api/studio/dispatch-sessions")
+    async def list_studio_dispatch_sessions(
+        project_id: Optional[str] = Query(None),
+        limit: int = Query(20, ge=1, le=200),
+    ):
+        sessions = [_dispatch_session_view(session) for session in STUDIO_STORE.list_dispatch_sessions(project_id=project_id, limit=limit)]
+        return {"sessions": sessions, "count": len(sessions)}
+
+    @app.get("/api/studio/dispatch-sessions/{session_id}")
+    async def get_studio_dispatch_session(session_id: str):
+        return _get_dispatch_session_or_404(session_id)
+
+    @app.post("/api/studio/dispatch-sessions/{session_id}/targets/{target_id}")
+    async def update_studio_dispatch_session_target(session_id: str, target_id: str, payload: dict[str, Any] = Body(...)):
+        evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+        return _update_dispatch_session_target(
+            session_id,
+            target_id,
+            status=str(payload.get("status") or ""),
+            evidence=evidence,
         )
 
     @app.get("/api/studio/handoff-snapshot")

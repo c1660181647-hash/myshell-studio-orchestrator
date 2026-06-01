@@ -41,6 +41,7 @@ import { fetchGenerateResult } from '../services/api';
 import {
   bulkStudioJobs,
   cancelStudioJob,
+  createStudioDispatchSession,
   extractGenerateTaskMedia,
   fetchStudioCoverage,
   fetchStudioDispatchMatrix,
@@ -54,6 +55,8 @@ import {
   fetchStudioProjectDeliveryReport,
   fetchStudioProjects,
   fetchStudioReadiness,
+  fetchStudioDispatchSession,
+  fetchStudioDispatchSessions,
   planStudioDispatchBatch,
   postStudioClientResult,
   resetStudioProject,
@@ -61,6 +64,7 @@ import {
   resolveStudioAssetUrl,
   streamStudioRun,
   submitDreamyMiniappJob,
+  updateStudioDispatchSessionTarget,
   verifyStudioCoverage,
 } from '../services/dreamyUnified';
 import {
@@ -68,6 +72,7 @@ import {
   forgetLastStudioProjectId,
   normalizeStudioNavigationPath,
   readLastStudioProjectId,
+  readStudioDispatchSession,
   saveLastStudioProjectId,
   saveStudioDispatchSession,
 } from '../services/studioSession';
@@ -81,6 +86,8 @@ import type {
   StudioDispatchMatrixEntry,
   StudioDispatchBatchPlan,
   StudioDispatchBatchTarget,
+  StudioDispatchSession,
+  StudioDispatchSessionTarget,
   StudioDispatchPreview,
   StudioExecutor,
   StudioExecutionRequest,
@@ -692,23 +699,39 @@ function StudioHandoffSnapshotStrip({
 
 function StudioDispatchBatchStrip({
   plan,
+  session,
   planning,
+  sessionRunning,
   onPlan,
+  onStartSession,
   onOpenTarget,
+  onCompleteTarget,
 }: {
   plan: StudioDispatchBatchPlan | null;
+  session: StudioDispatchSession | null;
   planning: boolean;
+  sessionRunning: boolean;
   onPlan: () => void;
-  onOpenTarget: (target: StudioDispatchBatchTarget) => void;
+  onStartSession: () => void;
+  onOpenTarget: (target: StudioDispatchBatchTarget | StudioDispatchSessionTarget) => void;
+  onCompleteTarget: (target: StudioDispatchSessionTarget) => void;
 }) {
   const summary = plan?.summary;
-  const nextNavigationTarget = plan?.targets.find((target) => target.executor === 'navigation' && target.navigationPath);
+  const sessionSummary = session?.summary;
+  const nextNavigationTarget =
+    session?.targets.find((target) => target.status === 'pending' && target.executor === 'navigation' && target.navigationPath) ||
+    plan?.targets.find((target) => target.executor === 'navigation' && target.navigationPath);
+  const visitedTarget = session?.targets.find((target) => target.status === 'visited');
   const skipped = plan?.skippedTargets || [];
+  const visibleTargets = (session?.targets || plan?.targets || []).slice(0, 5);
 
   return (
     <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
       <Pill tone={plan?.readyForDispatch ? 'success' : plan ? 'danger' : 'default'}>
         {plan ? `Batch ${plan.status}` : 'Batch not planned'}
+      </Pill>
+      <Pill tone={session?.status === 'active' ? 'success' : session ? 'hot' : 'default'}>
+        {session ? `Queue ${session.status}` : 'Queue not started'}
       </Pill>
       <button
         type="button"
@@ -721,12 +744,30 @@ function StudioDispatchBatchStrip({
       </button>
       <button
         type="button"
-        disabled={!nextNavigationTarget}
+        disabled={sessionRunning}
+        onClick={onStartSession}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <GitBranch size={12} className={sessionRunning ? 'animate-pulse' : ''} />
+        Start Queue
+      </button>
+      <button
+        type="button"
+        disabled={!nextNavigationTarget || sessionRunning}
         onClick={() => nextNavigationTarget && onOpenTarget(nextNavigationTarget)}
         className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
       >
         <Play size={12} />
         Open Next
+      </button>
+      <button
+        type="button"
+        disabled={!visitedTarget || sessionRunning}
+        onClick={() => visitedTarget && onCompleteTarget(visitedTarget)}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <CheckCircle2 size={12} />
+        Mark Done
       </button>
       {summary && (
         <>
@@ -738,7 +779,14 @@ function StudioDispatchBatchStrip({
           <Pill tone={summary.missingParams ? 'hot' : 'default'}>{`${summary.missingParams} missing params`}</Pill>
         </>
       )}
-      {plan?.targets.slice(0, 5).map((target) => (
+      {sessionSummary && (
+        <>
+          <Pill tone={sessionSummary.pending ? 'hot' : 'default'}>{`${sessionSummary.pending} pending`}</Pill>
+          <Pill tone={sessionSummary.visited ? 'hot' : 'default'}>{`${sessionSummary.visited} visited`}</Pill>
+          <Pill tone={sessionSummary.completed ? 'success' : 'default'}>{`${sessionSummary.completed} done`}</Pill>
+        </>
+      )}
+      {visibleTargets.map((target) => (
         <span
           key={target.id}
           title={target.navigationPath || target.dispatchMessage || target.recommendedAction}
@@ -746,7 +794,7 @@ function StudioDispatchBatchStrip({
         >
           <GitBranch size={12} className={target.executor === 'navigation' ? 'text-Cr-text-success-default-v2' : 'text-dreamy-brand-hot-v2'} />
           <span className="max-w-[120px] truncate">{target.pageName}</span>
-          <span className="text-Cr-text-subtlest-v2">{target.executor}</span>
+          <span className="text-Cr-text-subtlest-v2">{String('status' in target ? target.status : target.executor)}</span>
         </span>
       ))}
       {skipped.slice(0, 4).map((target) => (
@@ -1938,6 +1986,7 @@ export default function Dreamy() {
   const [coverageReport, setCoverageReport] = useState<StudioCoverageReport | null>(null);
   const [handoffSnapshot, setHandoffSnapshot] = useState<StudioHandoffSnapshot | null>(null);
   const [dispatchBatchPlan, setDispatchBatchPlan] = useState<StudioDispatchBatchPlan | null>(null);
+  const [dispatchSession, setDispatchSession] = useState<StudioDispatchSession | null>(null);
   const [queueStatusFilter, setQueueStatusFilter] = useState<StudioStatus | 'all'>('all');
   const [queuePageFilter, setQueuePageFilter] = useState<StudioApi | string>('all');
   const [queueAgentFilter, setQueueAgentFilter] = useState('all');
@@ -1946,6 +1995,7 @@ export default function Dreamy() {
   const [coverageVerifyRunning, setCoverageVerifyRunning] = useState(false);
   const [handoffRefreshing, setHandoffRefreshing] = useState(false);
   const [dispatchBatchPlanning, setDispatchBatchPlanning] = useState(false);
+  const [dispatchSessionRunning, setDispatchSessionRunning] = useState(false);
 
   const selectedSegment = useMemo(() => {
     const id = project?.selectedSegmentId;
@@ -2105,14 +2155,141 @@ export default function Dreamy() {
     }
   }, [applyHandoffSnapshot, dispatchBatchPlanning, project?.projectId, studioContextSourceSegmentId]);
 
+  const startDispatchSession = useCallback(async () => {
+    if (dispatchSessionRunning) return;
+    setDispatchSessionRunning(true);
+    try {
+      const projectId = project?.projectId || readLastStudioProjectId() || undefined;
+      const session = await createStudioDispatchSession({
+        projectId,
+        sourceSegmentId: studioContextSourceSegmentId,
+        limit: 50,
+      });
+      setDispatchSession(session);
+      setDispatchBatchPlan({
+        status: session.planStatus || session.status,
+        readyForDispatch: session.readyForDispatch,
+        checkedAt: session.checkedAt,
+        projectId: session.projectId,
+        sourceSegmentId: session.sourceSegmentId,
+        sourceMediaUrl: session.sourceMediaUrl,
+        summary: session.summary,
+        targets: session.targets,
+        skippedTargets: session.skippedTargets,
+        matrix: session.matrix,
+        handoffSnapshot: session.handoffSnapshot,
+      });
+      if (session.projectId) saveLastStudioProjectId(session.projectId);
+      applyHandoffSnapshot(session.handoffSnapshot);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: `Dispatch queue started with ${session.summary.pending} pending target${session.summary.pending === 1 ? '' : 's'}.`,
+          createdAt: nowIso(),
+        },
+      ]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: 'Dispatch queue start failed.',
+          error: error instanceof Error ? error.message : String(error),
+          createdAt: nowIso(),
+        },
+      ]);
+    } finally {
+      setDispatchSessionRunning(false);
+    }
+  }, [applyHandoffSnapshot, dispatchSessionRunning, project?.projectId, studioContextSourceSegmentId]);
+
+  const completeDispatchSessionTarget = useCallback(
+    async (target: StudioDispatchSessionTarget) => {
+      if (!dispatchSession?.sessionId || dispatchSessionRunning) return;
+      setDispatchSessionRunning(true);
+      try {
+        const session = await updateStudioDispatchSessionTarget({
+          sessionId: dispatchSession.sessionId,
+          targetId: target.id,
+          status: 'completed',
+          evidence: {
+            accepted: true,
+            completedFrom: 'studio',
+            pageId: target.pageId,
+            navigationPath: target.navigationPath || '',
+          },
+        });
+        setDispatchSession(session);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: makeId('assistant'),
+            role: 'assistant',
+            content: `${target.pageName} marked done; ${session.summary.pending} target${session.summary.pending === 1 ? '' : 's'} pending.`,
+            createdAt: nowIso(),
+          },
+        ]);
+      } catch (error) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: makeId('assistant'),
+            role: 'assistant',
+            content: 'Dispatch queue update failed.',
+            error: error instanceof Error ? error.message : String(error),
+            createdAt: nowIso(),
+          },
+        ]);
+      } finally {
+        setDispatchSessionRunning(false);
+      }
+    },
+    [dispatchSession?.sessionId, dispatchSessionRunning],
+  );
+
   const openDispatchBatchTarget = useCallback(
-    (target: StudioDispatchBatchTarget) => {
+    async (target: StudioDispatchBatchTarget | StudioDispatchSessionTarget) => {
       const targetPath = normalizeStudioNavigationPath(target.navigationPath);
       if (!targetPath) return;
-      const projectId = target.projectId || project?.projectId || '';
+      const projectId = target.projectId || dispatchSession?.projectId || project?.projectId || '';
       if (projectId) saveLastStudioProjectId(projectId);
+      if (dispatchSession?.sessionId && 'status' in target) {
+        setDispatchSessionRunning(true);
+        try {
+          const session = await updateStudioDispatchSessionTarget({
+            sessionId: dispatchSession.sessionId,
+            targetId: target.id,
+            status: 'visited',
+            evidence: {
+              openedFrom: 'studio',
+              pageId: target.pageId,
+              navigationPath: targetPath,
+            },
+          });
+          setDispatchSession(session);
+        } catch (error) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: makeId('assistant'),
+              role: 'assistant',
+              content: 'Dispatch queue visit could not be saved.',
+              error: error instanceof Error ? error.message : String(error),
+              createdAt: nowIso(),
+            },
+          ]);
+          setDispatchSessionRunning(false);
+          return;
+        }
+        setDispatchSessionRunning(false);
+      }
       saveStudioDispatchSession({
         projectId,
+        sessionId: dispatchSession?.sessionId,
+        targetId: target.id,
         pageId: String(target.pageId),
         pageName: target.pageName,
         navigationPath: targetPath,
@@ -2120,7 +2297,7 @@ export default function Dreamy() {
       });
       navigate(targetPath);
     },
-    [navigate, project?.projectId],
+    [dispatchSession?.projectId, dispatchSession?.sessionId, navigate, project?.projectId],
   );
 
   useEffect(() => {
@@ -2205,6 +2382,26 @@ export default function Dreamy() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const savedSession = readStudioDispatchSession();
+    const projectId = project?.projectId || savedSession?.projectId || readLastStudioProjectId() || undefined;
+    const restore = async () => {
+      if (savedSession?.sessionId) {
+        const session = await fetchStudioDispatchSession(savedSession.sessionId);
+        if (!cancelled) setDispatchSession(session);
+        return;
+      }
+      if (!projectId) return;
+      const [latestSession] = await fetchStudioDispatchSessions({ projectId, limit: 1 });
+      if (!cancelled && latestSession) setDispatchSession(latestSession);
+    };
+    void restore().catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.projectId]);
 
   useEffect(() => {
     if (!project?.projectId) {
@@ -2690,6 +2887,7 @@ export default function Dreamy() {
     setCoverageReport(null);
     setHandoffSnapshot(null);
     setDispatchBatchPlan(null);
+    setDispatchSession(null);
     forgetLastStudioProjectId();
     clearStudioDispatchSession();
     setMessages([
@@ -2947,9 +3145,13 @@ export default function Dreamy() {
       />
       <StudioDispatchBatchStrip
         plan={dispatchBatchPlan}
+        session={dispatchSession}
         planning={dispatchBatchPlanning}
+        sessionRunning={dispatchSessionRunning}
         onPlan={() => void planDispatchBatch()}
-        onOpenTarget={openDispatchBatchTarget}
+        onStartSession={() => void startDispatchSession()}
+        onOpenTarget={(target) => void openDispatchBatchTarget(target)}
+        onCompleteTarget={(target) => void completeDispatchSessionTarget(target)}
       />
 
       <div className="grid shrink-0 gap-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">

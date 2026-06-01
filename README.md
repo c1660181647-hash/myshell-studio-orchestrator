@@ -16,6 +16,7 @@ MyShell Studio Orchestrator is a unified agent dispatch center for Dreamy miniap
 - Project delivery reports that summarize accepted evidence, pending evidence, issue counts, unresolved actions, and per-segment evidence trails for operator handoff.
 - Dispatch matrix coverage for every registered MyShell page, including executor, default agent, route path, missing route params, auth status, and recommended dispatch action.
 - Batch dispatch planning for all ready MyShell targets, with openable navigation paths, executor groups, and explicit skip reasons for auth gaps or missing route params.
+- Recoverable dispatch sessions that persist batch target progress, next openable target, visited/completed/skipped states, and queue recovery after refresh or cross-page navigation.
 - One-click coverage verification for ready navigation surfaces, with accepted dispatch evidence for each verified page and explicit skip reasons for missing params, auth gaps, or non-batch-safe executors.
 - Handoff snapshots that package health, readiness, overview, dispatch matrix, coverage, project delivery evidence, artifacts, gaps, and next actions into a single delivery decision.
 
@@ -57,6 +58,10 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `GET /api/studio/overview`
 - `GET /api/studio/dispatch-matrix`
 - `POST /api/studio/dispatch-batch`
+- `POST /api/studio/dispatch-sessions`
+- `GET /api/studio/dispatch-sessions`
+- `GET /api/studio/dispatch-sessions/{session_id}`
+- `POST /api/studio/dispatch-sessions/{session_id}/targets/{target_id}`
 - `GET /api/studio/coverage`
 - `POST /api/studio/coverage/verify`
 - `GET /api/studio/handoff-snapshot`
@@ -82,6 +87,8 @@ http://127.0.0.1:5174/?test_route=dreamy
 `/api/studio/dispatch-matrix` returns a full page-to-agent routing matrix for every registered MyShell surface. It includes the recommended action (`navigate`, `execute-client`, or `execute-server`), default agent id, executor, auth status, navigation path, route params, missing params, and readiness summary so operators can audit and launch dispatch targets from one panel. Pass `project_id` and optional `source_segment_id` to compute contextual routes from the current media segment, such as filling Tag Generator's required `img` parameter from an accepted image.
 
 `POST /api/studio/dispatch-batch` turns the current dispatch matrix into an actionable batch plan without pretending to execute external adapters. Pass `project_id`, optional `source_segment_id`, optional `page_ids`, and optional `limit`. The response includes ready `targets`, `skippedTargets`, executor counts, navigation paths, source media context, the underlying matrix, and a fresh `handoffSnapshot`. The Studio UI exposes this as Plan All and Open Next so operators can move through all ready MyShell navigation targets while blocked client/server/auth/parameter targets stay visible.
+
+`POST /api/studio/dispatch-sessions` persists a batch plan as a recoverable queue. It accepts the same `project_id`, optional `source_segment_id`, optional `page_ids`, and optional `limit` as dispatch batch, then returns `sessionId`, `status`, `summary.pending`, `summary.visited`, `summary.completed`, `targets`, `skippedTargets`, and `nextTarget`. `GET /api/studio/dispatch-sessions` restores recent queues, `GET /api/studio/dispatch-sessions/{session_id}` restores one queue, and `POST /api/studio/dispatch-sessions/{session_id}/targets/{target_id}` marks a target `visited`, `completed`, `skipped`, or `error`. The Studio UI exposes this as Start Queue, Open Next, and Mark Done; Open Next records `visited` before leaving Studio, so returning to `/dreamy` can continue with the next pending navigation target instead of losing progress.
 
 `/api/studio/coverage` turns the dispatch matrix and persisted job evidence into a page-level delivery report. It marks each MyShell surface as `covered`, `pending`, `ready_unverified`, or `blocked`, includes the latest job/evidence per page, and summarizes covered, unverified, pending, blocked, and issue counts for release handoff.
 

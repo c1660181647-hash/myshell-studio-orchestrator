@@ -59,6 +59,17 @@ class StudioStore:
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_job_id ON evidence(job_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_project_id ON evidence(project_id)")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS dispatch_sessions (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT,
+                    payload TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_dispatch_sessions_project_id ON dispatch_sessions(project_id)")
 
     def save_project(self, project: dict[str, Any]) -> None:
         with self._lock, self._connect() as conn:
@@ -89,6 +100,7 @@ class StudioStore:
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
             conn.execute("DELETE FROM jobs WHERE project_id = ?", (project_id,))
             conn.execute("DELETE FROM evidence WHERE project_id = ?", (project_id,))
+            conn.execute("DELETE FROM dispatch_sessions WHERE project_id = ?", (project_id,))
 
     def save_job(self, job: dict[str, Any]) -> None:
         with self._lock, self._connect() as conn:
@@ -189,11 +201,48 @@ class StudioStore:
             rows = conn.execute(query, tuple(params)).fetchall()
         return [json.loads(row["payload"]) for row in rows]
 
+    def save_dispatch_session(self, session: dict[str, Any]) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO dispatch_sessions(id, project_id, payload, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    project_id=excluded.project_id,
+                    payload=excluded.payload,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    session["sessionId"],
+                    session.get("projectId"),
+                    json.dumps(session, ensure_ascii=False),
+                    session.get("updatedAt", ""),
+                ),
+            )
+
+    def get_dispatch_session(self, session_id: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT payload FROM dispatch_sessions WHERE id = ?", (session_id,)).fetchone()
+        return json.loads(row["payload"]) if row else None
+
+    def list_dispatch_sessions(self, project_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        query = "SELECT payload FROM dispatch_sessions"
+        params: tuple[Any, ...] = ()
+        if project_id:
+            query += " WHERE project_id = ?"
+            params = (project_id,)
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params = (*params, max(1, min(limit, 200)))
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [json.loads(row["payload"]) for row in rows]
+
     def reset_all(self) -> None:
         with self._lock, self._connect() as conn:
             conn.execute("DELETE FROM projects")
             conn.execute("DELETE FROM jobs")
             conn.execute("DELETE FROM evidence")
+            conn.execute("DELETE FROM dispatch_sessions")
 
 
 STUDIO_STORE = StudioStore()
