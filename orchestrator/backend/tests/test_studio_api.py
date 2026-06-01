@@ -242,6 +242,43 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(agents["miniapp-page-navigator"]["jobCounts"]["done"], 1)
         self.assertEqual([job["jobId"] for job in body["latestJobs"]], [library_job_id, dreamy_job_id])
 
+    def test_bulk_job_actions_apply_to_filtered_queue(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "queue dreamy segment", "agent_id": "dreamy-miniapp-executor"},
+        ) as response:
+            dreamy_events = _sse_events("".join(response.iter_text()))
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "open my generated library", "page_id": "library"},
+        ) as response:
+            library_events = _sse_events("".join(response.iter_text()))
+
+        dreamy_job_id = next(payload for name, payload in dreamy_events if name == "execution_request")["jobId"]
+        library_job_id = next(payload for name, payload in library_events if name == "execution_request")["jobId"]
+
+        cancelled = self.client.post("/api/studio/jobs/bulk", json={"action": "cancel", "status": "queued"})
+        self.assertEqual(cancelled.status_code, 200)
+        cancel_body = cancelled.json()
+        self.assertEqual(cancel_body["action"], "cancel")
+        self.assertEqual(cancel_body["matchedCount"], 1)
+        self.assertEqual([job["jobId"] for job in cancel_body["jobs"]], [dreamy_job_id])
+        self.assertEqual(cancel_body["jobs"][0]["status"], "cancelled")
+        self.assertEqual(self.client.get(f"/api/studio/jobs/{dreamy_job_id}").json()["status"], "cancelled")
+        self.assertEqual(self.client.get(f"/api/studio/jobs/{library_job_id}").json()["status"], "done")
+
+        retried = self.client.post("/api/studio/jobs/bulk", json={"action": "retry", "page_id": "library"})
+        self.assertEqual(retried.status_code, 200)
+        retry_body = retried.json()
+        self.assertEqual(retry_body["action"], "retry")
+        self.assertEqual(retry_body["matchedCount"], 1)
+        self.assertEqual([job["jobId"] for job in retry_body["jobs"]], [library_job_id])
+        self.assertEqual(retry_body["jobs"][0]["status"], "queued")
+        self.assertEqual(retry_body["jobs"][0]["attempt"], 2)
+        self.assertEqual(retry_body["executionRequests"][0]["jobId"], library_job_id)
+
     def test_health_reports_delivery_components(self) -> None:
         health = self.client.get("/api/health")
         self.assertEqual(health.status_code, 200)

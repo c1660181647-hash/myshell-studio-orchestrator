@@ -39,6 +39,7 @@ import exampleMultiple from '../assets/example-multiple.png';
 import { useEnergy } from '../contexts/EnergyContext';
 import { fetchGenerateResult } from '../services/api';
 import {
+  bulkStudioJobs,
   cancelStudioJob,
   extractGenerateTaskMedia,
   fetchStudioDispatchPreview,
@@ -1534,6 +1535,7 @@ export default function Dreamy() {
   const [queuePageFilter, setQueuePageFilter] = useState<StudioApi | string>('all');
   const [queueAgentFilter, setQueueAgentFilter] = useState('all');
   const [dispatchPreview, setDispatchPreview] = useState<StudioDispatchPreview | null>(null);
+  const [bulkActionRunning, setBulkActionRunning] = useState<'cancel' | 'retry' | null>(null);
 
   const selectedSegment = useMemo(() => {
     const id = project?.selectedSegmentId;
@@ -2140,6 +2142,52 @@ export default function Dreamy() {
     });
   };
 
+  const runBulkJobAction = async (action: 'cancel' | 'retry') => {
+    if (bulkActionRunning || !displayedHubJobs.length) return;
+    setBulkActionRunning(action);
+    const result = await bulkStudioJobs({
+      action,
+      status: queueStatusFilter === 'all' ? undefined : queueStatusFilter,
+      pageId: queuePageFilter === 'all' ? undefined : queuePageFilter,
+      agentId: queueAgentFilter === 'all' ? undefined : queueAgentFilter,
+      limit: 100,
+    }).catch((error) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: `Bulk ${action} failed.`,
+          error: error instanceof Error ? error.message : String(error),
+          createdAt: nowIso(),
+        },
+      ]);
+      return null;
+    });
+    setBulkActionRunning(null);
+    if (!result) return;
+    result.projects?.forEach((nextProject) => mergeProject(nextProject));
+    result.jobs.forEach((job) => mergeJob(job));
+    await Promise.all([
+      fetchStudioJobs({
+        limit: 50,
+        status: queueStatusFilter === 'all' ? undefined : queueStatusFilter,
+        pageId: queuePageFilter === 'all' ? undefined : queuePageFilter,
+        agentId: queueAgentFilter === 'all' ? undefined : queueAgentFilter,
+      }).then((jobs) => setHubJobs(jobs)).catch(() => undefined),
+      fetchStudioOverview().then((overview) => setStudioOverview(overview)).catch(() => undefined),
+    ]);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: makeId('assistant'),
+        role: 'assistant',
+        content: `Bulk ${action} applied to ${result.matchedCount} job${result.matchedCount === 1 ? '' : 's'}.`,
+        createdAt: nowIso(),
+      },
+    ]);
+  };
+
   return (
     <div className="flex h-full min-h-[100dvh] flex-col bg-Cr-Bg-soft-v2 text-Cr-text-default-v2">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3">
@@ -2240,12 +2288,12 @@ export default function Dreamy() {
       </div>
 
       <div className="shrink-0 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">
-        <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-xs font-semibold text-Cr-text-subtle-v2">
             <Layers3 size={14} />
             Page Registry
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex max-w-full items-center gap-2 overflow-x-auto [-webkit-overflow-scrolling:touch]">
             <Pill>{`${studioOverview?.totals?.pages || overviewPages.length} pages`}</Pill>
             <Pill tone={studioOverview?.totals?.issues ? 'danger' : 'default'}>{`${studioOverview?.totals?.issues || 0} issues`}</Pill>
           </div>
@@ -2295,7 +2343,27 @@ export default function Dreamy() {
             <GitBranch size={14} />
             Dispatch Queue
           </div>
-          <Pill>{`${displayedHubJobs.length} jobs`}</Pill>
+          <div className="flex items-center gap-2">
+            <Pill>{`${displayedHubJobs.length} jobs`}</Pill>
+            <button
+              type="button"
+              disabled={!displayedHubJobs.length || bulkActionRunning !== null}
+              onClick={() => void runBulkJobAction('cancel')}
+              className="inline-flex h-7 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:opacity-40"
+            >
+              <X size={12} />
+              Bulk Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!displayedHubJobs.length || bulkActionRunning !== null}
+              onClick={() => void runBulkJobAction('retry')}
+              className="inline-flex h-7 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:opacity-40"
+            >
+              <RefreshCcw size={12} className={bulkActionRunning === 'retry' ? 'animate-spin' : ''} />
+              Bulk Retry
+            </button>
+          </div>
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
           <select

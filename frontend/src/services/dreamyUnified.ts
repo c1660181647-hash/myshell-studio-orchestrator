@@ -674,6 +674,36 @@ export async function retryStudioJob(jobId: string): Promise<{ project?: StudioP
   return response.json();
 }
 
+export async function bulkStudioJobs(options: {
+  action: 'cancel' | 'retry';
+  projectId?: string;
+  status?: StudioStatus | string;
+  pageId?: StudioApi | string;
+  agentId?: string;
+  limit?: number;
+}): Promise<{
+  action: 'cancel' | 'retry';
+  matchedCount: number;
+  jobs: StudioJob[];
+  projects?: StudioProject[];
+  executionRequests?: StudioExecutionRequest[];
+}> {
+  const response = await fetch(getStudioRootEndpoint('/api/studio/jobs/bulk'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: options.action,
+      project_id: options.projectId,
+      status: options.status,
+      page_id: options.pageId,
+      agent_id: options.agentId,
+      limit: options.limit || 100,
+    }),
+  });
+  if (!response.ok) throw new Error(`Studio bulk ${options.action} ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
 export async function resetStudioProject(projectId: string): Promise<void> {
   const response = await fetch(`${getStudioProjectEndpoint(projectId)}/reset`, { method: 'POST' });
   if (!response.ok) {

@@ -184,6 +184,46 @@ def _studio_overview(limit: int = 50) -> dict[str, Any]:
     }
 
 
+def _cancel_job_record(job: dict[str, Any]) -> tuple[dict[str, Any], StudioProject | None]:
+    updated_job = _update_job(
+        job,
+        status="cancelled",
+        evidence=_evidence("cancelled", job.get("pageId", "studio"), message="Cancelled by Studio operator."),
+    )
+    project = _get_project(updated_job["projectId"])
+    if project:
+        segment = _find_segment(project, updated_job["segmentId"])
+        if segment:
+            segment["status"] = "cancelled"
+            segment["evidence"] = updated_job["evidence"]
+            segment["updatedAt"] = now_iso()
+        project["updatedAt"] = now_iso()
+        _sync_project_jobs(project)
+    return updated_job, project
+
+
+def _retry_job_record(job: dict[str, Any]) -> tuple[dict[str, Any], StudioProject | None, dict[str, Any] | None]:
+    updated_job = _update_job(
+        job,
+        status="queued",
+        attempt=int(job.get("attempt") or 1) + 1,
+        evidence=_evidence("queued", job.get("pageId", "studio"), message="Retry queued; waiting for adapter execution."),
+    )
+    project = _get_project(updated_job["projectId"])
+    if project:
+        segment = _find_segment(project, updated_job["segmentId"])
+        if segment:
+            segment["status"] = "queued"
+            segment["evidence"] = updated_job["evidence"]
+            segment["updatedAt"] = now_iso()
+        project["updatedAt"] = now_iso()
+        execution_request = _build_execution_request(project, updated_job)
+        _sync_project_jobs(project)
+    else:
+        execution_request = None
+    return updated_job, project, execution_request
+
+
 async def _dispatch_preview(
     *,
     message: str,
@@ -1098,6 +1138,40 @@ def register_studio_routes(app) -> None:
         )
         return {"jobs": [_job_with_evidence(job) for job in jobs], "count": len(jobs)}
 
+    @app.post("/api/studio/jobs/bulk")
+    async def bulk_studio_jobs(payload: dict[str, Any] = Body(...)):
+        action = str(payload.get("action") or "").strip()
+        if action not in {"cancel", "retry"}:
+            raise HTTPException(status_code=400, detail="Bulk action must be cancel or retry")
+        jobs = STUDIO_STORE.list_jobs(
+            project_id=payload.get("project_id"),
+            status=payload.get("status"),
+            page_id=payload.get("page_id"),
+            agent_id=payload.get("agent_id"),
+            limit=int(payload.get("limit") or 100),
+        )
+        updated_jobs: list[dict[str, Any]] = []
+        projects_by_id: dict[str, StudioProject] = {}
+        execution_requests: list[dict[str, Any]] = []
+        for job in jobs:
+            if action == "cancel":
+                updated_job, project = _cancel_job_record(job)
+                execution_request = None
+            else:
+                updated_job, project, execution_request = _retry_job_record(job)
+            updated_jobs.append(_job_with_evidence(updated_job))
+            if project:
+                projects_by_id[project["projectId"]] = project
+            if execution_request:
+                execution_requests.append(execution_request)
+        return {
+            "action": action,
+            "matchedCount": len(updated_jobs),
+            "jobs": updated_jobs,
+            "projects": list(projects_by_id.values()),
+            "executionRequests": execution_requests,
+        }
+
     @app.get("/api/studio/jobs/{job_id}/evidence")
     async def get_studio_job_evidence(job_id: str):
         job = STUDIO_STORE.get_job(job_id)
@@ -1117,20 +1191,7 @@ def register_studio_routes(app) -> None:
         job = STUDIO_STORE.get_job(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
-        job = _update_job(
-            job,
-            status="cancelled",
-            evidence=_evidence("cancelled", job.get("pageId", "studio"), message="Cancelled by Studio operator."),
-        )
-        project = _get_project(job["projectId"])
-        if project:
-            segment = _find_segment(project, job["segmentId"])
-            if segment:
-                segment["status"] = "cancelled"
-                segment["evidence"] = job["evidence"]
-                segment["updatedAt"] = now_iso()
-            project["updatedAt"] = now_iso()
-            _sync_project_jobs(project)
+        job, project = _cancel_job_record(job)
         return {"job": _job_with_evidence(job), "project": project}
 
     @app.post("/api/studio/jobs/{job_id}/retry")
@@ -1138,22 +1199,5 @@ def register_studio_routes(app) -> None:
         job = STUDIO_STORE.get_job(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
-        job = _update_job(
-            job,
-            status="queued",
-            attempt=int(job.get("attempt") or 1) + 1,
-            evidence=_evidence("queued", job.get("pageId", "studio"), message="Retry queued; waiting for adapter execution."),
-        )
-        project = _get_project(job["projectId"])
-        if project:
-            segment = _find_segment(project, job["segmentId"])
-            if segment:
-                segment["status"] = "queued"
-                segment["evidence"] = job["evidence"]
-                segment["updatedAt"] = now_iso()
-            project["updatedAt"] = now_iso()
-            execution_request = _build_execution_request(project, job)
-            _sync_project_jobs(project)
-        else:
-            execution_request = None
+        job, project, execution_request = _retry_job_record(job)
         return {"job": _job_with_evidence(job), "project": project, "executionRequest": execution_request}
