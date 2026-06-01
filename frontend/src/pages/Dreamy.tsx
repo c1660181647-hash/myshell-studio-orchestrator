@@ -2223,6 +2223,14 @@ export default function Dreamy() {
           },
         });
         setDispatchSession(session);
+        const snapshot = await refreshHandoffSnapshot({
+          projectId: session.projectId || project?.projectId,
+          sourceSegmentId: session.sourceSegmentId || studioContextSourceSegmentId,
+          interactive: false,
+        });
+        if (snapshot) {
+          setDispatchBatchPlan((current) => current ? { ...current, handoffSnapshot: snapshot } : current);
+        }
         setMessages((prev) => [
           ...prev,
           {
@@ -2247,7 +2255,7 @@ export default function Dreamy() {
         setDispatchSessionRunning(false);
       }
     },
-    [dispatchSession?.sessionId, dispatchSessionRunning],
+    [dispatchSession?.sessionId, dispatchSessionRunning, project?.projectId, refreshHandoffSnapshot, studioContextSourceSegmentId],
   );
 
   const openDispatchBatchTarget = useCallback(

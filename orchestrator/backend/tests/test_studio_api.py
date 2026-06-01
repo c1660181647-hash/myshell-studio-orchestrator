@@ -1110,6 +1110,30 @@ class StudioApiTest(unittest.TestCase):
         completed_body = completed.json()
         self.assertEqual(completed_body["summary"]["visited"], 0)
         self.assertEqual(completed_body["summary"]["completed"], 1)
+        completed_target = next(target for target in completed_body["targets"] if target["id"] == first_target_id)
+        self.assertEqual(completed_target["evidence"]["accepted"], True)
+        self.assertTrue(completed_target["evidenceJobId"].startswith("job_"))
+
+        covered_jobs = self.client.get(
+            "/api/studio/jobs",
+            params={"project_id": source_meta["projectId"], "page_id": first_target["pageId"]},
+        )
+        self.assertEqual(covered_jobs.status_code, 200)
+        completed_page_jobs = [
+            job for job in covered_jobs.json()["jobs"] if job.get("evidence", {}).get("accepted")
+        ]
+        self.assertTrue(completed_page_jobs)
+        self.assertEqual(completed_page_jobs[0]["status"], "done")
+        self.assertEqual(completed_page_jobs[0]["evidence"]["dispatchSessionId"], session["sessionId"])
+        self.assertEqual(completed_page_jobs[0]["evidence"]["dispatchTargetId"], first_target_id)
+
+        coverage = self.client.get(
+            "/api/studio/coverage",
+            params={"project_id": source_meta["projectId"], "source_segment_id": source_execution["segmentId"]},
+        )
+        self.assertEqual(coverage.status_code, 200)
+        covered_page = next(page for page in coverage.json()["pages"] if page["pageId"] == first_target["pageId"])
+        self.assertEqual(covered_page["coverageStatus"], "covered")
 
         PROJECTS.clear()
         restored = self.client.get(f"/api/studio/dispatch-sessions/{session['sessionId']}")

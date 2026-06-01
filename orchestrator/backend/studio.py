@@ -428,6 +428,8 @@ def _verify_navigation_page(
     coverage_page: dict[str, Any],
     source_segment: StudioSegment | None,
     resolved_source_segment_id: str | None,
+    evidence_patch: dict[str, Any] | None = None,
+    message: str | None = None,
 ) -> dict[str, Any]:
     page = get_page(coverage_page["pageId"])
     prompt = f"Verify {page['name']} dispatch coverage."
@@ -454,7 +456,7 @@ def _verify_navigation_page(
         "done",
         page["id"],
         accepted=True,
-        message=f"Coverage verification prepared navigation dispatch for {page['name']} at {navigation_path}.",
+        message=message or f"Coverage verification prepared navigation dispatch for {page['name']} at {navigation_path}.",
     )
     segment["evidence"].update(
         {
@@ -465,6 +467,8 @@ def _verify_navigation_page(
             "coverageVerification": True,
         }
     )
+    if evidence_patch:
+        segment["evidence"].update(evidence_patch)
     segment["updatedAt"] = now_iso()
     _update_job(
         job,
@@ -655,7 +659,16 @@ async def _studio_dispatch_batch_plan(
 
 
 def _dispatch_session_next_target(targets: list[dict[str, Any]]) -> dict[str, Any] | None:
-    return next((target for target in targets if target.get("status", "pending") == "pending"), None)
+    return next(
+        (
+            target
+            for target in targets
+            if target.get("status", "pending") == "pending"
+            and target.get("executor") == "navigation"
+            and target.get("navigationPath")
+        ),
+        None,
+    ) or next((target for target in targets if target.get("status", "pending") == "pending"), None)
 
 
 def _dispatch_session_view(session: dict[str, Any]) -> dict[str, Any]:
@@ -738,6 +751,58 @@ def _get_dispatch_session_or_404(session_id: str) -> dict[str, Any]:
     return _dispatch_session_view(session)
 
 
+def _record_dispatch_session_target_completion(
+    session: dict[str, Any],
+    target: dict[str, Any],
+    operator_evidence: dict[str, Any],
+) -> dict[str, Any] | None:
+    if target.get("executor") != "navigation":
+        return None
+    if target.get("evidenceJobId"):
+        existing_job = _job_with_evidence(STUDIO_STORE.get_job(str(target["evidenceJobId"])))
+        if existing_job:
+            target["jobId"] = existing_job["jobId"]
+            target["evidence"] = {
+                **(target.get("evidence") or {}),
+                **(existing_job.get("evidence") or {}),
+            }
+        return existing_job
+
+    project_id = target.get("projectId") or session.get("projectId")
+    project = _get_project(str(project_id)) if project_id else None
+    if not project:
+        return None
+
+    source_segment_id = target.get("sourceSegmentId") or session.get("sourceSegmentId")
+    source_segment = _resolve_source_segment(project, str(source_segment_id) if source_segment_id else None)
+    resolved_source_segment_id = source_segment.get("id") if source_segment else source_segment_id
+    evidence_patch = {
+        "coverageVerification": True,
+        "dispatchSessionId": session["sessionId"],
+        "dispatchTargetId": target["id"],
+        "operatorEvidence": operator_evidence,
+    }
+    job = _verify_navigation_page(
+        project,
+        {
+            "pageId": target["pageId"],
+            "pageName": target.get("pageName") or target["pageId"],
+            "agentId": target.get("agentId"),
+        },
+        source_segment,
+        str(resolved_source_segment_id) if resolved_source_segment_id else None,
+        evidence_patch=evidence_patch,
+        message=f"Dispatch session marked {target.get('pageName') or target['pageId']} complete.",
+    )
+    target["evidenceJobId"] = job["jobId"]
+    target["jobId"] = job["jobId"]
+    target["evidence"] = {
+        **(target.get("evidence") or {}),
+        **(job.get("evidence") or {}),
+    }
+    return job
+
+
 def _update_dispatch_session_target(
     session_id: str,
     target_id: str,
@@ -768,6 +833,8 @@ def _update_dispatch_session_target(
         target["erroredAt"] = now
     if evidence:
         target["evidence"] = evidence
+    if status == "completed":
+        _record_dispatch_session_target_completion(session, target, evidence or {})
 
     session["updatedAt"] = now
     view = _dispatch_session_view(session)
