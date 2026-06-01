@@ -4,7 +4,7 @@ MyShell Studio Orchestrator is a unified agent dispatch center for Dreamy miniap
 
 ## What Is Included
 
-- `/dreamy` Studio UI with conversation, preview timeline, canvas mode, page adapter selection, persisted job queue restore, cancel/retry, auth state, evidence status, and a return dock after cross-page dispatch.
+- `/dreamy` Studio UI with conversation, preview timeline, canvas mode, mobile-ready page/agent selection, persisted job queue restore, cancel/retry, auth state, evidence status, and a return dock after cross-page dispatch.
 - FastAPI backend with persistent Studio projects/jobs/evidence trails, SSE routing, and typed MyShell page/agent registries.
 - Dreamy miniapp client executor for `generate`, `generate/result`, `task/running`, `task/cancel`, `task/retry`, and library-backed refresh flows.
 - MyShell Art CDP adapter surface for browser-cookie-backed page execution. Missing cookies become `auth_missing`, not fake success.

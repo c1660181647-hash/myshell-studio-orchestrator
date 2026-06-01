@@ -1533,6 +1533,23 @@ export default function Dreamy() {
     () => agents.find((agent) => agent.id === selectedAgentId) || null,
     [agents, selectedAgentId],
   );
+  const pageOptions = useMemo(
+    () => (pages.length ? pages : [{ id: 'dreamy-miniapp', name: 'Dreamy Miniapp' } as StudioPageAdapter]),
+    [pages],
+  );
+  const agentOptions = useMemo(
+    () => (
+      agents.length
+        ? agents
+        : [{ id: DEFAULT_STUDIO_AGENT_ID, label: 'Dreamy Miniapp Executor', pageId: 'dreamy-miniapp', role: '', capabilities: [] }]
+    ),
+    [agents],
+  );
+  const changePage = useCallback((nextPageId: string) => {
+    const nextPage = pages.find((page) => page.id === nextPageId) || null;
+    setSelectedPageId(nextPageId);
+    setSelectedAgentId(defaultAgentIdForPage(nextPage));
+  }, [pages]);
 
   useEffect(() => {
     if (!previewUrl) return;
@@ -2051,40 +2068,6 @@ export default function Dreamy() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <select
-            value={selectedPageId}
-            onChange={(event) => {
-              const nextPageId = event.target.value;
-              const nextPage = pages.find((page) => page.id === nextPageId) || null;
-              setSelectedPageId(nextPageId);
-              setSelectedAgentId(defaultAgentIdForPage(nextPage));
-            }}
-            className="hidden h-9 max-w-[160px] rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 text-xs font-semibold text-Cr-text-subtle-v2 outline-none sm:block"
-            aria-label="Studio page adapter"
-          >
-            {(pages.length ? pages : [{ id: 'dreamy-miniapp', name: 'Dreamy Miniapp' } as StudioPageAdapter]).map((page) => (
-              <option key={page.id} value={page.id}>{page.name}</option>
-            ))}
-          </select>
-          <select
-            value={selectedAgentId}
-            onChange={(event) => setSelectedAgentId(event.target.value)}
-            className="hidden h-9 max-w-[170px] rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 text-xs font-semibold text-Cr-text-subtle-v2 outline-none md:block"
-            aria-label="Studio agent"
-          >
-            {(agents.length ? agents : [{ id: DEFAULT_STUDIO_AGENT_ID, label: 'Dreamy Miniapp Executor', pageId: 'dreamy-miniapp', role: '', capabilities: [] }]).map((agent) => (
-              <option key={agent.id} value={agent.id}>{agent.label}</option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={refreshSelectedTask}
-            disabled={!selectedSegment?.taskId}
-            className="hidden h-9 items-center gap-2 rounded-lg-v2 bg-Cr-Bg-surface-subtle-v2 px-3 text-xs font-semibold text-Cr-text-subtle-v2 disabled:opacity-40 sm:inline-flex"
-          >
-            <RotateCcw size={14} />
-            Refresh
-          </button>
           <button
             type="button"
             onClick={resetProject}
@@ -2105,6 +2088,44 @@ export default function Dreamy() {
       </header>
 
       <StudioHealthStrip health={studioHealth} />
+
+      <div className="grid shrink-0 gap-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+        <label className="grid gap-1">
+          <span className="text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2">Page</span>
+          <select
+            value={selectedPageId}
+            onChange={(event) => changePage(event.target.value)}
+            className="h-10 min-w-0 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 text-xs font-semibold text-Cr-text-subtle-v2 outline-none"
+            aria-label="Studio page adapter"
+          >
+            {pageOptions.map((page) => (
+              <option key={page.id} value={page.id}>{page.name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-1">
+          <span className="text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2">Agent</span>
+          <select
+            value={selectedAgentId}
+            onChange={(event) => setSelectedAgentId(event.target.value)}
+            className="h-10 min-w-0 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 text-xs font-semibold text-Cr-text-subtle-v2 outline-none"
+            aria-label="Studio agent"
+          >
+            {agentOptions.map((agent) => (
+              <option key={agent.id} value={agent.id}>{agent.label}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={refreshSelectedTask}
+          disabled={!selectedSegment?.taskId}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg-v2 bg-Cr-Bg-surface-subtle-v2 px-3 text-xs font-semibold text-Cr-text-subtle-v2 disabled:opacity-40 sm:self-end"
+        >
+          <RotateCcw size={14} />
+          Refresh
+        </button>
+      </div>
 
       <div className="grid h-11 shrink-0 grid-cols-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-1 lg:hidden">
         {(['chat', 'preview'] as TabKey[]).map((tab) => (
