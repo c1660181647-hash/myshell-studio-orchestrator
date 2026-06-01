@@ -450,6 +450,7 @@ export interface StudioDeliveryBundle {
   acceptedJobs: StudioJob[];
   remainingTargets: StudioDispatchSessionTarget[];
   skippedTargets: Array<StudioDispatchBatchSkip | StudioDispatchSessionTarget>;
+  errorTargets: StudioDispatchSessionTarget[];
   reports: {
     deliveryReport: StudioProjectDeliveryReport;
     coverage: StudioCoverageReport;

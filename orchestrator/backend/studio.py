@@ -2485,6 +2485,14 @@ async def _project_delivery_bundle(
     ]
     skipped_targets = [*batch_skipped_targets, *operator_skipped_targets]
     remaining_targets = [target for target in all_targets if target.get("status", "pending") in {"pending", "visited"}]
+    error_targets = [
+        {
+            **target,
+            "message": target.get("message") or (target.get("evidence") or {}).get("message") or "Target needs operator review.",
+        }
+        for target in all_targets
+        if target.get("status") == "error"
+    ]
     target_status_counts = {
         "pending": sum(1 for target in all_targets if target.get("status", "pending") == "pending"),
         "visited": sum(1 for target in all_targets if target.get("status") == "visited"),
@@ -2531,6 +2539,7 @@ async def _project_delivery_bundle(
         "acceptedJobs": accepted_jobs,
         "remainingTargets": remaining_targets,
         "skippedTargets": skipped_targets,
+        "errorTargets": error_targets,
         "reports": {
             "deliveryReport": delivery_report,
             "coverage": coverage,

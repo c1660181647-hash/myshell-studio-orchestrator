@@ -1955,6 +1955,68 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(skipped_by_id[skipped_target["id"]]["status"], "skipped")
         self.assertEqual(skipped_by_id[skipped_target["id"]]["reason"], "operator_skipped")
 
+    def test_project_delivery_bundle_keeps_error_targets_for_review(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            with self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={"message": "create error handoff source image"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                events = _sse_events("".join(response.iter_text()))
+
+            meta = next(payload for name, payload in events if name == "meta")
+            execution = next(payload for name, payload in events if name == "execution_request")
+            update = self.client.post(
+                f"/api/studio/projects/{meta['projectId']}/client-result",
+                json={
+                    "segmentId": execution["segmentId"],
+                    "jobId": execution["jobId"],
+                    "status": "done",
+                    "taskId": "task_error_handoff_source",
+                    "url": "https://example.com/error-handoff-source.png",
+                    "posterUrl": "https://example.com/error-handoff-source.png",
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            session_response = self.client.post(
+                "/api/studio/dispatch-sessions",
+                json={
+                    "project_id": meta["projectId"],
+                    "source_segment_id": execution["segmentId"],
+                    "limit": 50,
+                },
+            )
+            self.assertEqual(session_response.status_code, 200)
+            session = session_response.json()
+            error_target = session["nextTarget"]
+            errored = self.client.post(
+                f"/api/studio/dispatch-sessions/{session['sessionId']}/targets/{error_target['id']}",
+                json={"status": "error", "evidence": {"message": "operator saw broken target"}},
+            )
+            self.assertEqual(errored.status_code, 200)
+
+            bundle = self.client.get(
+                f"/api/studio/projects/{meta['projectId']}/delivery-bundle",
+                params={"source_segment_id": execution["segmentId"]},
+            )
+
+        self.assertEqual(bundle.status_code, 200)
+        body = bundle.json()
+        self.assertEqual(body["summary"]["errorTargets"], 1)
+        plan_skipped_count = sum(1 for target in body["skippedTargets"] if str(target["id"]).startswith("skip:"))
+        self.assertEqual(body["summary"]["dispatchTargets"], len(body["dispatchSessions"][0]["targets"]) + plan_skipped_count)
+        error_by_id = {target["id"]: target for target in body["errorTargets"]}
+        self.assertIn(error_target["id"], error_by_id)
+        self.assertEqual(error_by_id[error_target["id"]]["status"], "error")
+        self.assertEqual(error_by_id[error_target["id"]]["message"], "operator saw broken target")
+
     def test_job_queue_can_filter_by_page_and_agent(self) -> None:
         with self.client.stream(
             "POST",

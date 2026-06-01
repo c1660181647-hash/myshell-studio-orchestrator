@@ -12,7 +12,7 @@ The backend exposes the Studio API for MyShell page and agent dispatch. It keeps
 - `POST /api/studio/actions/resolve` executes safe audit actions such as targeted `verify-ready`, or returns explicit `manual_required` instructions with concrete `url`/`retryUrl`/`cancelUrl` values for every handoff/audit operator action.
 - `POST /api/studio/actions/resolve-batch` executes multiple safe audit actions, preserves every manual operator action with instructions, and returns a refreshed audit.
 - `GET /api/studio/projects` lists recent persisted projects for Studio restore.
-- `GET /api/studio/projects/{project_id}/delivery-bundle?download=1` returns the operator handoff bundle as a downloadable JSON attachment. Bundle `remainingTargets` includes both `pending` and `visited` dispatch targets, so opened-but-uncompleted pages stay visible during handoff. Bundle `skippedTargets` includes both plan-time skips and operator-skipped dispatch targets.
+- `GET /api/studio/projects/{project_id}/delivery-bundle?download=1` returns the operator handoff bundle as a downloadable JSON attachment. Bundle `remainingTargets` includes both `pending` and `visited` dispatch targets, so opened-but-uncompleted pages stay visible during handoff. Bundle `skippedTargets` includes both plan-time skips and operator-skipped dispatch targets, and `errorTargets` lists dispatch targets that need operator review.
 - `GET /api/studio/jobs` lists the persisted queue with optional `project_id` and `status` filters.
 - `GET /api/studio/jobs/{job_id}` and `/evidence` return current state plus evidence history.
 - `POST /api/studio/jobs/{job_id}/cancel` and `/retry` manage persisted jobs. Retry returns an `executionRequest` for client-side miniapp execution when needed.
