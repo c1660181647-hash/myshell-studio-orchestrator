@@ -337,6 +337,81 @@ export interface StudioCoverageVerifyResult {
   coverage: StudioCoverageReport;
 }
 
+export interface StudioHandoffGate {
+  id: string;
+  label: string;
+  status: 'ready' | 'needs_attention' | 'blocked' | string;
+  required: boolean;
+  message?: string;
+}
+
+export interface StudioHandoffGap {
+  id: string;
+  kind: 'page' | 'job' | string;
+  pageId?: StudioApi | string;
+  pageName?: string;
+  status: StudioCoverageStatus | StudioStatus | string;
+  reason: string;
+  message?: string;
+  missingRouteParams?: string[];
+}
+
+export interface StudioHandoffAction {
+  id: string;
+  action: string;
+  kind: 'page' | 'job' | string;
+  targetId?: string;
+  targetName?: string;
+  status?: StudioCoverageStatus | StudioStatus | string;
+  reason?: string;
+  message?: string;
+  pageId?: StudioApi | string;
+  segmentId?: string;
+  jobId?: string;
+}
+
+export interface StudioHandoffArtifact {
+  id: string;
+  label: string;
+  endpoint: string;
+  projectId?: string;
+}
+
+export interface StudioHandoffSnapshot {
+  status: 'ready' | 'needs_attention' | 'blocked' | string;
+  readyForDelivery: boolean;
+  checkedAt: string;
+  projectId?: string | null;
+  sourceSegmentId?: string | null;
+  sourceMediaUrl?: string;
+  summary: {
+    pages: number;
+    covered: number;
+    pending: number;
+    readyUnverified: number;
+    blocked: number;
+    acceptedEvidence: number;
+    jobs: number;
+    issues: number;
+    deliveryAcceptedEvidence: number;
+    deliveryPendingEvidence: number;
+    unresolvedActions: number;
+    gaps: number;
+  };
+  gates: StudioHandoffGate[];
+  gaps: StudioHandoffGap[];
+  actions: StudioHandoffAction[];
+  artifacts: StudioHandoffArtifact[];
+  reports: {
+    health: StudioHealth;
+    readiness: StudioReadiness;
+    overview: StudioOverview;
+    dispatchMatrix: StudioDispatchMatrix;
+    coverage: StudioCoverageReport;
+    deliveryReport?: StudioProjectDeliveryReport | null;
+  };
+}
+
 export interface StudioAgentCapability {
   id: string;
   label: string;
@@ -782,6 +857,19 @@ export async function fetchStudioCoverage(options: {
   const query = params.toString();
   const response = await fetch(getStudioRootEndpoint(`/api/studio/coverage${query ? `?${query}` : ''}`));
   if (!response.ok) throw new Error(`Studio coverage ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function fetchStudioHandoffSnapshot(options: {
+  projectId?: string;
+  sourceSegmentId?: string;
+} = {}): Promise<StudioHandoffSnapshot> {
+  const params = new URLSearchParams();
+  if (options.projectId) params.set('project_id', options.projectId);
+  if (options.sourceSegmentId) params.set('source_segment_id', options.sourceSegmentId);
+  const query = params.toString();
+  const response = await fetch(getStudioRootEndpoint(`/api/studio/handoff-snapshot${query ? `?${query}` : ''}`));
+  if (!response.ok) throw new Error(`Studio handoff snapshot ${response.status}: ${response.statusText}`);
   return response.json();
 }
 

@@ -46,6 +46,7 @@ import {
   fetchStudioDispatchMatrix,
   fetchStudioDispatchPreview,
   fetchStudioAgents,
+  fetchStudioHandoffSnapshot,
   fetchStudioHealth,
   fetchStudioJobs,
   fetchStudioOverview,
@@ -80,6 +81,7 @@ import type {
   StudioDispatchPreview,
   StudioExecutor,
   StudioExecutionRequest,
+  StudioHandoffSnapshot,
   StudioHealth,
   StudioJob,
   StudioMode,
@@ -202,7 +204,7 @@ function healthPillTone(status?: string): 'default' | 'hot' | 'success' | 'dange
 
 function handoffPillTone(status?: string): 'default' | 'hot' | 'success' | 'danger' {
   if (status === 'ready') return 'success';
-  if (status === 'needs_attention') return 'danger';
+  if (status === 'needs_attention' || status === 'blocked') return 'danger';
   if (status === 'in_progress') return 'hot';
   return 'default';
 }
@@ -613,6 +615,74 @@ function StudioCoverageStrip({
         </span>
       ))}
       {gaps.length > 6 && <Pill tone="hot">{`+${gaps.length - 6} gaps`}</Pill>}
+    </div>
+  );
+}
+
+function StudioHandoffSnapshotStrip({
+  snapshot,
+  refreshing,
+  onRefresh,
+}: {
+  snapshot: StudioHandoffSnapshot | null;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
+  const summary = snapshot?.summary;
+  const gaps = snapshot?.gaps || [];
+  const actions = snapshot?.actions || [];
+
+  return (
+    <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
+      <Pill tone={handoffPillTone(snapshot?.status)}>
+        {snapshot ? `Handoff ${snapshot.status}` : 'Handoff checking'}
+      </Pill>
+      <button
+        type="button"
+        disabled={refreshing}
+        onClick={onRefresh}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <RefreshCcw size={12} className={refreshing ? 'animate-spin' : ''} />
+        Refresh Handoff
+      </button>
+      {summary && (
+        <>
+          <Pill tone={snapshot?.readyForDelivery ? 'success' : 'default'}>
+            {snapshot?.readyForDelivery ? 'deliverable' : 'not deliverable'}
+          </Pill>
+          <Pill tone={summary.covered === summary.pages ? 'success' : 'hot'}>{`${summary.covered}/${summary.pages} pages`}</Pill>
+          <Pill tone={summary.gaps ? 'danger' : 'default'}>{`${summary.gaps} gaps`}</Pill>
+          <Pill tone={summary.unresolvedActions ? 'hot' : 'default'}>{`${summary.unresolvedActions} actions`}</Pill>
+          <Pill tone={summary.deliveryAcceptedEvidence || summary.acceptedEvidence ? 'success' : 'default'}>
+            {`${summary.deliveryAcceptedEvidence || summary.acceptedEvidence} evidence`}
+          </Pill>
+          <Pill>{`${summary.jobs} jobs`}</Pill>
+          <Pill>{`${snapshot?.artifacts.length || 0} artifacts`}</Pill>
+        </>
+      )}
+      {gaps.slice(0, 4).map((gap) => (
+        <span
+          key={gap.id}
+          title={gap.message || gap.reason}
+          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2"
+        >
+          <AlertTriangle size={12} className={gap.status === 'blocked' ? 'text-Cr-text-critical-default-v2' : 'text-dreamy-brand-hot-v2'} />
+          <span className="max-w-[120px] truncate">{gap.pageName || gap.pageId || gap.id}</span>
+          <span className="text-Cr-text-subtlest-v2">{gap.reason}</span>
+        </span>
+      ))}
+      {actions.slice(0, 4).map((action) => (
+        <span
+          key={action.id}
+          title={action.message || action.reason || action.action}
+          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2"
+        >
+          <GitBranch size={12} className="text-dreamy-brand-hot-v2" />
+          <span className="max-w-[130px] truncate">{action.targetName || action.targetId || action.kind}</span>
+          <span className="text-Cr-text-subtlest-v2">{action.action}</span>
+        </span>
+      ))}
     </div>
   );
 }
@@ -1789,12 +1859,14 @@ export default function Dreamy() {
   const [deliveryReport, setDeliveryReport] = useState<StudioProjectDeliveryReport | null>(null);
   const [dispatchMatrix, setDispatchMatrix] = useState<StudioDispatchMatrix | null>(null);
   const [coverageReport, setCoverageReport] = useState<StudioCoverageReport | null>(null);
+  const [handoffSnapshot, setHandoffSnapshot] = useState<StudioHandoffSnapshot | null>(null);
   const [queueStatusFilter, setQueueStatusFilter] = useState<StudioStatus | 'all'>('all');
   const [queuePageFilter, setQueuePageFilter] = useState<StudioApi | string>('all');
   const [queueAgentFilter, setQueueAgentFilter] = useState('all');
   const [dispatchPreview, setDispatchPreview] = useState<StudioDispatchPreview | null>(null);
   const [bulkActionRunning, setBulkActionRunning] = useState<'cancel' | 'retry' | null>(null);
   const [coverageVerifyRunning, setCoverageVerifyRunning] = useState(false);
+  const [handoffRefreshing, setHandoffRefreshing] = useState(false);
 
   const selectedSegment = useMemo(() => {
     const id = project?.selectedSegmentId;
@@ -1858,6 +1930,48 @@ export default function Dreamy() {
     [hubJobs],
   );
 
+  const applyHandoffSnapshot = useCallback((snapshot: StudioHandoffSnapshot) => {
+    setHandoffSnapshot(snapshot);
+    setStudioHealth(snapshot.reports.health);
+    setStudioReadiness(snapshot.reports.readiness);
+    setStudioOverview(snapshot.reports.overview);
+    setDispatchMatrix(snapshot.reports.dispatchMatrix);
+    setCoverageReport(snapshot.reports.coverage);
+    setDeliveryReport(snapshot.reports.deliveryReport || null);
+  }, []);
+
+  const refreshHandoffSnapshot = useCallback(
+    async (options: { projectId?: string; sourceSegmentId?: string; interactive?: boolean } = {}) => {
+      const interactive = options.interactive ?? true;
+      if (interactive) setHandoffRefreshing(true);
+      try {
+        const snapshot = await fetchStudioHandoffSnapshot({
+          projectId: options.projectId ?? project?.projectId,
+          sourceSegmentId: options.sourceSegmentId ?? selectedSegment?.id,
+        });
+        applyHandoffSnapshot(snapshot);
+        return snapshot;
+      } catch (error) {
+        if (interactive) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: makeId('assistant'),
+              role: 'assistant',
+              content: 'Handoff snapshot refresh failed.',
+              error: error instanceof Error ? error.message : String(error),
+              createdAt: nowIso(),
+            },
+          ]);
+        }
+        return null;
+      } finally {
+        if (interactive) setHandoffRefreshing(false);
+      }
+    },
+    [applyHandoffSnapshot, project?.projectId, selectedSegment?.id],
+  );
+
   useEffect(() => {
     if (!previewUrl) return;
     return () => URL.revokeObjectURL(previewUrl);
@@ -1910,15 +2024,20 @@ export default function Dreamy() {
     void Promise.all([
       fetchStudioDispatchMatrix(context).catch(() => null),
       fetchStudioCoverage(context).catch(() => null),
-    ]).then(([matrix, coverage]) => {
+      fetchStudioHandoffSnapshot(context).catch(() => null),
+    ]).then(([matrix, coverage, handoff]) => {
       if (cancelled) return;
+      if (handoff) {
+        applyHandoffSnapshot(handoff);
+        return;
+      }
       if (matrix) setDispatchMatrix(matrix);
       if (coverage) setCoverageReport(coverage);
     }).catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [project?.projectId, selectedSegment?.id]);
+  }, [applyHandoffSnapshot, project?.projectId, selectedSegment?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1980,8 +2099,16 @@ export default function Dreamy() {
         projectId: project?.projectId,
         sourceSegmentId: selectedSegment?.id,
       }).catch(() => null),
-    ]).then(([overview, readiness, matrix, coverage]) => {
+      fetchStudioHandoffSnapshot({
+        projectId: project?.projectId,
+        sourceSegmentId: selectedSegment?.id,
+      }).catch(() => null),
+    ]).then(([overview, readiness, matrix, coverage, handoff]) => {
       if (cancelled) return;
+      if (handoff) {
+        applyHandoffSnapshot(handoff);
+        return;
+      }
       if (overview) setStudioOverview(overview);
       if (readiness) setStudioReadiness(readiness);
       if (matrix) setDispatchMatrix(matrix);
@@ -1990,7 +2117,7 @@ export default function Dreamy() {
     return () => {
       cancelled = true;
     };
-  }, [hubJobsVersion, project?.projectId, selectedSegment?.id]);
+  }, [applyHandoffSnapshot, hubJobsVersion, project?.projectId, selectedSegment?.id]);
 
   useEffect(() => {
     if (!selectedPageId) return;
@@ -2410,6 +2537,7 @@ export default function Dreamy() {
     setHubJobs([]);
     setDeliveryReport(null);
     setCoverageReport(null);
+    setHandoffSnapshot(null);
     forgetLastStudioProjectId();
     clearStudioDispatchSession();
     setMessages([
@@ -2537,6 +2665,10 @@ export default function Dreamy() {
         projectId: project?.projectId,
         sourceSegmentId: selectedSegment?.id,
       }).then((coverage) => setCoverageReport(coverage)).catch(() => undefined),
+      fetchStudioHandoffSnapshot({
+        projectId: project?.projectId,
+        sourceSegmentId: selectedSegment?.id,
+      }).then((snapshot) => applyHandoffSnapshot(snapshot)).catch(() => undefined),
       project?.projectId
         ? fetchStudioProjectDeliveryReport(project.projectId).then((report) => setDeliveryReport(report)).catch(() => undefined)
         : Promise.resolve(),
@@ -2595,6 +2727,10 @@ export default function Dreamy() {
         sourceSegmentId: nextSourceSegmentId || undefined,
       }).then((coverage) => setCoverageReport(coverage)).catch(() => undefined),
       fetchStudioProjectDeliveryReport(nextProjectId).then((report) => setDeliveryReport(report)).catch(() => undefined),
+      fetchStudioHandoffSnapshot({
+        projectId: nextProjectId,
+        sourceSegmentId: nextSourceSegmentId || undefined,
+      }).then((snapshot) => applyHandoffSnapshot(snapshot)).catch(() => undefined),
     ]);
     setMessages((prev) => [
       ...prev,
@@ -2651,6 +2787,11 @@ export default function Dreamy() {
         coverage={coverageReport}
         verifying={coverageVerifyRunning}
         onVerify={() => void runCoverageVerification()}
+      />
+      <StudioHandoffSnapshotStrip
+        snapshot={handoffSnapshot}
+        refreshing={handoffRefreshing}
+        onRefresh={() => void refreshHandoffSnapshot({ interactive: true })}
       />
 
       <div className="grid shrink-0 gap-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">

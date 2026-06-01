@@ -16,6 +16,7 @@ MyShell Studio Orchestrator is a unified agent dispatch center for Dreamy miniap
 - Project delivery reports that summarize accepted evidence, pending evidence, issue counts, unresolved actions, and per-segment evidence trails for operator handoff.
 - Dispatch matrix coverage for every registered MyShell page, including executor, default agent, route path, missing route params, auth status, and recommended dispatch action.
 - One-click coverage verification for ready navigation surfaces, with accepted dispatch evidence for each verified page and explicit skip reasons for missing params, auth gaps, or non-batch-safe executors.
+- Handoff snapshots that package health, readiness, overview, dispatch matrix, coverage, project delivery evidence, artifacts, gaps, and next actions into a single delivery decision.
 
 ## Repository Layout
 
@@ -56,6 +57,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `GET /api/studio/dispatch-matrix`
 - `GET /api/studio/coverage`
 - `POST /api/studio/coverage/verify`
+- `GET /api/studio/handoff-snapshot`
 - `GET /api/studio/readiness`
 - `GET /api/studio/dispatch-preview`
 - `POST /api/studio/run`
@@ -80,6 +82,8 @@ http://127.0.0.1:5174/?test_route=dreamy
 `/api/studio/coverage` turns the dispatch matrix and persisted job evidence into a page-level delivery report. It marks each MyShell surface as `covered`, `pending`, `ready_unverified`, or `blocked`, includes the latest job/evidence per page, and summarizes covered, unverified, pending, blocked, and issue counts for release handoff.
 
 `POST /api/studio/coverage/verify` batch-verifies ready navigation pages for a project. It creates accepted navigation jobs for `ready_unverified` pages, reuses `project_id` and optional `source_segment_id` for contextual routes, and returns `createdCount`, `skippedPages`, touched jobs, the updated project, and refreshed coverage. Client and server executors are skipped with explicit reasons instead of being marked successful without a real adapter run.
+
+`/api/studio/handoff-snapshot` packages the current delivery evidence into one operator-ready payload. Pass `project_id` and optional `source_segment_id` to include contextual routes and project delivery evidence. The response includes top-level `status`, `readyForDelivery`, `summary`, `gates`, `gaps`, `actions`, `artifacts`, and embedded `reports` for health, readiness, overview, dispatch matrix, coverage, and project delivery. Any blocked page, missing route parameter, auth gap, unresolved job action, or unverified surface stays visible as a gap/action instead of being treated as success.
 
 `/api/studio/readiness` returns delivery gates for the handoff surface: backend, storage, Chrome CDP, cookie injection, page registry, agent registry, dispatch preview, overview, MyShell Art auth, and job store. Required gate failures make the response `blocked`; optional auth/CDP gaps are surfaced as `degraded` or `auth_missing` rather than hidden as success.
 
