@@ -8,6 +8,7 @@ The backend exposes the Studio API for MyShell page and agent dispatch. It keeps
 - `GET /api/pages` lists registered page adapters and miniapp navigation surfaces, including `dreamy-miniapp`, `myshell-art`, Explore, AI Picks, Bot Detail, Upload, Tag Generator, Library, Library Detail, Energy, Energy History, Earn, Share Invite, Settings, Profile, and Checkin.
 - `GET /api/agents` lists the dispatch graph agents.
 - `POST /api/studio/run` routes a prompt, creates a persisted job, and streams Studio SSE events.
+- `GET /api/studio/delivery-audit` returns machine-readable acceptance status, requirements, artifacts, and embedded reports for deployment handoff.
 - `GET /api/studio/projects` lists recent persisted projects for Studio restore.
 - `GET /api/studio/projects/{project_id}/delivery-bundle?download=1` returns the operator handoff bundle as a downloadable JSON attachment.
 - `GET /api/studio/jobs` lists the persisted queue with optional `project_id` and `status` filters.

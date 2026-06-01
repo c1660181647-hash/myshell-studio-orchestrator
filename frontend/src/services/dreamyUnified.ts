@@ -375,6 +375,9 @@ export interface StudioHandoffArtifact {
   label: string;
   endpoint: string;
   projectId?: string;
+  url?: string;
+  query?: Record<string, unknown>;
+  filename?: string;
 }
 
 export interface StudioHandoffSnapshot {
@@ -449,6 +452,46 @@ export interface StudioDeliveryBundle {
     deliveryReport: StudioProjectDeliveryReport;
     coverage: StudioCoverageReport;
     handoffSnapshot: StudioHandoffSnapshot;
+  };
+}
+
+export interface StudioDeliveryAuditRequirement {
+  id: string;
+  label: string;
+  status: 'ready' | 'degraded' | 'blocked' | 'needs_attention' | 'auth_missing' | string;
+  required: boolean;
+  message?: string;
+  evidence?: Record<string, unknown>;
+}
+
+export interface StudioDeliveryAudit {
+  status: 'ready' | 'degraded' | 'blocked' | string;
+  checkedAt: string;
+  projectId?: string | null;
+  sourceSegmentId?: string | null;
+  sourceMediaUrl?: string;
+  summary: {
+    pages: number;
+    agents: number;
+    readyTargets: number;
+    missingParams: number;
+    missingCorePages: number;
+    missingCoreAgents: number;
+    readinessGates: number;
+    readinessReady: number;
+    jobs: number;
+    artifacts: number;
+  };
+  requirements: StudioDeliveryAuditRequirement[];
+  artifacts: StudioHandoffArtifact[];
+  reports: {
+    health: StudioHealth;
+    readiness: StudioReadiness;
+    overview: StudioOverview;
+    dispatchMatrix: StudioDispatchMatrix;
+    coverage: StudioCoverageReport;
+    deliveryReport?: StudioProjectDeliveryReport | null;
+    handoffSnapshot?: StudioHandoffSnapshot | null;
   };
 }
 
@@ -976,6 +1019,19 @@ export async function fetchStudioOverview(limit = 50): Promise<StudioOverview> {
 export async function fetchStudioReadiness(): Promise<StudioReadiness> {
   const response = await fetch(getStudioRootEndpoint('/api/studio/readiness'));
   if (!response.ok) throw new Error(`Studio readiness ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function fetchStudioDeliveryAudit(options: {
+  projectId?: string;
+  sourceSegmentId?: string;
+} = {}): Promise<StudioDeliveryAudit> {
+  const params = new URLSearchParams();
+  if (options.projectId) params.set('project_id', options.projectId);
+  if (options.sourceSegmentId) params.set('source_segment_id', options.sourceSegmentId);
+  const query = params.toString();
+  const response = await fetch(getStudioRootEndpoint(`/api/studio/delivery-audit${query ? `?${query}` : ''}`));
+  if (!response.ok) throw new Error(`Studio delivery audit ${response.status}: ${response.statusText}`);
   return response.json();
 }
 

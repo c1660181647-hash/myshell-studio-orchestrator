@@ -368,6 +368,70 @@ class StudioApiTest(unittest.TestCase):
         self.assertFalse(gates["myshell-art-auth"]["required"])
         self.assertEqual(gates["job-store"]["status"], "ready")
 
+    def test_delivery_audit_packages_machine_readable_acceptance_evidence(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "create delivery audit evidence"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        meta = next(payload for name, payload in events if name == "meta")
+        execution = next(payload for name, payload in events if name == "execution_request")
+        update = self.client.post(
+            f"/api/studio/projects/{meta['projectId']}/client-result",
+            json={
+                "segmentId": execution["segmentId"],
+                "jobId": execution["jobId"],
+                "status": "done",
+                "taskId": "task_delivery_audit",
+                "url": "https://example.com/delivery-audit.png",
+                "posterUrl": "https://example.com/delivery-audit.png",
+            },
+        )
+        self.assertEqual(update.status_code, 200)
+
+        audit = self.client.get(
+            "/api/studio/delivery-audit",
+            params={"project_id": meta["projectId"], "source_segment_id": execution["segmentId"]},
+        )
+
+        self.assertEqual(audit.status_code, 200)
+        self.assertEqual(audit.headers.get("content-type", "").split(";")[0], "application/json")
+        body = audit.json()
+        self.assertEqual(body["projectId"], meta["projectId"])
+        self.assertEqual(body["sourceSegmentId"], execution["segmentId"])
+        self.assertIn(body["status"], {"ready", "degraded", "blocked"})
+        self.assertGreaterEqual(body["summary"]["pages"], 16)
+        self.assertGreaterEqual(body["summary"]["agents"], 7)
+        self.assertEqual(body["summary"]["missingCorePages"], 0)
+        self.assertEqual(body["summary"]["missingCoreAgents"], 0)
+        self.assertGreaterEqual(body["summary"]["artifacts"], 7)
+
+        requirements = {item["id"]: item for item in body["requirements"]}
+        expected_requirements = {
+            "backend",
+            "storage",
+            "page-registry",
+            "agent-registry",
+            "dispatch-matrix",
+            "handoff-snapshot",
+            "downloadable-delivery-bundle",
+        }
+        self.assertTrue(expected_requirements.issubset(requirements.keys()))
+        self.assertEqual(requirements["page-registry"]["status"], "ready")
+        self.assertEqual(requirements["agent-registry"]["status"], "ready")
+        self.assertEqual(requirements["downloadable-delivery-bundle"]["status"], "ready")
+        self.assertEqual(requirements["downloadable-delivery-bundle"]["evidence"]["filename"], f"myshell-studio-delivery-{meta['projectId']}.json")
+
+        artifact_endpoints = {artifact["endpoint"] for artifact in body["artifacts"]}
+        self.assertIn("/api/studio/delivery-audit", artifact_endpoints)
+        self.assertIn("/api/studio/projects/{project_id}/delivery-bundle", artifact_endpoints)
+        self.assertIn("download=1", str(body["artifacts"]))
+        self.assertEqual(body["reports"]["dispatchMatrix"]["summary"]["total"], body["summary"]["pages"])
+        self.assertEqual(body["reports"]["handoffSnapshot"]["projectId"], meta["projectId"])
+
     def test_dispatch_matrix_covers_all_pages_agents_and_paths(self) -> None:
         matrix = self.client.get("/api/studio/dispatch-matrix")
 

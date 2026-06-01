@@ -44,6 +44,7 @@ import {
   createStudioDispatchSession,
   extractGenerateTaskMedia,
   fetchStudioCoverage,
+  fetchStudioDeliveryAudit,
   fetchStudioDispatchMatrix,
   fetchStudioDispatchPreview,
   fetchStudioAgents,
@@ -83,6 +84,7 @@ import type {
   StudioAgentNode,
   StudioApi,
   StudioCoverageReport,
+  StudioDeliveryAudit,
   StudioDeliveryBundle,
   StudioDispatchMatrix,
   StudioDispatchMatrixEntry,
@@ -552,6 +554,69 @@ function StudioReadinessStrip({ readiness }: { readiness: StudioReadiness | null
             />
             <span className="max-w-[120px] truncate">{gate.label}</span>
             <span className="text-Cr-text-subtlest-v2">{gate.status}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function StudioDeliveryAuditStrip({
+  audit,
+  refreshing,
+  onRefresh,
+}: {
+  audit: StudioDeliveryAudit | null;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
+  const summary = audit?.summary;
+  const gaps = (audit?.requirements || []).filter((item) => item.status !== 'ready');
+
+  return (
+    <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
+      <Pill tone={healthPillTone(audit?.status)}>
+        {audit ? `Audit ${audit.status}` : 'Audit checking'}
+      </Pill>
+      <button
+        type="button"
+        disabled={refreshing}
+        onClick={onRefresh}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <RefreshCcw size={12} className={refreshing ? 'animate-spin' : ''} />
+        Refresh Audit
+      </button>
+      {summary && (
+        <>
+          <Pill tone={summary.missingCorePages || summary.missingCoreAgents ? 'danger' : 'success'}>{`${summary.pages} pages`}</Pill>
+          <Pill tone={summary.missingCoreAgents ? 'danger' : 'success'}>{`${summary.agents} agents`}</Pill>
+          <Pill tone={summary.readyTargets === summary.pages ? 'success' : 'hot'}>{`${summary.readyTargets}/${summary.pages} ready`}</Pill>
+          <Pill tone={summary.missingParams ? 'hot' : 'default'}>{`${summary.missingParams} missing params`}</Pill>
+          <Pill>{`${summary.artifacts} artifacts`}</Pill>
+        </>
+      )}
+      {gaps.slice(0, 5).map((item) => {
+        const tone = healthPillTone(item.status);
+        const Icon = tone === 'success' ? CheckCircle2 : AlertTriangle;
+        return (
+          <span
+            key={item.id}
+            title={item.message || item.id}
+            className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2"
+          >
+            <Icon
+              size={12}
+              className={
+                tone === 'danger'
+                  ? 'text-Cr-text-critical-default-v2'
+                  : tone === 'success'
+                    ? 'text-Cr-text-success-default-v2'
+                    : 'text-dreamy-brand-hot-v2'
+              }
+            />
+            <span className="max-w-[130px] truncate">{item.label}</span>
+            <span className="text-Cr-text-subtlest-v2">{item.status}</span>
           </span>
         );
       })}
@@ -2019,6 +2084,7 @@ export default function Dreamy() {
   const [studioHealth, setStudioHealth] = useState<StudioHealth | null>(null);
   const [studioOverview, setStudioOverview] = useState<StudioOverview | null>(null);
   const [studioReadiness, setStudioReadiness] = useState<StudioReadiness | null>(null);
+  const [deliveryAudit, setDeliveryAudit] = useState<StudioDeliveryAudit | null>(null);
   const [deliveryReport, setDeliveryReport] = useState<StudioProjectDeliveryReport | null>(null);
   const [dispatchMatrix, setDispatchMatrix] = useState<StudioDispatchMatrix | null>(null);
   const [coverageReport, setCoverageReport] = useState<StudioCoverageReport | null>(null);
@@ -2032,6 +2098,7 @@ export default function Dreamy() {
   const [dispatchPreview, setDispatchPreview] = useState<StudioDispatchPreview | null>(null);
   const [bulkActionRunning, setBulkActionRunning] = useState<'cancel' | 'retry' | null>(null);
   const [coverageVerifyRunning, setCoverageVerifyRunning] = useState(false);
+  const [deliveryAuditRefreshing, setDeliveryAuditRefreshing] = useState(false);
   const [handoffRefreshing, setHandoffRefreshing] = useState(false);
   const [deliveryBundleLoading, setDeliveryBundleLoading] = useState(false);
   const [dispatchBatchPlanning, setDispatchBatchPlanning] = useState(false);
@@ -2125,6 +2192,51 @@ export default function Dreamy() {
     setCoverageReport(snapshot.reports.coverage);
     setDeliveryReport(snapshot.reports.deliveryReport || null);
   }, []);
+
+  const applyDeliveryAudit = useCallback((audit: StudioDeliveryAudit) => {
+    setDeliveryAudit(audit);
+    setStudioHealth(audit.reports.health);
+    setStudioReadiness(audit.reports.readiness);
+    setStudioOverview(audit.reports.overview);
+    setDispatchMatrix(audit.reports.dispatchMatrix);
+    setCoverageReport(audit.reports.coverage);
+    setDeliveryReport(audit.reports.deliveryReport || null);
+    if (audit.reports.handoffSnapshot) {
+      setHandoffSnapshot(audit.reports.handoffSnapshot);
+    }
+  }, []);
+
+  const refreshDeliveryAudit = useCallback(
+    async (options: { projectId?: string; sourceSegmentId?: string; interactive?: boolean } = {}) => {
+      const interactive = options.interactive ?? true;
+      if (interactive) setDeliveryAuditRefreshing(true);
+      try {
+        const audit = await fetchStudioDeliveryAudit({
+          projectId: options.projectId ?? project?.projectId,
+          sourceSegmentId: options.sourceSegmentId ?? studioContextSourceSegmentId,
+        });
+        applyDeliveryAudit(audit);
+        return audit;
+      } catch (error) {
+        if (interactive) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: makeId('assistant'),
+              role: 'assistant',
+              content: 'Delivery audit refresh failed.',
+              error: error instanceof Error ? error.message : String(error),
+              createdAt: nowIso(),
+            },
+          ]);
+        }
+        return null;
+      } finally {
+        if (interactive) setDeliveryAuditRefreshing(false);
+      }
+    },
+    [applyDeliveryAudit, project?.projectId, studioContextSourceSegmentId],
+  );
 
   const refreshHandoffSnapshot = useCallback(
     async (options: { projectId?: string; sourceSegmentId?: string; interactive?: boolean } = {}) => {
@@ -2415,15 +2527,17 @@ export default function Dreamy() {
       fetchStudioHealth().catch(() => null),
       fetchStudioOverview().catch(() => null),
       fetchStudioReadiness().catch(() => null),
+      fetchStudioDeliveryAudit().catch(() => null),
       fetchStudioDispatchMatrix().catch(() => null),
       fetchStudioCoverage().catch(() => null),
-    ]).then(([nextPages, nextAgents, nextHealth, nextOverview, nextReadiness, nextMatrix, nextCoverage]) => {
+    ]).then(([nextPages, nextAgents, nextHealth, nextOverview, nextReadiness, nextAudit, nextMatrix, nextCoverage]) => {
       if (cancelled) return;
       setPages(nextPages);
       setAgents(nextAgents);
       setStudioHealth(nextHealth);
       setStudioOverview(nextOverview);
       setStudioReadiness(nextReadiness);
+      if (nextAudit) applyDeliveryAudit(nextAudit);
       setDispatchMatrix(nextMatrix);
       setCoverageReport(nextCoverage);
       setSelectedPageId((current) =>
@@ -2434,7 +2548,7 @@ export default function Dreamy() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [applyDeliveryAudit]);
 
   useEffect(() => {
     if (!selectedPage || !agents.length) return;
@@ -2455,8 +2569,13 @@ export default function Dreamy() {
       fetchStudioDispatchMatrix(context).catch(() => null),
       fetchStudioCoverage(context).catch(() => null),
       fetchStudioHandoffSnapshot(context).catch(() => null),
-    ]).then(([matrix, coverage, handoff]) => {
+      fetchStudioDeliveryAudit(context).catch(() => null),
+    ]).then(([matrix, coverage, handoff, audit]) => {
       if (cancelled) return;
+      if (audit) {
+        applyDeliveryAudit(audit);
+        return;
+      }
       if (handoff) {
         applyHandoffSnapshot(handoff);
         return;
@@ -2467,7 +2586,7 @@ export default function Dreamy() {
     return () => {
       cancelled = true;
     };
-  }, [applyHandoffSnapshot, project?.projectId, selectedSegment?.id]);
+  }, [applyDeliveryAudit, applyHandoffSnapshot, project?.projectId, selectedSegment?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2553,8 +2672,16 @@ export default function Dreamy() {
         projectId: project?.projectId,
         sourceSegmentId: selectedSegment?.id,
       }).catch(() => null),
-    ]).then(([overview, readiness, matrix, coverage, handoff]) => {
+      fetchStudioDeliveryAudit({
+        projectId: project?.projectId,
+        sourceSegmentId: selectedSegment?.id,
+      }).catch(() => null),
+    ]).then(([overview, readiness, matrix, coverage, handoff, audit]) => {
       if (cancelled) return;
+      if (audit) {
+        applyDeliveryAudit(audit);
+        return;
+      }
       if (handoff) {
         applyHandoffSnapshot(handoff);
         return;
@@ -2567,7 +2694,7 @@ export default function Dreamy() {
     return () => {
       cancelled = true;
     };
-  }, [applyHandoffSnapshot, hubJobsVersion, project?.projectId, selectedSegment?.id]);
+  }, [applyDeliveryAudit, applyHandoffSnapshot, hubJobsVersion, project?.projectId, selectedSegment?.id]);
 
   useEffect(() => {
     if (!selectedPageId) return;
@@ -2986,6 +3113,7 @@ export default function Dreamy() {
     setProject(null);
     setHubJobs([]);
     setDeliveryReport(null);
+    setDeliveryAudit(null);
     setCoverageReport(null);
     setHandoffSnapshot(null);
     setDeliveryBundle(null);
@@ -3235,6 +3363,11 @@ export default function Dreamy() {
 
       <StudioHealthStrip health={studioHealth} />
       <StudioReadinessStrip readiness={studioReadiness} />
+      <StudioDeliveryAuditStrip
+        audit={deliveryAudit}
+        refreshing={deliveryAuditRefreshing}
+        onRefresh={() => void refreshDeliveryAudit({ interactive: true })}
+      />
       <StudioDeliveryReportStrip projectId={project?.projectId} report={deliveryReport} />
       <StudioCoverageStrip
         coverage={coverageReport}

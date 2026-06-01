@@ -45,10 +45,13 @@ CORE_DELIVERY_PAGE_IDS = {
     "upload",
     "tag-generator",
     "library",
+    "library-detail",
     "energy-store",
+    "energy-history",
     "earn",
     "share-invite",
     "settings",
+    "profile",
     "checkin",
 }
 CORE_DELIVERY_AGENT_IDS = {
@@ -1182,6 +1185,45 @@ def _readiness_status(gates: list[dict[str, Any]]) -> str:
     return "ready"
 
 
+def _audit_status(requirements: list[dict[str, Any]]) -> str:
+    if any(item.get("required") and item.get("status") in {"blocked", "error"} for item in requirements):
+        return "blocked"
+    if any(item.get("status") != "ready" for item in requirements):
+        return "degraded"
+    return "ready"
+
+
+def _requirement(
+    requirement_id: str,
+    label: str,
+    status: str,
+    *,
+    required: bool = True,
+    message: str = "",
+    evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_status = "ready" if status in READY_GATE_STATUSES else status
+    return {
+        "id": requirement_id,
+        "label": label,
+        "status": normalized_status,
+        "required": required,
+        "message": message,
+        "evidence": evidence or {},
+    }
+
+
+def _requirement_from_gate(gate: dict[str, Any]) -> dict[str, Any]:
+    return _requirement(
+        str(gate.get("id") or ""),
+        str(gate.get("label") or gate.get("id") or ""),
+        str(gate.get("status") or "unknown"),
+        required=bool(gate.get("required", True)),
+        message=str(gate.get("message") or ""),
+        evidence=gate.get("evidence") if isinstance(gate.get("evidence"), dict) else {},
+    )
+
+
 async def _studio_readiness() -> dict[str, Any]:
     health = await runtime_health(STUDIO_STORE.path)
     components = health.get("components") or {}
@@ -1329,6 +1371,142 @@ async def _studio_readiness() -> dict[str, Any]:
         "summary": summary,
         "gates": gates,
         "health": health,
+    }
+
+
+def _delivery_audit_artifacts(project_id: str | None) -> list[dict[str, Any]]:
+    artifacts = [
+        {"id": "delivery-audit", "label": "Delivery Audit", "endpoint": "/api/studio/delivery-audit"},
+        *_handoff_artifacts(project_id),
+    ]
+    if project_id:
+        artifacts.extend(
+            [
+                {
+                    "id": "project",
+                    "label": "Project",
+                    "endpoint": "/api/studio/projects/{project_id}",
+                    "projectId": project_id,
+                },
+                {
+                    "id": "delivery-bundle-download",
+                    "label": "Downloadable Delivery Bundle",
+                    "endpoint": "/api/studio/projects/{project_id}/delivery-bundle",
+                    "url": f"/api/studio/projects/{project_id}/delivery-bundle?download=1",
+                    "projectId": project_id,
+                    "query": {"download": 1},
+                    "filename": f"myshell-studio-delivery-{project_id}.json",
+                },
+            ]
+        )
+    return artifacts
+
+
+async def _studio_delivery_audit(
+    project_id: str | None = None,
+    source_segment_id: str | None = None,
+) -> dict[str, Any]:
+    project = _get_project(project_id) if project_id else None
+    resolved_project_id = project.get("projectId") if project else project_id
+    readiness = await _studio_readiness()
+    overview = _studio_overview(limit=25)
+    dispatch_matrix = _dispatch_matrix(project_id=resolved_project_id, source_segment_id=source_segment_id)
+    coverage = _studio_coverage(project_id=resolved_project_id, source_segment_id=source_segment_id)
+    delivery_report = _project_delivery_report(project) if project else None
+    handoff = (
+        await _studio_handoff_snapshot(project_id=resolved_project_id, source_segment_id=source_segment_id)
+        if project
+        else None
+    )
+
+    readiness_gates = [_requirement_from_gate(gate) for gate in readiness.get("gates") or []]
+    pages = list_studio_pages()
+    agents = list_studio_agents()
+    page_ids = {page["id"] for page in pages}
+    agent_ids = {agent["id"] for agent in agents}
+    missing_core_pages = sorted(CORE_DELIVERY_PAGE_IDS - page_ids)
+    missing_core_agents = sorted(CORE_DELIVERY_AGENT_IDS - agent_ids)
+    matrix_summary = dispatch_matrix.get("summary") or {}
+
+    requirements = [
+        *readiness_gates,
+        _requirement(
+            "dispatch-matrix",
+            "Dispatch Matrix",
+            "ready" if matrix_summary.get("total", 0) >= len(CORE_DELIVERY_PAGE_IDS) else "blocked",
+            message=f"{matrix_summary.get('ready', 0)}/{matrix_summary.get('total', 0)} targets ready",
+            evidence=matrix_summary,
+        ),
+    ]
+
+    if handoff:
+        requirements.append(
+            _requirement(
+                "handoff-snapshot",
+                "Handoff Snapshot",
+                _gate_status_from_report(str(handoff.get("status") or "unknown")),
+                message=f"{(handoff.get('summary') or {}).get('covered', 0)}/{(handoff.get('summary') or {}).get('pages', 0)} pages covered",
+                evidence={
+                    "readyForDelivery": bool(handoff.get("readyForDelivery")),
+                    "gaps": len(handoff.get("gaps") or []),
+                    "actions": len(handoff.get("actions") or []),
+                },
+            )
+        )
+        requirements.append(
+            _requirement(
+                "downloadable-delivery-bundle",
+                "Downloadable Delivery Bundle",
+                "ready",
+                message="Delivery bundle can be downloaded as JSON",
+                evidence={
+                    "endpoint": "/api/studio/projects/{project_id}/delivery-bundle",
+                    "query": {"download": 1},
+                    "filename": f"myshell-studio-delivery-{project['projectId']}.json",
+                },
+            )
+        )
+    else:
+        requirements.append(
+            _requirement(
+                "handoff-snapshot",
+                "Handoff Snapshot",
+                "degraded",
+                required=False,
+                message="Pass project_id to audit project delivery evidence.",
+            )
+        )
+
+    artifacts = _delivery_audit_artifacts(project.get("projectId") if project else None)
+    return {
+        "status": _audit_status(requirements),
+        "checkedAt": now_iso(),
+        "projectId": project.get("projectId") if project else None,
+        "sourceSegmentId": dispatch_matrix.get("sourceSegmentId"),
+        "sourceMediaUrl": dispatch_matrix.get("sourceMediaUrl", ""),
+        "summary": {
+            "pages": len(pages),
+            "agents": len(agents),
+            "readyTargets": matrix_summary.get("ready", 0),
+            "missingParams": matrix_summary.get("missingParams", 0),
+            "missingCorePages": len(missing_core_pages),
+            "missingCoreAgents": len(missing_core_agents),
+            "readinessGates": (readiness.get("summary") or {}).get("total", 0),
+            "readinessReady": (readiness.get("summary") or {}).get("ready", 0),
+            "jobs": (overview.get("totals") or {}).get("jobs", 0),
+            "artifacts": len(artifacts),
+        },
+        "requirements": requirements,
+        "artifacts": artifacts,
+        "reports": {
+            "health": readiness.get("health") or {},
+            "readiness": readiness,
+            "overview": overview,
+            "dispatchMatrix": dispatch_matrix,
+            "coverage": coverage,
+            "deliveryReport": delivery_report,
+            "handoffSnapshot": handoff,
+        },
     }
 
 
@@ -2162,6 +2340,13 @@ def register_studio_routes(app) -> None:
     @app.get("/api/studio/readiness")
     async def get_studio_readiness():
         return await _studio_readiness()
+
+    @app.get("/api/studio/delivery-audit")
+    async def get_studio_delivery_audit(
+        project_id: Optional[str] = Query(None),
+        source_segment_id: Optional[str] = Query(None),
+    ):
+        return await _studio_delivery_audit(project_id=project_id, source_segment_id=source_segment_id)
 
     @app.get("/api/studio/dispatch-preview")
     async def get_dispatch_preview(
