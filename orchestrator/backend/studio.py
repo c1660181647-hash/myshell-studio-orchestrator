@@ -1637,6 +1637,126 @@ async def _resolve_studio_action(payload: dict[str, Any] | None) -> dict[str, An
     raise HTTPException(status_code=400, detail=f"Unsupported Studio action: {action}")
 
 
+async def _resolve_studio_actions_batch(payload: dict[str, Any] | None) -> dict[str, Any]:
+    body = payload or {}
+    project_id = body.get("project_id") or body.get("projectId")
+    source_segment_id = body.get("source_segment_id") or body.get("sourceSegmentId")
+    requested_actions = body.get("actions")
+    if requested_actions is None:
+        audit = await _studio_delivery_audit(project_id=project_id, source_segment_id=source_segment_id)
+        requested_actions = audit.get("actions") or []
+    if not isinstance(requested_actions, list):
+        raise HTTPException(status_code=400, detail="actions must be a list")
+
+    normalized_actions: list[dict[str, Any]] = []
+    for item in requested_actions:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="Each action must be an object")
+        action = str(item.get("action") or "").strip()
+        target_id = str(item.get("target_id") or item.get("targetId") or "").strip()
+        if not action or not target_id:
+            raise HTTPException(status_code=400, detail="Each action requires action and target_id")
+        normalized_actions.append({"action": action, "targetId": target_id, "raw": item})
+
+    verify_page_ids = []
+    manual_actions: list[dict[str, Any]] = []
+    skipped_actions: list[dict[str, Any]] = []
+    for item in normalized_actions:
+        action = item["action"]
+        target_id = item["targetId"]
+        if action == "verify-ready":
+            verify_page_ids.append(target_id)
+        elif action in {"restore-auth", "start-chrome-cdp", "provide-project-id", "inspect-requirement", "inspect-dispatch-matrix"}:
+            manual_actions.append(
+                {
+                    "status": "manual_required",
+                    "action": action,
+                    "targetId": target_id,
+                    "resultType": "operator-instruction",
+                    "message": "Manual operator action is required.",
+                    "next": _manual_action_instruction(action, target_id),
+                }
+            )
+        else:
+            skipped_actions.append(
+                {
+                    "status": "skipped",
+                    "action": action,
+                    "targetId": target_id,
+                    "resultType": "unsupported",
+                    "message": f"Unsupported Studio action: {action}",
+                }
+            )
+
+    coverage_result: dict[str, Any] | None = None
+    executed_actions: list[dict[str, Any]] = []
+    if verify_page_ids:
+        coverage_result = _verify_studio_coverage(
+            project_id=project_id,
+            source_segment_id=source_segment_id,
+            page_ids=verify_page_ids,
+            limit=len(verify_page_ids),
+        )
+        jobs_by_page = {job.get("pageId"): job for job in coverage_result.get("jobs") or []}
+        skipped_by_page = {page.get("pageId"): page for page in coverage_result.get("skippedPages") or []}
+        for page_id in verify_page_ids:
+            if page_id in jobs_by_page:
+                executed_actions.append(
+                    {
+                        "status": "executed",
+                        "action": "verify-ready",
+                        "targetId": page_id,
+                        "resultType": "coverage-verify",
+                        "jobId": jobs_by_page[page_id].get("jobId"),
+                        "message": f"Verified {page_id}.",
+                    }
+                )
+            else:
+                skipped = skipped_by_page.get(page_id) or {}
+                skipped_actions.append(
+                    {
+                        "status": "skipped",
+                        "action": "verify-ready",
+                        "targetId": page_id,
+                        "resultType": "coverage-verify",
+                        "reason": skipped.get("reason") or "not_verified",
+                        "message": skipped.get("message") or "No verification job was created.",
+                    }
+                )
+
+    resolved_project_id = (coverage_result or {}).get("projectId") or project_id
+    resolved_source_segment_id = (coverage_result or {}).get("sourceSegmentId") or source_segment_id
+    audit = await _studio_delivery_audit(project_id=resolved_project_id, source_segment_id=resolved_source_segment_id)
+    status = "executed"
+    if manual_actions and executed_actions:
+        status = "executed_with_manual"
+    elif manual_actions and not executed_actions:
+        status = "manual_required"
+    elif skipped_actions and not executed_actions:
+        status = "skipped"
+    elif skipped_actions:
+        status = "executed_with_skips"
+
+    return {
+        "status": status,
+        "checkedAt": now_iso(),
+        "projectId": resolved_project_id,
+        "sourceSegmentId": resolved_source_segment_id,
+        "summary": {
+            "requested": len(normalized_actions),
+            "executed": len(executed_actions),
+            "manualRequired": len(manual_actions),
+            "skipped": len(skipped_actions),
+            "createdJobs": int((coverage_result or {}).get("createdCount") or 0),
+        },
+        "executedActions": executed_actions,
+        "manualActions": manual_actions,
+        "skippedActions": skipped_actions,
+        "result": coverage_result,
+        "audit": audit,
+    }
+
+
 def _cancel_job_record(job: dict[str, Any]) -> tuple[dict[str, Any], StudioProject | None]:
     updated_job = _update_job(
         job,
@@ -2408,6 +2528,10 @@ def register_studio_routes(app) -> None:
     @app.post("/api/studio/actions/resolve")
     async def post_studio_action_resolve(payload: Optional[dict[str, Any]] = Body(None)):
         return await _resolve_studio_action(payload)
+
+    @app.post("/api/studio/actions/resolve-batch")
+    async def post_studio_actions_resolve_batch(payload: Optional[dict[str, Any]] = Body(None)):
+        return await _resolve_studio_actions_batch(payload)
 
     @app.post("/api/studio/dispatch-batch")
     async def post_studio_dispatch_batch(payload: Optional[dict[str, Any]] = Body(None)):

@@ -524,6 +524,74 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("MYSHELL_COOKIES", auth_body["next"]["message"])
         self.assertEqual(auth_body["audit"]["projectId"], meta["projectId"])
 
+    def test_studio_action_resolve_batch_executes_safe_actions_and_preserves_manual_actions(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            with self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={"message": "create batch action resolve source image"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                events = _sse_events("".join(response.iter_text()))
+
+            meta = next(payload for name, payload in events if name == "meta")
+            execution = next(payload for name, payload in events if name == "execution_request")
+            update = self.client.post(
+                f"/api/studio/projects/{meta['projectId']}/client-result",
+                json={
+                    "segmentId": execution["segmentId"],
+                    "jobId": execution["jobId"],
+                    "status": "done",
+                    "taskId": "task_action_resolve_batch_source",
+                    "url": "https://example.com/action-resolve-batch-source.png",
+                    "posterUrl": "https://example.com/action-resolve-batch-source.png",
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            batch = self.client.post(
+                "/api/studio/actions/resolve-batch",
+                json={
+                    "project_id": meta["projectId"],
+                    "source_segment_id": execution["segmentId"],
+                    "actions": [
+                        {"action": "verify-ready", "target_id": "explore"},
+                        {"action": "verify-ready", "target_id": "ai-picks"},
+                        {"action": "restore-auth", "target_id": "myshell-art"},
+                    ],
+                },
+            )
+
+        self.assertEqual(batch.status_code, 200)
+        body = batch.json()
+        self.assertEqual(body["status"], "executed_with_manual")
+        self.assertEqual(body["projectId"], meta["projectId"])
+        self.assertEqual(body["sourceSegmentId"], execution["segmentId"])
+        self.assertEqual(body["summary"]["requested"], 3)
+        self.assertEqual(body["summary"]["executed"], 2)
+        self.assertEqual(body["summary"]["manualRequired"], 1)
+        self.assertEqual(body["summary"]["createdJobs"], 2)
+
+        executed_by_target = {item["targetId"]: item for item in body["executedActions"]}
+        self.assertEqual(set(executed_by_target.keys()), {"explore", "ai-picks"})
+        self.assertTrue(all(item["status"] == "executed" for item in executed_by_target.values()))
+
+        manual_by_target = {item["targetId"]: item for item in body["manualActions"]}
+        self.assertEqual(manual_by_target["myshell-art"]["action"], "restore-auth")
+        self.assertEqual(manual_by_target["myshell-art"]["status"], "manual_required")
+        self.assertIn("MYSHELL_COOKIES", manual_by_target["myshell-art"]["next"]["message"])
+
+        covered_page_ids = {page["pageId"] for page in body["audit"]["reports"]["coverage"]["pages"] if page["coverageStatus"] == "covered"}
+        self.assertIn("explore", covered_page_ids)
+        self.assertIn("ai-picks", covered_page_ids)
+        self.assertNotIn("explore", {action.get("targetId") for action in body["audit"]["actions"]})
+        self.assertNotIn("ai-picks", {action.get("targetId") for action in body["audit"]["actions"]})
+
     def test_dispatch_matrix_covers_all_pages_agents_and_paths(self) -> None:
         matrix = self.client.get("/api/studio/dispatch-matrix")
 

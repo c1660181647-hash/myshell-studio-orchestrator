@@ -517,6 +517,46 @@ export interface StudioActionResolveResult {
   audit: StudioDeliveryAudit;
 }
 
+export interface StudioActionResolveBatchResult {
+  status: 'executed' | 'executed_with_manual' | 'executed_with_skips' | 'manual_required' | 'skipped' | string;
+  checkedAt: string;
+  projectId?: string | null;
+  sourceSegmentId?: string | null;
+  summary: {
+    requested: number;
+    executed: number;
+    manualRequired: number;
+    skipped: number;
+    createdJobs: number;
+  };
+  executedActions: Array<{
+    status: string;
+    action: string;
+    targetId: string;
+    resultType: string;
+    jobId?: string;
+    message?: string;
+  }>;
+  manualActions: Array<{
+    status: string;
+    action: string;
+    targetId: string;
+    resultType: string;
+    message?: string;
+    next?: StudioActionResolveResult['next'];
+  }>;
+  skippedActions: Array<{
+    status: string;
+    action: string;
+    targetId: string;
+    resultType: string;
+    reason?: string;
+    message?: string;
+  }>;
+  result?: StudioCoverageVerifyResult | null;
+  audit: StudioDeliveryAudit;
+}
+
 export interface StudioDispatchBatchTarget {
   id: string;
   pageId: StudioApi | string;
@@ -1215,6 +1255,27 @@ export async function resolveStudioAction(options: {
     }),
   });
   if (!response.ok) throw new Error(`Studio action resolve ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function resolveStudioActionsBatch(options: {
+  projectId?: string;
+  sourceSegmentId?: string;
+  actions?: Array<{ action: string; targetId?: string; target_id?: string }>;
+}): Promise<StudioActionResolveBatchResult> {
+  const response = await fetch(getStudioRootEndpoint('/api/studio/actions/resolve-batch'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      project_id: options.projectId,
+      source_segment_id: options.sourceSegmentId,
+      actions: options.actions?.map((action) => ({
+        action: action.action,
+        target_id: action.target_id || action.targetId,
+      })),
+    }),
+  });
+  if (!response.ok) throw new Error(`Studio action resolve batch ${response.status}: ${response.statusText}`);
   return response.json();
 }
 

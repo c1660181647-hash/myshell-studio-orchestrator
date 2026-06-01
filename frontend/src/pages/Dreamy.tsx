@@ -63,6 +63,7 @@ import {
   postStudioClientResult,
   resetStudioProject,
   resolveStudioAction,
+  resolveStudioActionsBatch,
   retryStudioJob,
   resolveStudioAssetUrl,
   streamStudioRun,
@@ -571,20 +572,25 @@ function StudioDeliveryAuditStrip({
   audit,
   refreshing,
   resolvingActionId,
+  resolvingBatch,
   onRefresh,
   onDownload,
   onResolveAction,
+  onResolveSafeActions,
 }: {
   audit: StudioDeliveryAudit | null;
   refreshing: boolean;
   resolvingActionId: string | null;
+  resolvingBatch: boolean;
   onRefresh: () => void;
   onDownload: () => void;
   onResolveAction: (action: StudioHandoffAction) => void;
+  onResolveSafeActions: () => void;
 }) {
   const summary = audit?.summary;
   const gaps = (audit?.requirements || []).filter((item) => item.status !== 'ready');
   const actions = audit?.actions || [];
+  const safeActionCount = actions.filter((action) => action.action === 'verify-ready').length;
 
   return (
     <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
@@ -609,6 +615,15 @@ function StudioDeliveryAuditStrip({
         <Download size={12} />
         Audit JSON
       </button>
+      <button
+        type="button"
+        disabled={!safeActionCount || resolvingBatch || Boolean(resolvingActionId)}
+        onClick={onResolveSafeActions}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        {resolvingBatch ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+        Resolve Safe
+      </button>
       {summary && (
         <>
           <Pill tone={summary.missingCorePages || summary.missingCoreAgents ? 'danger' : 'success'}>{`${summary.pages} pages`}</Pill>
@@ -626,7 +641,7 @@ function StudioDeliveryAuditStrip({
             type="button"
             key={action.id}
             title={action.message || action.reason || action.action}
-            disabled={Boolean(resolvingActionId)}
+            disabled={Boolean(resolvingActionId) || resolvingBatch}
             onClick={() => onResolveAction(action)}
             className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2 disabled:opacity-60"
           >
@@ -2145,6 +2160,7 @@ export default function Dreamy() {
   const [coverageVerifyRunning, setCoverageVerifyRunning] = useState(false);
   const [deliveryAuditRefreshing, setDeliveryAuditRefreshing] = useState(false);
   const [resolvingAuditActionId, setResolvingAuditActionId] = useState<string | null>(null);
+  const [resolvingAuditBatch, setResolvingAuditBatch] = useState(false);
   const [handoffRefreshing, setHandoffRefreshing] = useState(false);
   const [deliveryBundleLoading, setDeliveryBundleLoading] = useState(false);
   const [dispatchBatchPlanning, setDispatchBatchPlanning] = useState(false);
@@ -2863,6 +2879,60 @@ export default function Dreamy() {
     studioContextSourceSegmentId,
   ]);
 
+  const resolveSafeAuditActions = useCallback(async () => {
+    if (resolvingAuditBatch || resolvingAuditActionId || !deliveryAudit) return;
+    const safeActions = deliveryAudit.actions
+      .filter((action) => action.action === 'verify-ready')
+      .map((action) => ({
+        action: action.action,
+        targetId: action.targetId || action.pageId || action.segmentId || action.jobId || action.id,
+      }))
+      .filter((action) => Boolean(action.targetId));
+    if (!safeActions.length) return;
+    setResolvingAuditBatch(true);
+    try {
+      const result = await resolveStudioActionsBatch({
+        projectId: project?.projectId || deliveryAudit.projectId || undefined,
+        sourceSegmentId: studioContextSourceSegmentId || deliveryAudit.sourceSegmentId || undefined,
+        actions: safeActions,
+      });
+      if (result.result?.project) mergeProject(result.result.project);
+      result.result?.jobs?.forEach((job) => mergeJob(job));
+      applyDeliveryAudit(result.audit);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: `Resolved ${result.summary.executed} safe audit action${result.summary.executed === 1 ? '' : 's'}; ${result.audit.summary.actions} audit action${result.audit.summary.actions === 1 ? '' : 's'} remain.`,
+          createdAt: nowIso(),
+        },
+      ]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: 'Safe audit actions could not be resolved.',
+          error: error instanceof Error ? error.message : String(error),
+          createdAt: nowIso(),
+        },
+      ]);
+    } finally {
+      setResolvingAuditBatch(false);
+    }
+  }, [
+    applyDeliveryAudit,
+    deliveryAudit,
+    mergeJob,
+    mergeProject,
+    project?.projectId,
+    resolvingAuditActionId,
+    resolvingAuditBatch,
+    studioContextSourceSegmentId,
+  ]);
+
   const updateAssistant = useCallback((id: string, patch: Partial<ChatItem>) => {
     setMessages((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }, []);
@@ -3482,9 +3552,11 @@ export default function Dreamy() {
         audit={deliveryAudit}
         refreshing={deliveryAuditRefreshing}
         resolvingActionId={resolvingAuditActionId}
+        resolvingBatch={resolvingAuditBatch}
         onRefresh={() => void refreshDeliveryAudit({ interactive: true })}
         onDownload={downloadDeliveryAudit}
         onResolveAction={(action) => void resolveAuditAction(action)}
+        onResolveSafeActions={() => void resolveSafeAuditActions()}
       />
       <StudioDeliveryReportStrip projectId={project?.projectId} report={deliveryReport} />
       <StudioCoverageStrip

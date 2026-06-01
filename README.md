@@ -69,6 +69,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `GET /api/studio/readiness`
 - `GET /api/studio/delivery-audit`
 - `POST /api/studio/actions/resolve`
+- `POST /api/studio/actions/resolve-batch`
 - `GET /api/studio/dispatch-preview`
 - `POST /api/studio/run`
 - `GET /api/studio/projects`
@@ -105,6 +106,8 @@ http://127.0.0.1:5174/?test_route=dreamy
 `/api/studio/delivery-audit` returns a machine-readable acceptance report for operators and deployment checks. Pass optional `project_id` and `source_segment_id` to include project-specific handoff evidence, and add `download=1` to receive a JSON attachment named `myshell-studio-audit-{project_id|current}.json`. The response includes top-level `status`, `summary`, `requirements`, `actions`, `artifacts`, and embedded `reports` for health, readiness, overview, dispatch matrix, coverage, project delivery, and handoff snapshot. The `actions` list lifts handoff gaps such as `restore-auth`, `verify-ready`, or `provide-project-id` into an operator queue. The Studio UI surfaces this as the Audit strip with refresh, action hints, and Audit JSON download actions.
 
 `POST /api/studio/actions/resolve` turns one audit or handoff action into an executable result or explicit operator instruction. `verify-ready` runs targeted coverage verification for the page; auth, cookie, CDP, and project-selection actions return `manual_required` with the exact next step instead of pretending the external state changed.
+
+`POST /api/studio/actions/resolve-batch` runs all supplied safe audit actions in one pass. It batch-executes `verify-ready` page actions, returns manual auth/CDP/project actions unchanged with instructions, and includes a refreshed audit so the Studio UI can update the action queue after one click.
 
 `/api/studio/dispatch-preview` preflights a target page without creating a job. It returns the resolved page, executor, agent, auth status, navigation path, route params, and `missingRouteParams`, which lets the Studio UI show exactly where a dispatch will go before it runs.
 
