@@ -448,7 +448,9 @@ class StudioApiTest(unittest.TestCase):
         action_by_target = {action.get("targetId"): action for action in body["actions"] if action.get("targetId")}
         self.assertIn("myshell-art", action_by_target)
         self.assertEqual(action_by_target["myshell-art"]["action"], "restore-auth")
-        self.assertEqual(body["actions"], body["reports"]["handoffSnapshot"]["actions"])
+        handoff_action_ids = {action["id"] for action in body["reports"]["handoffSnapshot"]["actions"]}
+        audit_action_ids = {action["id"] for action in body["actions"]}
+        self.assertTrue(handoff_action_ids.issubset(audit_action_ids))
 
         download = self.client.get(
             "/api/studio/delivery-audit",
@@ -462,6 +464,67 @@ class StudioApiTest(unittest.TestCase):
         download_body = download.json()
         self.assertEqual(download_body["projectId"], meta["projectId"])
         self.assertEqual(download_body["requirements"][0]["id"], body["requirements"][0]["id"])
+
+    def test_delivery_audit_merges_requirement_and_handoff_actions(self) -> None:
+        async def fake_runtime_health(store_path: str) -> dict:
+            return {
+                "status": "ok",
+                "version": "test",
+                "checkedAt": "2026-06-02T00:00:00Z",
+                "components": {
+                    "backend": {"status": "ok", "message": "FastAPI runtime is serving requests"},
+                    "storage": {"status": "ok", "path": store_path},
+                    "chromeCdp": {"status": "unavailable", "url": "http://127.0.0.1:9222"},
+                    "myshellCookies": {"status": "auth_missing", "message": "No MyShell cookies configured"},
+                    "cookieInjection": {"status": "auth_missing", "message": "Set MYSHELL_COOKIES"},
+                    "dreamyApiAuth": {"status": "client_delegated", "mode": "telegram-init-data"},
+                },
+            }
+
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with (
+            patch("studio.runtime_health", side_effect=fake_runtime_health),
+            patch("studio.adapter_auth_status", side_effect=fake_auth_status),
+        ):
+            with self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={"message": "create audit action merge evidence"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                events = _sse_events("".join(response.iter_text()))
+
+            meta = next(payload for name, payload in events if name == "meta")
+            execution = next(payload for name, payload in events if name == "execution_request")
+            update = self.client.post(
+                f"/api/studio/projects/{meta['projectId']}/client-result",
+                json={
+                    "segmentId": execution["segmentId"],
+                    "jobId": execution["jobId"],
+                    "status": "done",
+                    "taskId": "task_audit_action_merge",
+                    "url": "https://example.com/audit-action-merge.png",
+                    "posterUrl": "https://example.com/audit-action-merge.png",
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            audit = self.client.get(
+                "/api/studio/delivery-audit",
+                params={"project_id": meta["projectId"], "source_segment_id": execution["segmentId"]},
+            )
+
+        self.assertEqual(audit.status_code, 200)
+        body = audit.json()
+        actions = {(action["action"], action.get("targetId")) for action in body["actions"]}
+        self.assertIn(("start-chrome-cdp", "chrome-cdp"), actions)
+        self.assertIn(("restore-auth", "myshell-art"), actions)
+        self.assertEqual(len(body["actions"]), len({action["id"] for action in body["actions"]}))
+        self.assertEqual(body["summary"]["actions"], len(body["actions"]))
 
     def test_studio_action_resolve_executes_verification_and_explains_manual_auth(self) -> None:
         def fake_auth_status(page_id: str) -> dict:

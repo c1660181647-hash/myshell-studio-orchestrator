@@ -1334,14 +1334,23 @@ def _delivery_audit_actions(
     requirements: list[dict[str, Any]],
     handoff: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    if handoff and isinstance(handoff.get("actions"), list):
-        return list(handoff.get("actions") or [])
     actions: list[dict[str, Any]] = []
     for requirement in requirements:
         action = _audit_action_for_requirement(requirement)
         if action:
             actions.append(action)
-    return actions
+    if handoff and isinstance(handoff.get("actions"), list):
+        actions.extend(list(handoff.get("actions") or []))
+    deduped: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for action in actions:
+        action_id = str(action.get("id") or "")
+        if action_id and action_id in seen_ids:
+            continue
+        if action_id:
+            seen_ids.add(action_id)
+        deduped.append(action)
+    return deduped
 
 
 async def _studio_readiness() -> dict[str, Any]:
