@@ -1,0 +1,7 @@
+{
+  "ageVerification": "年齢確認",
+  "ageDesc": "このコンテンツは成人向けです。続けるには <strong>18歳以上</strong> である必要があります。",
+  "iAmOver18": "18歳以上です、続ける",
+  "iAmUnder18": "18歳未満です、退出する",
+  "viewerComingSoon": "画像ビューアー (id: {{id}}) — 近日公開"
+}

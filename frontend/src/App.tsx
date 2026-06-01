@@ -1,0 +1,360 @@
+import React, { useEffect } from 'react';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { useRtl } from './i18n/useRtl';
+import { EnergyProvider } from './contexts/EnergyContext';
+import { ToastProvider } from './contexts/ToastContext';
+import { InviteProvider } from './contexts/InviteContext';
+import { CheckinProvider, useCheckin } from './contexts/CheckinContext';
+import InviteCodeModal from './components/InviteCodeModal';
+import AgeGateModal from './components/AgeGateModal';
+import RouteObserver from './components/RouteObserver';
+import CheckinModal from './components/Checkin/CheckinModal';
+import { reportInviteOpened, reportPickOpened, reportShareOpened } from './services/api';
+import { trackEvent } from './services/tracking';
+import Explore from './pages/Characters';
+import AiPicks from './pages/AiPicks';
+import BotDetail from './pages/BotDetail';
+import Library from './pages/Library';
+import ViewImage from './pages/ViewImage';
+import GetEnergy from './pages/GetEnergy';
+import Settings from './pages/Settings';
+import EnergyHistory from './pages/EnergyHistory';
+import Upload from './pages/Upload';
+import { TagGenerator } from './pages/TagGenerator';
+import Earn from './pages/Earn';
+import ShareInvite from './pages/ShareInvite';
+import TestCustomizeScene from './pages/TestCustomizeScene';
+import CheckinDemo from './pages/CheckinDemo';
+import Dreamy from './pages/Dreamy';
+
+
+let communityPushCtaOpenedReported = false;
+
+const COMMUNITY_PUSH_ATTRIBUTION_KEYS = new Set([
+  'start',
+  'source',
+  'community_push_task_id',
+  'channel_post_message_id',
+  'campaign_id',
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_content',
+  'utm_term',
+  'recipient_trace_id',
+  'push_trace_id',
+  'trace_id',
+  'user_trace_id',
+  'delivery_id',
+  'recipient_id',
+]);
+
+function readStartParam(params: URLSearchParams): { value: string; source: string } {
+  const tgStartParam = (
+    window.Telegram?.WebApp?.initDataUnsafe as { start_param?: string } | undefined
+  )?.start_param;
+  if (tgStartParam) return { value: tgStartParam, source: 'telegram_init_data' };
+
+  const startapp = params.get('startapp');
+  if (startapp) return { value: startapp, source: 'url_startapp' };
+
+  const tgWebAppStartParam = params.get('tgWebAppStartParam');
+  if (tgWebAppStartParam) return { value: tgWebAppStartParam, source: 'url_tgWebAppStartParam' };
+
+  return { value: '', source: 'none' };
+}
+
+function isCommunityPushAttributionParam(key: string): boolean {
+  return (
+    COMMUNITY_PUSH_ATTRIBUTION_KEYS.has(key) ||
+    key.startsWith('community_push_') ||
+    key.startsWith('channel_post_') ||
+    key.startsWith('recipient_') ||
+    key.startsWith('trace_') ||
+    key.startsWith('push_') ||
+    key.startsWith('utm_')
+  );
+}
+
+function collectCommunityPushAttributionParams(
+  params: URLSearchParams,
+): Record<string, string> {
+  const attributionParams: Record<string, string> = {};
+  params.forEach((value, key) => {
+    if (value && isCommunityPushAttributionParam(key)) {
+      attributionParams[key] = value;
+    }
+  });
+  return attributionParams;
+}
+
+// Parse deep-link params before MemoryRouter takes over.
+// Supports: slug_id (from URL query) and startapp (from Telegram start_param).
+function getInitialEntry(): string {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const slugId = params.get('slug_id');
+    if (slugId) return `/upload?slug_id=${encodeURIComponent(slugId)}`;
+    // Test harness deep-link (automated L1 rendering tests)
+    const testRoute = params.get('test_route');
+    if (testRoute === 'customize-scene') {
+      const state = params.get('state') || 'free-default';
+      return `/__test-customize-scene?state=${encodeURIComponent(state)}`;
+    }
+    if (testRoute === 'tag-generator') {
+      const img = params.get('img') || 'https://placehold.co/400x600/1a1a1a/ff195e?text=Photo';
+      const slug = params.get('slug_id') || 'ai-porn-generator';
+      return `/tag-generator?slug_id=${encodeURIComponent(slug)}&img=${encodeURIComponent(img)}`;
+    }
+    if (testRoute === 'dreamy') return '/dreamy';
+  } catch { /* fallback */ }
+
+  // Telegram deep link: startapp param → route mapping
+  // In dev mode, also accept ?startapp= URL param for testing without Telegram.
+  // WebApp button passes ?page= directly in the URL.
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const page = params.get('page');
+    if (page === 'library') return '/library';
+    if (page === 'earn') return '/earn';
+    if (page === 'checkin-demo') return '/checkin-demo';
+    if (page === 'dreamy') return '/dreamy';
+    if (page === 'self-director') return '/upload?mode=tag-generator';
+    if (page === 'ai-picks') return '/ai-picks';
+    const startParam = (
+      window.Telegram?.WebApp?.initDataUnsafe as { start_param?: string } | undefined
+    )?.start_param
+      ?? params.get('startapp')
+      ?? params.get('tgWebAppStartParam');
+    if (startParam === 'earn') return '/share-invite';
+    if (startParam === 'buy') return '/energy?oos=1';
+    if (startParam === 'library') return '/library';
+    if (startParam === 'dreamy') return '/dreamy';
+    if (startParam?.startsWith('share_')) return '/library';
+    // Fallback: treat any other non-empty startParam as a bot slug_id.
+    // Generated by TG WebApp button: t.me/<bot>/<app>?startapp=<slugID>
+    if (startParam) return `/bot?slug_id=${encodeURIComponent(startParam)}`;
+  } catch { /* fallback */ }
+
+  return '/';
+}
+
+// Error boundary to catch rendering crashes (prevents blank screen)
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error?: Error }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 24, color: '#fff', background: '#0E0E0F', minHeight: '100vh' }}>
+          <h2>Something went wrong</h2>{/* ErrorBoundary: no hooks available in class component */}
+          <pre style={{ fontSize: 12, color: '#f88', whiteSpace: 'pre-wrap' }}>
+            {this.state.error?.message}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+/** Connects the global CheckinModal to CheckinContext state. */
+function GlobalCheckinModal() {
+  const { isModalOpen, closeModal, modalSource } = useCheckin();
+  return <CheckinModal open={isModalOpen} onClose={closeModal} source={modalSource} />;
+}
+
+function AppRoutes() {
+  return (
+    <div className="h-full w-full">
+      <Routes>
+        <Route path="/" element={<Explore />} />
+        <Route path="/ai-picks" element={<AiPicks />} />
+        <Route path="/bot" element={<BotDetail />} />
+        <Route path="/profile" element={<Settings />} />
+        <Route path="/library" element={<Library />} />
+        <Route path="/library/:id" element={<ViewImage />} />
+        <Route path="/energy" element={<GetEnergy />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/energy-history" element={<EnergyHistory />} />
+        <Route path="/upload" element={<Upload />} />
+        <Route path="/tag-generator" element={<TagGenerator />} />
+        <Route path="/earn" element={<Earn />} />
+        <Route path="/share-invite" element={<ShareInvite />} />
+        <Route path="/dreamy" element={<Dreamy />} />
+        <Route path="/__test-customize-scene" element={<TestCustomizeScene />} />
+        <Route path="/checkin-demo" element={<CheckinDemo />} />
+      </Routes>
+    </div>
+  );
+}
+
+export default function App() {
+  useRtl();
+
+  // ── Funnel Step 3: miniapp_webview_ready ──
+  useEffect(() => {
+    let cancelled = false;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        try {
+          trackEvent('miniapp_webview_ready', {
+            ts: Date.now(),
+            first_route: (window.location.search || '') + (window.location.hash || ''),
+            has_tg_init: !!(window.Telegram?.WebApp?.initData),
+          });
+        } catch { /* swallow */ }
+      });
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Funnel Step 4: miniapp_firstview_engage ──
+  useEffect(() => {
+    let fired = false;
+    const fire = (signal: string) => {
+      if (fired) return;
+      fired = true;
+      try { trackEvent('miniapp_firstview_engage', { signal }); } catch {}
+      cleanup();
+    };
+
+    const onScroll = () => fire('scroll');
+    const onTouchMove = () => fire('touchmove');
+    const onClick = () => fire('click');
+    const onKey = () => fire('keydown');
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') fire('visible');
+    };
+    const timer = window.setTimeout(() => fire('dwell_3s'), 3000);
+
+    window.addEventListener('scroll', onScroll, { passive: true, capture: true });
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
+    window.addEventListener('click', onClick, { capture: true });
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    function cleanup() {
+      window.clearTimeout(timer);
+      window.removeEventListener('scroll', onScroll, { capture: true } as EventListenerOptions);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('click', onClick, { capture: true } as EventListenerOptions);
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('visibilitychange', onVisibility);
+    }
+    return cleanup;
+  }, []);
+
+  // Fire traceable community-push CTA-open telemetry when the TG WebApp button
+  // URL carries start=push / source=community_push attribution params.
+  useEffect(() => {
+    if (communityPushCtaOpenedReported) return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const source = params.get('source') || '';
+      const startMarker = params.get('start') || '';
+      const isCommunityPushOpen =
+        source === 'community_push' ||
+        startMarker === 'push' ||
+        params.has('community_push_task_id') ||
+        params.has('channel_post_message_id');
+
+      if (!isCommunityPushOpen) return;
+      communityPushCtaOpenedReported = true;
+
+      const startParam = readStartParam(params);
+      trackEvent('miniapp_community_push_cta_opened', {
+        opened_from: 'tg_web_app_cta',
+        attribution_source: source || (startMarker === 'push' ? 'push' : 'community_push'),
+        start_marker: startMarker,
+        target_slug_id: startParam.value,
+        start_param: startParam.value,
+        start_param_source: startParam.source,
+        community_push_task_id: params.get('community_push_task_id') || '',
+        channel_post_message_id: params.get('channel_post_message_id') || '',
+        campaign_id: params.get('campaign_id') || '',
+        recipient_trace_id: params.get('recipient_trace_id') || '',
+        push_trace_id: params.get('push_trace_id') || '',
+        trace_id: params.get('trace_id') || '',
+        delivery_id: params.get('delivery_id') || '',
+        has_tg_init: !!(window.Telegram?.WebApp?.initData),
+        attribution_params: collectCommunityPushAttributionParams(params),
+      });
+    } catch { /* ignore */ }
+  }, []);
+
+  // Fire invite-push telemetry when the Mini App is launched from the
+  // next-day push notification (CTA URL carries ?src=invite_push).
+  useEffect(() => {
+    try {
+      const src = new URLSearchParams(window.location.search).get('src');
+      if (src === 'invite_push') void reportInviteOpened();
+    } catch { /* ignore */ }
+  }, []);
+
+  // Fire ai-pick-push telemetry when the Mini App is launched from the AI
+  // Pick daily push card.
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('source') === 'ai_pick') {
+        const rawTaskId = params.get('task_id');
+        const taskId = rawTaskId ? Number(rawTaskId) : 0;
+        void reportPickOpened(Number.isFinite(taskId) ? taskId : 0);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // Fire share-opened telemetry when the Mini App is launched from a share link.
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const startParam = (
+        window.Telegram?.WebApp?.initDataUnsafe as { start_param?: string } | undefined
+      )?.start_param
+        ?? params.get('startapp')
+        ?? params.get('tgWebAppStartParam');
+      if (startParam?.startsWith('share_')) {
+        const parts = startParam.split('_');
+        // Format: share_<taskId>_<inviterUserId>
+        if (parts.length >= 3) {
+          const taskId = parts[1];
+          const inviterUserId = parts.slice(2).join('_');
+          void reportShareOpened(taskId, inviterUserId);
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  return (
+    <ErrorBoundary>
+      <div className="h-full w-full relative">
+        <EnergyProvider>
+          <ToastProvider>
+            <CheckinProvider>
+              <InviteProvider>
+                <MemoryRouter initialEntries={[getInitialEntry()]}>
+                  <RouteObserver />
+                  <AppRoutes />
+                  <InviteCodeModal />
+                  <AgeGateModal />
+                  <GlobalCheckinModal />
+                </MemoryRouter>
+              </InviteProvider>
+            </CheckinProvider>
+          </ToastProvider>
+        </EnergyProvider>
+      </div>
+    </ErrorBoundary>
+  );
+}
