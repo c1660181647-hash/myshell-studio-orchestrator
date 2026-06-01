@@ -285,6 +285,34 @@ export interface StudioOverview {
   latestJobs: StudioJob[];
 }
 
+export type StudioCoverageStatus = 'covered' | 'pending' | 'ready_unverified' | 'blocked' | string;
+
+export interface StudioCoveragePage extends StudioDispatchMatrixEntry {
+  coverageStatus: StudioCoverageStatus;
+  jobCount: number;
+  acceptedEvidence: number;
+  latestJob?: StudioJob | null;
+  latestEvidence?: StudioEvidence;
+}
+
+export interface StudioCoverageReport {
+  status: 'ready' | 'ready_with_gaps' | 'blocked' | string;
+  checkedAt: string;
+  projectId?: string | null;
+  sourceSegmentId?: string | null;
+  sourceMediaUrl?: string;
+  summary: StudioDispatchMatrix['summary'] & {
+    covered: number;
+    pending: number;
+    readyUnverified: number;
+    acceptedEvidence: number;
+    issues: number;
+    pendingJobs: number;
+    withJobs: number;
+  };
+  pages: StudioCoveragePage[];
+}
+
 export interface StudioAgentCapability {
   id: string;
   label: string;
@@ -717,6 +745,19 @@ export async function fetchStudioDispatchMatrix(options: {
   const query = params.toString();
   const response = await fetch(getStudioRootEndpoint(`/api/studio/dispatch-matrix${query ? `?${query}` : ''}`));
   if (!response.ok) throw new Error(`Studio dispatch matrix ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function fetchStudioCoverage(options: {
+  projectId?: string;
+  sourceSegmentId?: string;
+} = {}): Promise<StudioCoverageReport> {
+  const params = new URLSearchParams();
+  if (options.projectId) params.set('project_id', options.projectId);
+  if (options.sourceSegmentId) params.set('source_segment_id', options.sourceSegmentId);
+  const query = params.toString();
+  const response = await fetch(getStudioRootEndpoint(`/api/studio/coverage${query ? `?${query}` : ''}`));
+  if (!response.ok) throw new Error(`Studio coverage ${response.status}: ${response.statusText}`);
   return response.json();
 }
 

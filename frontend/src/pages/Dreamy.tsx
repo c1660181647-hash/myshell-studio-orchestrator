@@ -42,6 +42,7 @@ import {
   bulkStudioJobs,
   cancelStudioJob,
   extractGenerateTaskMedia,
+  fetchStudioCoverage,
   fetchStudioDispatchMatrix,
   fetchStudioDispatchPreview,
   fetchStudioAgents,
@@ -72,6 +73,7 @@ import type {
   StudioAction,
   StudioAgentNode,
   StudioApi,
+  StudioCoverageReport,
   StudioDispatchMatrix,
   StudioDispatchMatrixEntry,
   StudioDispatchPreview,
@@ -556,6 +558,42 @@ function StudioDeliveryReportStrip({
         </span>
       ))}
       {actions.length > 4 && <Pill tone="hot">{`+${actions.length - 4} actions`}</Pill>}
+    </div>
+  );
+}
+
+function StudioCoverageStrip({ coverage }: { coverage: StudioCoverageReport | null }) {
+  const summary = coverage?.summary;
+  const gaps = (coverage?.pages || []).filter((page) => page.coverageStatus !== 'covered');
+
+  return (
+    <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
+      <Pill tone={coverage?.status === 'blocked' ? 'danger' : coverage?.status === 'ready' ? 'success' : 'hot'}>
+        {coverage ? `Coverage ${coverage.status}` : 'Coverage checking'}
+      </Pill>
+      {summary && (
+        <>
+          <Pill tone={summary.covered === summary.total ? 'success' : 'hot'}>{`${summary.covered}/${summary.total} covered`}</Pill>
+          <Pill tone={summary.pending ? 'hot' : 'default'}>{`${summary.pending} pending`}</Pill>
+          <Pill tone={summary.readyUnverified ? 'hot' : 'default'}>{`${summary.readyUnverified} unverified`}</Pill>
+          <Pill tone={summary.blocked ? 'danger' : 'default'}>{`${summary.blocked} blocked`}</Pill>
+        </>
+      )}
+      {gaps.slice(0, 6).map((page) => (
+        <span
+          key={page.pageId}
+          title={page.dispatchMessage || page.latestEvidence?.message || page.coverageStatus}
+          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2"
+        >
+          <AlertTriangle
+            size={12}
+            className={page.coverageStatus === 'blocked' ? 'text-Cr-text-critical-default-v2' : 'text-dreamy-brand-hot-v2'}
+          />
+          <span className="max-w-[120px] truncate">{page.pageName}</span>
+          <span className="text-Cr-text-subtlest-v2">{page.coverageStatus}</span>
+        </span>
+      ))}
+      {gaps.length > 6 && <Pill tone="hot">{`+${gaps.length - 6} gaps`}</Pill>}
     </div>
   );
 }
@@ -1726,6 +1764,7 @@ export default function Dreamy() {
   const [studioReadiness, setStudioReadiness] = useState<StudioReadiness | null>(null);
   const [deliveryReport, setDeliveryReport] = useState<StudioProjectDeliveryReport | null>(null);
   const [dispatchMatrix, setDispatchMatrix] = useState<StudioDispatchMatrix | null>(null);
+  const [coverageReport, setCoverageReport] = useState<StudioCoverageReport | null>(null);
   const [queueStatusFilter, setQueueStatusFilter] = useState<StudioStatus | 'all'>('all');
   const [queuePageFilter, setQueuePageFilter] = useState<StudioApi | string>('all');
   const [queueAgentFilter, setQueueAgentFilter] = useState('all');
@@ -1808,7 +1847,8 @@ export default function Dreamy() {
       fetchStudioOverview().catch(() => null),
       fetchStudioReadiness().catch(() => null),
       fetchStudioDispatchMatrix().catch(() => null),
-    ]).then(([nextPages, nextAgents, nextHealth, nextOverview, nextReadiness, nextMatrix]) => {
+      fetchStudioCoverage().catch(() => null),
+    ]).then(([nextPages, nextAgents, nextHealth, nextOverview, nextReadiness, nextMatrix, nextCoverage]) => {
       if (cancelled) return;
       setPages(nextPages);
       setAgents(nextAgents);
@@ -1816,6 +1856,7 @@ export default function Dreamy() {
       setStudioOverview(nextOverview);
       setStudioReadiness(nextReadiness);
       setDispatchMatrix(nextMatrix);
+      setCoverageReport(nextCoverage);
       setSelectedPageId((current) =>
         nextPages.length && !nextPages.some((page) => page.id === current) ? nextPages[0].id : current,
       );
@@ -1837,11 +1878,17 @@ export default function Dreamy() {
 
   useEffect(() => {
     let cancelled = false;
-    void fetchStudioDispatchMatrix({
+    const context = {
       projectId: project?.projectId,
       sourceSegmentId: selectedSegment?.id,
-    }).then((matrix) => {
-      if (!cancelled) setDispatchMatrix(matrix);
+    };
+    void Promise.all([
+      fetchStudioDispatchMatrix(context).catch(() => null),
+      fetchStudioCoverage(context).catch(() => null),
+    ]).then(([matrix, coverage]) => {
+      if (cancelled) return;
+      if (matrix) setDispatchMatrix(matrix);
+      if (coverage) setCoverageReport(coverage);
     }).catch(() => undefined);
     return () => {
       cancelled = true;
@@ -1904,11 +1951,16 @@ export default function Dreamy() {
         projectId: project?.projectId,
         sourceSegmentId: selectedSegment?.id,
       }).catch(() => null),
-    ]).then(([overview, readiness, matrix]) => {
+      fetchStudioCoverage({
+        projectId: project?.projectId,
+        sourceSegmentId: selectedSegment?.id,
+      }).catch(() => null),
+    ]).then(([overview, readiness, matrix, coverage]) => {
       if (cancelled) return;
       if (overview) setStudioOverview(overview);
       if (readiness) setStudioReadiness(readiness);
       if (matrix) setDispatchMatrix(matrix);
+      if (coverage) setCoverageReport(coverage);
     }).catch(() => undefined);
     return () => {
       cancelled = true;
@@ -2332,6 +2384,7 @@ export default function Dreamy() {
     setProject(null);
     setHubJobs([]);
     setDeliveryReport(null);
+    setCoverageReport(null);
     forgetLastStudioProjectId();
     clearStudioDispatchSession();
     setMessages([
@@ -2455,6 +2508,10 @@ export default function Dreamy() {
         projectId: project?.projectId,
         sourceSegmentId: selectedSegment?.id,
       }).then((matrix) => setDispatchMatrix(matrix)).catch(() => undefined),
+      fetchStudioCoverage({
+        projectId: project?.projectId,
+        sourceSegmentId: selectedSegment?.id,
+      }).then((coverage) => setCoverageReport(coverage)).catch(() => undefined),
       project?.projectId
         ? fetchStudioProjectDeliveryReport(project.projectId).then((report) => setDeliveryReport(report)).catch(() => undefined)
         : Promise.resolve(),
@@ -2512,6 +2569,7 @@ export default function Dreamy() {
       <StudioHealthStrip health={studioHealth} />
       <StudioReadinessStrip readiness={studioReadiness} />
       <StudioDeliveryReportStrip projectId={project?.projectId} report={deliveryReport} />
+      <StudioCoverageStrip coverage={coverageReport} />
 
       <div className="grid shrink-0 gap-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
         <label className="grid gap-1">

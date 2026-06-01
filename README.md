@@ -53,6 +53,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `GET /api/agents`
 - `GET /api/studio/overview`
 - `GET /api/studio/dispatch-matrix`
+- `GET /api/studio/coverage`
 - `GET /api/studio/readiness`
 - `GET /api/studio/dispatch-preview`
 - `POST /api/studio/run`
@@ -73,6 +74,8 @@ http://127.0.0.1:5174/?test_route=dreamy
 `/api/studio/overview` aggregates pages, agents, latest jobs, and status counts for the Studio command center. Page summaries include runtime readiness, related agent ids, per-status job counts, and the latest job for that page.
 
 `/api/studio/dispatch-matrix` returns a full page-to-agent routing matrix for every registered MyShell surface. It includes the recommended action (`navigate`, `execute-client`, or `execute-server`), default agent id, executor, auth status, navigation path, route params, missing params, and readiness summary so operators can audit and launch dispatch targets from one panel. Pass `project_id` and optional `source_segment_id` to compute contextual routes from the current media segment, such as filling Tag Generator's required `img` parameter from an accepted image.
+
+`/api/studio/coverage` turns the dispatch matrix and persisted job evidence into a page-level delivery report. It marks each MyShell surface as `covered`, `pending`, `ready_unverified`, or `blocked`, includes the latest job/evidence per page, and summarizes covered, unverified, pending, blocked, and issue counts for release handoff.
 
 `/api/studio/readiness` returns delivery gates for the handoff surface: backend, storage, Chrome CDP, cookie injection, page registry, agent registry, dispatch preview, overview, MyShell Art auth, and job store. Required gate failures make the response `blocked`; optional auth/CDP gaps are surfaced as `degraded` or `auth_missing` rather than hidden as success.
 

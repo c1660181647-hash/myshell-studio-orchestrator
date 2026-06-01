@@ -271,7 +271,7 @@ def _dispatch_matrix(project_id: str | None = None, source_segment_id: str | Non
     default_bot = get_bot_by_slug("seedream-multi-chart") or MYSHELL_BOTS[0]
     project = _get_project(project_id) if project_id else None
     resolved_source_segment_id = source_segment_id or (project or {}).get("selectedSegmentId")
-    source_segment = _find_segment(project, resolved_source_segment_id) if project else None
+    source_segment = _resolve_source_segment(project, resolved_source_segment_id)
     route = {
         "bot": {
             "slug": default_bot["slug"],
@@ -299,6 +299,86 @@ def _dispatch_matrix(project_id: str | None = None, source_segment_id: str | Non
         "sourceMediaUrl": _accepted_source_media_url(source_segment),
         "summary": summary,
         "entries": entries,
+    }
+
+
+def _coverage_status(entry: dict[str, Any], page_jobs: list[dict[str, Any]], accepted_count: int) -> str:
+    if not entry.get("dispatchReady"):
+        return "blocked"
+    latest_status = str((page_jobs[0] if page_jobs else {}).get("status") or "")
+    if accepted_count:
+        return "covered"
+    if latest_status in PENDING_DELIVERY_STATUSES or latest_status in ISSUE_DELIVERY_STATUSES:
+        return "pending"
+    return "ready_unverified"
+
+
+def _coverage_status_summary(statuses: list[str]) -> str:
+    if "blocked" in statuses:
+        return "blocked"
+    if statuses and all(status == "covered" for status in statuses):
+        return "ready"
+    return "ready_with_gaps"
+
+
+def _studio_coverage(project_id: str | None = None, source_segment_id: str | None = None) -> dict[str, Any]:
+    matrix = _dispatch_matrix(project_id=project_id, source_segment_id=source_segment_id)
+    project = _get_project(project_id) if project_id else None
+    jobs = STUDIO_STORE.list_jobs(project_id=project_id, limit=500) if project_id else STUDIO_STORE.list_jobs(limit=500)
+
+    pages: list[dict[str, Any]] = []
+    statuses: list[str] = []
+    accepted_total = 0
+    issue_total = 0
+    pending_total = 0
+
+    for entry in matrix["entries"]:
+        page_jobs = [job for job in jobs if job.get("pageId") == entry["pageId"] or job.get("api") == entry["pageId"]]
+        enriched_jobs = [_job_with_evidence(job) for job in page_jobs]
+        latest_job = enriched_jobs[0] if enriched_jobs else None
+        accepted_evidence = [
+            evidence
+            for job in enriched_jobs
+            for evidence in (job or {}).get("evidenceTrail", [])
+            if evidence.get("accepted")
+        ]
+        accepted_count = len(accepted_evidence)
+        latest_evidence = (latest_job or {}).get("evidence") or (accepted_evidence[0] if accepted_evidence else {})
+        status = _coverage_status(entry, page_jobs, accepted_count)
+        statuses.append(status)
+        accepted_total += accepted_count
+        issue_total += sum(1 for job in page_jobs if str(job.get("status") or "") in ISSUE_DELIVERY_STATUSES)
+        pending_total += sum(1 for job in page_jobs if str(job.get("status") or "") in PENDING_DELIVERY_STATUSES)
+
+        pages.append(
+            {
+                **entry,
+                "coverageStatus": status,
+                "jobCount": len(page_jobs),
+                "acceptedEvidence": accepted_count,
+                "latestJob": latest_job,
+                "latestEvidence": latest_evidence,
+            }
+        )
+
+    summary = {
+        **matrix["summary"],
+        "covered": statuses.count("covered"),
+        "pending": statuses.count("pending"),
+        "readyUnverified": statuses.count("ready_unverified"),
+        "acceptedEvidence": accepted_total,
+        "issues": issue_total,
+        "pendingJobs": pending_total,
+        "withJobs": sum(1 for page in pages if page["jobCount"]),
+    }
+    return {
+        "status": _coverage_status_summary(statuses),
+        "checkedAt": now_iso(),
+        "projectId": project.get("projectId") if project else None,
+        "sourceSegmentId": matrix.get("sourceSegmentId"),
+        "sourceMediaUrl": matrix.get("sourceMediaUrl", ""),
+        "summary": summary,
+        "pages": pages,
     }
 
 
@@ -567,12 +647,13 @@ async def _dispatch_preview(
     )
 
     project = _get_project(project_id) if project_id else None
-    source_segment = _find_segment(project, source_segment_id) if project else None
+    source_segment = _resolve_source_segment(project, source_segment_id)
+    resolved_source_segment_id = source_segment.get("id") if source_segment else source_segment_id
     route = await choose_route(prompt, has_image, normalized_action, source_segment)
     page = page_for_dispatch(route["bot"], page_id, prompt)
     route["action"] = normalized_action
-    route["sourceSegmentId"] = source_segment_id
-    route["sourceSummary"] = f"Using segment {source_segment_id}" if source_segment_id else "Starting from prompt"
+    route["sourceSegmentId"] = resolved_source_segment_id
+    route["sourceSummary"] = f"Using segment {resolved_source_segment_id}" if resolved_source_segment_id else "Starting from prompt"
     route["page"] = page
     route["api"] = page["id"]
     route["executor"] = page["executor"]
@@ -800,6 +881,24 @@ def _find_segment(project: StudioProject, segment_id: Optional[str]) -> Optional
         if segment.get("id") == segment_id:
             return segment
     return None
+
+
+def _latest_accepted_media_segment(project: StudioProject | None) -> Optional[StudioSegment]:
+    if not project:
+        return None
+    for segment in reversed(project.get("segments", [])):
+        if _accepted_source_media_url(segment):
+            return segment
+    return None
+
+
+def _resolve_source_segment(project: StudioProject | None, segment_id: Optional[str]) -> Optional[StudioSegment]:
+    if not project:
+        return None
+    requested = _find_segment(project, segment_id)
+    if _accepted_source_media_url(requested):
+        return requested
+    return _latest_accepted_media_segment(project)
 
 
 def _append_message(project: StudioProject, role: str, content: str, **extra: Any) -> dict[str, Any]:
@@ -1160,6 +1259,13 @@ def register_studio_routes(app) -> None:
     ):
         return _dispatch_matrix(project_id=project_id, source_segment_id=source_segment_id)
 
+    @app.get("/api/studio/coverage")
+    async def get_studio_coverage(
+        project_id: Optional[str] = Query(None),
+        source_segment_id: Optional[str] = Query(None),
+    ):
+        return _studio_coverage(project_id=project_id, source_segment_id=source_segment_id)
+
     @app.get("/api/studio/readiness")
     async def get_studio_readiness():
         return await _studio_readiness()
@@ -1218,13 +1324,14 @@ def register_studio_routes(app) -> None:
         if image is not None:
             image_data = base64.b64encode(await image.read()).decode()
         has_image = image_data is not None
-        source_segment = _find_segment(project, source_segment_id)
+        source_segment = _resolve_source_segment(project, source_segment_id)
+        resolved_source_segment_id = source_segment.get("id") if source_segment else source_segment_id
         _append_message(
             project,
             "user",
             prompt,
             action=normalized_action,
-            sourceSegmentId=source_segment_id,
+            sourceSegmentId=resolved_source_segment_id,
             hasImage=has_image,
         )
 
@@ -1241,9 +1348,9 @@ def register_studio_routes(app) -> None:
             route = await choose_route(prompt, has_image, normalized_action, source_segment)
             page = page_for_dispatch(route["bot"], page_id, prompt)
             route["action"] = normalized_action
-            route["sourceSegmentId"] = source_segment_id
+            route["sourceSegmentId"] = resolved_source_segment_id
             route["sourceSummary"] = (
-                f"Using segment {source_segment_id}" if source_segment_id else "Starting from prompt"
+                f"Using segment {resolved_source_segment_id}" if resolved_source_segment_id else "Starting from prompt"
             )
             route["page"] = page
             route["api"] = page["id"]
@@ -1270,7 +1377,7 @@ def register_studio_routes(app) -> None:
                 route,
                 route.get("optimizedPrompt") or prompt,
                 normalized_action,
-                source_segment_id,
+                resolved_source_segment_id,
             )
             job = _create_job(project, segment, route, page, source_segment, agent_id=route["agentId"])
             graph = _set_graph_status(project, route, segment)

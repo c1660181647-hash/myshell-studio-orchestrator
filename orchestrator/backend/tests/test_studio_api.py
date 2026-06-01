@@ -649,6 +649,145 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(tag_generator["missingRouteParams"], ["img"])
         self.assertNotIn("img=%2Fgallery", tag_generator["navigationPath"])
 
+    def test_studio_coverage_report_summarizes_page_dispatch_evidence(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "create coverage source image"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            source_events = _sse_events("".join(response.iter_text()))
+
+        source_meta = next(payload for name, payload in source_events if name == "meta")
+        source_execution = next(payload for name, payload in source_events if name == "execution_request")
+        source_url = "https://example.com/coverage-source.png"
+        update = self.client.post(
+            f"/api/studio/projects/{source_meta['projectId']}/client-result",
+            json={
+                "segmentId": source_execution["segmentId"],
+                "jobId": source_execution["jobId"],
+                "status": "done",
+                "taskId": "task_coverage_source",
+                "url": source_url,
+                "posterUrl": source_url,
+            },
+        )
+        self.assertEqual(update.status_code, 200)
+
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={
+                "message": "dispatch tag generator for coverage",
+                "project_id": source_meta["projectId"],
+                "source_segment_id": source_execution["segmentId"],
+                "page_id": "tag-generator",
+                "agent_id": "miniapp-page-navigator",
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            _sse_events("".join(response.iter_text()))
+
+        coverage = self.client.get(
+            "/api/studio/coverage",
+            params={"project_id": source_meta["projectId"], "source_segment_id": source_execution["segmentId"]},
+        )
+        self.assertEqual(coverage.status_code, 200)
+        body = coverage.json()
+        pages = {page["pageId"]: page for page in body["pages"]}
+
+        self.assertEqual(body["projectId"], source_meta["projectId"])
+        self.assertEqual(body["sourceSegmentId"], source_execution["segmentId"])
+        self.assertEqual(body["summary"]["total"], 13)
+        self.assertGreaterEqual(body["summary"]["ready"], 12)
+        self.assertGreaterEqual(body["summary"]["covered"], 2)
+        self.assertGreaterEqual(body["summary"]["blocked"], 1)
+        self.assertIn(body["status"], {"ready_with_gaps", "blocked"})
+
+        tag_generator = pages["tag-generator"]
+        self.assertEqual(tag_generator["coverageStatus"], "covered")
+        self.assertEqual(tag_generator["latestJob"]["status"], "done")
+        self.assertEqual(tag_generator["latestEvidence"]["pageId"], "tag-generator")
+        self.assertIn("img=https%3A%2F%2Fexample.com%2Fcoverage-source.png", tag_generator["navigationPath"])
+        self.assertEqual(tag_generator["missingRouteParams"], [])
+
+        art = pages["myshell-art"]
+        self.assertEqual(art["coverageStatus"], "blocked")
+        self.assertEqual(art["dispatchStatus"], "auth_missing")
+        self.assertEqual(art["authStatus"]["status"], "auth_missing")
+
+    def test_coverage_falls_back_to_latest_accepted_media_segment(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "create fallback coverage source image"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            source_events = _sse_events("".join(response.iter_text()))
+
+        source_meta = next(payload for name, payload in source_events if name == "meta")
+        source_execution = next(payload for name, payload in source_events if name == "execution_request")
+        source_url = "https://example.com/fallback-coverage-source.png"
+        update = self.client.post(
+            f"/api/studio/projects/{source_meta['projectId']}/client-result",
+            json={
+                "segmentId": source_execution["segmentId"],
+                "jobId": source_execution["jobId"],
+                "status": "done",
+                "taskId": "task_fallback_coverage_source",
+                "url": source_url,
+                "posterUrl": source_url,
+            },
+        )
+        self.assertEqual(update.status_code, 200)
+
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={
+                "message": "dispatch tag generator then keep context",
+                "project_id": source_meta["projectId"],
+                "source_segment_id": source_execution["segmentId"],
+                "page_id": "tag-generator",
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            _sse_events("".join(response.iter_text()))
+
+        restored_project = self.client.get(f"/api/studio/projects/{source_meta['projectId']}").json()
+        self.assertNotEqual(restored_project["selectedSegmentId"], source_execution["segmentId"])
+
+        coverage = self.client.get(
+            "/api/studio/coverage",
+            params={"project_id": source_meta["projectId"]},
+        )
+        self.assertEqual(coverage.status_code, 200)
+        body = coverage.json()
+        pages = {page["pageId"]: page for page in body["pages"]}
+
+        self.assertEqual(body["sourceSegmentId"], source_execution["segmentId"])
+        self.assertEqual(body["sourceMediaUrl"], source_url)
+        self.assertEqual(pages["tag-generator"]["coverageStatus"], "covered")
+        self.assertEqual(pages["tag-generator"]["missingRouteParams"], [])
+        self.assertIn("img=https%3A%2F%2Fexample.com%2Ffallback-coverage-source.png", pages["tag-generator"]["navigationPath"])
+
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={
+                "message": "dispatch from selected navigation segment",
+                "project_id": source_meta["projectId"],
+                "source_segment_id": restored_project["selectedSegmentId"],
+                "page_id": "tag-generator",
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            rerun_events = _sse_events("".join(response.iter_text()))
+
+        rerun_execution = next(payload for name, payload in rerun_events if name == "execution_request")
+        self.assertEqual(rerun_execution["missingRouteParams"], [])
+        self.assertIn("img=https%3A%2F%2Fexample.com%2Ffallback-coverage-source.png", rerun_execution["navigationPath"])
+
     def test_run_stream_preserves_selected_agent_id_through_retry(self) -> None:
         with self.client.stream(
             "POST",
