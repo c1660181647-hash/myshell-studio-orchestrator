@@ -472,10 +472,13 @@ class StudioApiTest(unittest.TestCase):
             "upload": "/upload",
             "tag-generator": "/tag-generator",
             "library": "/library",
+            "library-detail": "/library/:id",
             "energy-store": "/energy",
+            "energy-history": "/energy-history",
             "earn": "/earn",
             "share-invite": "/share-invite",
             "settings": "/settings",
+            "profile": "/profile",
             "checkin": "/checkin-demo",
         }
 
@@ -484,6 +487,27 @@ class StudioApiTest(unittest.TestCase):
             self.assertEqual(page_by_id[page_id]["appRoute"], route)
             self.assertEqual(page_by_id[page_id]["executor"], "navigation")
             self.assertEqual(page_by_id[page_id]["registrySource"], "manifest")
+
+    def test_dynamic_manifest_routes_replace_path_parameters(self) -> None:
+        preview = self.client.get(
+            "/api/studio/dispatch-preview",
+            params={"page_id": "library-detail", "message": "open a generated work detail"},
+        )
+
+        self.assertEqual(preview.status_code, 200)
+        body = preview.json()
+        self.assertEqual(body["page"]["id"], "library-detail")
+        self.assertEqual(body["navigationPath"], "/library/studio-preview")
+        self.assertEqual(body["routeParams"], ["id"])
+        self.assertEqual(body["missingRouteParams"], [])
+        self.assertTrue(body["dispatchReady"])
+
+        matrix = self.client.get("/api/studio/dispatch-matrix")
+        self.assertEqual(matrix.status_code, 200)
+        entries = {entry["pageId"]: entry for entry in matrix.json()["entries"]}
+        self.assertEqual(entries["library-detail"]["navigationPath"], "/library/studio-preview")
+        self.assertEqual(entries["library-detail"]["missingRouteParams"], [])
+        self.assertTrue(entries["library-detail"]["dispatchReady"])
 
     def test_manifest_pages_extend_registry_and_prompt_routing(self) -> None:
         manifest = {
@@ -698,8 +722,8 @@ class StudioApiTest(unittest.TestCase):
 
         self.assertEqual(body["projectId"], source_meta["projectId"])
         self.assertEqual(body["sourceSegmentId"], source_execution["segmentId"])
-        self.assertEqual(body["summary"]["total"], 13)
-        self.assertGreaterEqual(body["summary"]["ready"], 12)
+        self.assertEqual(body["summary"]["total"], 16)
+        self.assertGreaterEqual(body["summary"]["ready"], 15)
         self.assertGreaterEqual(body["summary"]["covered"], 2)
         self.assertGreaterEqual(body["summary"]["blocked"], 1)
         self.assertIn(body["status"], {"ready_with_gaps", "blocked"})
@@ -930,12 +954,12 @@ class StudioApiTest(unittest.TestCase):
         self.assertFalse(body["readyForDelivery"])
 
         summary = body["summary"]
-        self.assertEqual(summary["pages"], 13)
-        self.assertGreaterEqual(summary["covered"], 12)
+        self.assertEqual(summary["pages"], 16)
+        self.assertGreaterEqual(summary["covered"], 15)
         self.assertEqual(summary["readyUnverified"], 0)
         self.assertEqual(summary["blocked"], 1)
-        self.assertGreaterEqual(summary["acceptedEvidence"], 12)
-        self.assertGreaterEqual(summary["jobs"], 12)
+        self.assertGreaterEqual(summary["acceptedEvidence"], 15)
+        self.assertGreaterEqual(summary["jobs"], 15)
 
         report_keys = set(body["reports"].keys())
         self.assertTrue(
@@ -1009,11 +1033,11 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(body["sourceMediaUrl"], source_url)
         self.assertEqual(body["status"], "planned")
         self.assertTrue(body["readyForDispatch"])
-        self.assertEqual(body["summary"]["total"], 13)
-        self.assertGreaterEqual(body["summary"]["planned"], 12)
+        self.assertEqual(body["summary"]["total"], 16)
+        self.assertGreaterEqual(body["summary"]["planned"], 15)
         self.assertEqual(body["summary"]["skipped"], 1)
         self.assertEqual(body["summary"]["server"], 0)
-        self.assertGreaterEqual(body["summary"]["navigation"], 11)
+        self.assertGreaterEqual(body["summary"]["navigation"], 14)
         self.assertGreaterEqual(body["summary"]["client"], 1)
 
         target_by_page = {target["pageId"]: target for target in body["targets"]}
@@ -1032,7 +1056,7 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(skipped_by_page["myshell-art"]["recommendedAction"], "execute-server")
 
         self.assertEqual(body["handoffSnapshot"]["status"], "blocked")
-        self.assertEqual(body["handoffSnapshot"]["summary"]["readyUnverified"], 11)
+        self.assertEqual(body["handoffSnapshot"]["summary"]["readyUnverified"], 14)
 
     def test_dispatch_session_persists_next_target_and_completion(self) -> None:
         def fake_auth_status(page_id: str) -> dict:
@@ -1084,7 +1108,7 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(session["summary"]["pending"], session["summary"]["planned"])
         self.assertEqual(session["summary"]["visited"], 0)
         self.assertEqual(session["summary"]["completed"], 0)
-        self.assertGreaterEqual(session["summary"]["planned"], 12)
+        self.assertGreaterEqual(session["summary"]["planned"], 15)
         self.assertEqual(session["summary"]["blocked"], 1)
         self.assertIsNotNone(session["nextTarget"])
 

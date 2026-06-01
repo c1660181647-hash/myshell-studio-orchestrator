@@ -5,7 +5,7 @@ The backend exposes the Studio API for MyShell page and agent dispatch. It keeps
 ## Core Surfaces
 
 - `GET /api/health` reports backend, SQLite storage, Chrome CDP, MyShell cookie, cookie injection, and Dreamy delegated-auth state.
-- `GET /api/pages` lists registered page adapters and miniapp navigation surfaces, including `dreamy-miniapp`, `myshell-art`, Explore, Upload, Tag Generator, Library, Energy, Earn, Settings, and Checkin.
+- `GET /api/pages` lists registered page adapters and miniapp navigation surfaces, including `dreamy-miniapp`, `myshell-art`, Explore, AI Picks, Bot Detail, Upload, Tag Generator, Library, Library Detail, Energy, Energy History, Earn, Share Invite, Settings, Profile, and Checkin.
 - `GET /api/agents` lists the dispatch graph agents.
 - `POST /api/studio/run` routes a prompt, creates a persisted job, and streams Studio SSE events.
 - `GET /api/studio/projects` lists recent persisted projects for Studio restore.
@@ -17,13 +17,13 @@ When `/api/studio/run` receives the default Dreamy page selection, the backend c
 
 `POST /api/studio/run` accepts optional `agent_id`. Registered agent ids are persisted on the job and included in route/execution/retry payloads; unknown ids fall back to the default executor agent for the selected page.
 
-Miniapp navigation pages are loaded from `backend/studio_pages_manifest.json`. Set `STUDIO_PAGES_MANIFEST=/path/to/pages.json` to extend or replace the page set per environment. Manifest entries support `id`, `name`, `appRoute`, `capabilities`, optional `routeParams`, optional `routeDefaults`, and optional `intentKeywords`; matching intent keywords join the same prompt router used by the default page selection. `routeDefaults` are merged into the generated navigation query before dynamic values like `slug_id` and `img`.
+Miniapp navigation pages are loaded from `backend/studio_pages_manifest.json`. Set `STUDIO_PAGES_MANIFEST=/path/to/pages.json` to extend or replace the page set per environment. Manifest entries support `id`, `name`, `appRoute`, `capabilities`, optional `routeParams`, optional `routeDefaults`, and optional `intentKeywords`; matching intent keywords join the same prompt router used by the default page selection. `routeDefaults` are merged into the generated navigation query before dynamic values like `slug_id` and `img`, unless a route uses a matching path placeholder such as `/library/:id`, in which case Studio replaces the placeholder before computing `missingRouteParams`.
 
 ## Evidence Rules
 
 The backend never marks placeholder media as complete. Generation `done` is accepted only when a fresh media URL or task result is registered. Navigation pages complete with accepted route evidence and return `clientAction: navigate` plus `navigationPath` for the Studio frontend to execute while keeping the return dock available. Missing cookies become `auth_missing`; long-running or failed adapters become `timeout` or `error`.
 
-Contextual navigation pages can declare `routeParams`. The current registry uses this to append `slug_id` for Bot Detail, Upload, and Tag Generator, plus `img` for Tag Generator when source media exists.
+Contextual navigation pages can declare `routeParams`. The current registry uses this to append `slug_id` for Bot Detail, Upload, and Tag Generator, add `img` for Tag Generator when source media exists, and replace the `id` path parameter for Library Detail.
 
 ## Local Backend
 

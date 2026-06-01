@@ -47,11 +47,29 @@
       "intentKeywords": ["library", "generated library", "generated works", "my works", "my creations", "results", "gallery", "history", "作品库", "生成历史", "历史作品", "我的作品", "结果"]
     },
     {
+      "id": "library-detail",
+      "name": "Library Detail",
+      "appRoute": "/library/:id",
+      "routeParams": ["id"],
+      "routeDefaults": {
+        "id": "studio-preview"
+      },
+      "capabilities": ["library-detail", "result-view", "media-preview"],
+      "intentKeywords": ["library detail", "generated work detail", "view generated work", "result detail", "media detail", "作品详情", "结果详情", "查看作品"]
+    },
+    {
       "id": "energy-store",
       "name": "Energy Store",
       "appRoute": "/energy",
       "capabilities": ["energy", "packs", "invoice"],
       "intentKeywords": ["energy", "energy store", "buy energy", "store", "packs", "credits", "能量", "能量商店", "购买能量", "充值"]
+    },
+    {
+      "id": "energy-history",
+      "name": "Energy History",
+      "appRoute": "/energy-history",
+      "capabilities": ["energy-history", "usage-history", "invoice-history"],
+      "intentKeywords": ["energy history", "usage history", "energy records", "invoice history", "能量记录", "消耗记录", "充值记录"]
     },
     {
       "id": "earn",
@@ -73,6 +91,13 @@
       "appRoute": "/settings",
       "capabilities": ["profile", "language", "preferences"],
       "intentKeywords": ["settings", "preferences", "profile settings", "account settings", "language", "设置", "偏好", "语言", "账号设置"]
+    },
+    {
+      "id": "profile",
+      "name": "Profile",
+      "appRoute": "/profile",
+      "capabilities": ["profile", "account", "preferences"],
+      "intentKeywords": ["profile", "my profile", "account profile", "个人资料", "账户", "账号"]
     },
     {
       "id": "checkin",

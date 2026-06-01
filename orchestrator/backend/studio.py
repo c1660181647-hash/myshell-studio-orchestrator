@@ -6,7 +6,7 @@ import uuid
 import base64
 from datetime import UTC, datetime
 from typing import Any, Optional
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from fastapi import Body, File, Form, HTTPException, Query, UploadFile
 from sse_starlette.sse import EventSourceResponse
@@ -108,18 +108,36 @@ def _navigation_path_for_page(
 
     route_params = set(page.get("routeParams") or [])
     parsed_path = urlsplit(path)
-    query: dict[str, str] = {key: value for key, value in parse_qsl(parsed_path.query, keep_blank_values=True)}
-    query.update({key: str(value) for key, value in (page.get("routeDefaults") or {}).items() if value is not None})
+    route_defaults = {key: str(value) for key, value in (page.get("routeDefaults") or {}).items() if value is not None}
+    route_values = dict(route_defaults)
     bot_slug = (route or {}).get("bot", {}).get("slug") or ""
     if "slug_id" in route_params and bot_slug:
-        query["slug_id"] = bot_slug
+        route_values["slug_id"] = bot_slug
     if "img" in route_params and source_segment:
         source_url = _accepted_source_media_url(source_segment)
         if source_url:
-            query["img"] = source_url
+            route_values["img"] = source_url
+
+    path_part = parsed_path.path
+    path_bound_params: set[str] = set()
+    for param in route_params:
+        placeholder = f":{param}"
+        value = route_values.get(param)
+        if placeholder in path_part and value:
+            path_part = path_part.replace(placeholder, quote(value, safe=""))
+            path_bound_params.add(param)
+
+    query: dict[str, str] = {key: value for key, value in parse_qsl(parsed_path.query, keep_blank_values=True)}
+    for key, value in route_defaults.items():
+        if key not in path_bound_params:
+            query[key] = value
+    for key, value in route_values.items():
+        if key in route_params and key not in path_bound_params:
+            query[key] = value
+
     if not query:
-        return urlunsplit((parsed_path.scheme, parsed_path.netloc, parsed_path.path, "", parsed_path.fragment))
-    return urlunsplit((parsed_path.scheme, parsed_path.netloc, parsed_path.path, urlencode(query), parsed_path.fragment))
+        return urlunsplit((parsed_path.scheme, parsed_path.netloc, path_part, "", parsed_path.fragment))
+    return urlunsplit((parsed_path.scheme, parsed_path.netloc, path_part, urlencode(query), parsed_path.fragment))
 
 
 def _navigation_contract(
@@ -140,9 +158,19 @@ def _missing_route_params(page: dict[str, Any], navigation_path: str) -> list[st
     route_params = page.get("routeParams") or []
     if not route_params:
         return []
+    app_path = urlsplit(page.get("appRoute") or "").path
     parsed_path = urlsplit(navigation_path or "")
     query_params = {key for key, _value in parse_qsl(parsed_path.query, keep_blank_values=True)}
-    return [param for param in route_params if param not in query_params]
+    missing: list[str] = []
+    for param in route_params:
+        placeholder = f":{param}"
+        if placeholder in app_path:
+            if placeholder in parsed_path.path:
+                missing.append(param)
+            continue
+        if param not in query_params:
+            missing.append(param)
+    return missing
 
 
 def _page_with_runtime_status(page: dict[str, Any]) -> dict[str, Any]:
