@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { MemoryRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Sparkles, X } from 'lucide-react';
 import { useRtl } from './i18n/useRtl';
 import { EnergyProvider } from './contexts/EnergyContext';
 import { ToastProvider } from './contexts/ToastContext';
@@ -11,6 +12,12 @@ import AgeGateModal from './components/AgeGateModal';
 import RouteObserver from './components/RouteObserver';
 import CheckinModal from './components/Checkin/CheckinModal';
 import { reportInviteOpened, reportPickOpened, reportShareOpened } from './services/api';
+import {
+  STUDIO_SESSION_CHANGED_EVENT,
+  clearStudioDispatchSession,
+  normalizeStudioNavigationPath,
+  readStudioDispatchSession,
+} from './services/studioSession';
 import { trackEvent } from './services/tracking';
 import Explore from './pages/Characters';
 import AiPicks from './pages/AiPicks';
@@ -173,6 +180,55 @@ function GlobalCheckinModal() {
   return <CheckinModal open={isModalOpen} onClose={closeModal} source={modalSource} />;
 }
 
+function StudioReturnDock() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [session, setSession] = useState(() => readStudioDispatchSession());
+
+  useEffect(() => {
+    const refresh = () => setSession(readStudioDispatchSession());
+    window.addEventListener(STUDIO_SESSION_CHANGED_EVENT, refresh);
+    window.addEventListener('storage', refresh);
+    refresh();
+    return () => {
+      window.removeEventListener(STUDIO_SESSION_CHANGED_EVENT, refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, [location.pathname]);
+
+  if (!session || location.pathname === '/dreamy') return null;
+
+  const targetPath = normalizeStudioNavigationPath(session.studioReturnPath) || '/dreamy';
+
+  return (
+    <div className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-32px)] items-center gap-1 rounded-full-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-1 shadow-[0_10px_28px_rgba(0,0,0,0.32)]">
+      <button
+        type="button"
+        onClick={() => {
+          trackEvent('studio_return_click', {
+            page_id: session.pageId || '',
+            navigation_path: session.navigationPath || '',
+          });
+          navigate(targetPath);
+        }}
+        className="inline-flex h-10 items-center gap-2 rounded-full-v2 px-3 text-sm font-semibold text-Cr-text-default-v2 active:bg-Cr-beta-white-8-v2"
+        aria-label="Return to Studio"
+      >
+        <Sparkles size={16} className="text-dreamy-brand-hot-v2" />
+        Studio
+      </button>
+      <button
+        type="button"
+        onClick={clearStudioDispatchSession}
+        className="flex h-8 w-8 items-center justify-center rounded-full-v2 text-Cr-text-subtler-v2 active:bg-Cr-beta-white-8-v2"
+        aria-label="Dismiss Studio return"
+      >
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
 function AppRoutes() {
   return (
     <div className="h-full w-full">
@@ -194,6 +250,7 @@ function AppRoutes() {
         <Route path="/__test-customize-scene" element={<TestCustomizeScene />} />
         <Route path="/checkin-demo" element={<CheckinDemo />} />
       </Routes>
+      <StudioReturnDock />
     </div>
   );
 }

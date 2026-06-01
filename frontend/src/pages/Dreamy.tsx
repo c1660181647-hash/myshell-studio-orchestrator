@@ -52,6 +52,14 @@ import {
   streamStudioRun,
   submitDreamyMiniappJob,
 } from '../services/dreamyUnified';
+import {
+  clearStudioDispatchSession,
+  forgetLastStudioProjectId,
+  normalizeStudioNavigationPath,
+  readLastStudioProjectId,
+  saveLastStudioProjectId,
+  saveStudioDispatchSession,
+} from '../services/studioSession';
 import type {
   StudioAgentCapability,
   StudioAction,
@@ -113,8 +121,6 @@ interface ChatItem {
 }
 
 const DEFAULT_DREAMY_SLUG = 'ai-porn-generator';
-const LAST_STUDIO_PROJECT_KEY = 'dreamy-studio:last-project-id';
-
 const LOCAL_POSTERS = [exampleGood, exampleMultiple];
 
 const EMPTY_GRAPH: StudioAgentNode[] = [
@@ -133,40 +139,6 @@ function makeId(prefix: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function readLastStudioProjectId(): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    return window.localStorage.getItem(LAST_STUDIO_PROJECT_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function saveLastStudioProjectId(projectId: string): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(LAST_STUDIO_PROJECT_KEY, projectId);
-  } catch {
-    // Storage can be unavailable in embedded browsers; persistence is best-effort.
-  }
-}
-
-function forgetLastStudioProjectId(): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.removeItem(LAST_STUDIO_PROJECT_KEY);
-  } catch {
-    // Storage can be unavailable in embedded browsers; reset still works server-side.
-  }
-}
-
-function normalizeStudioNavigationPath(path: string | undefined): string {
-  if (!path) return '';
-  if (!path.startsWith('/')) return '';
-  if (path.startsWith('//')) return '';
-  return path;
 }
 
 function statusTone(status?: string): string {
@@ -1368,6 +1340,7 @@ function CanvasWorkspace({
 function Composer({
   mode,
   prompt,
+  canSubmitWithoutPrompt,
   previewUrl,
   selectedFileName,
   submitting,
@@ -1380,6 +1353,7 @@ function Composer({
 }: {
   mode: StudioMode;
   prompt: string;
+  canSubmitWithoutPrompt?: boolean;
   previewUrl: string;
   selectedFileName?: string;
   submitting: boolean;
@@ -1437,7 +1411,7 @@ function Composer({
             <button
               type="button"
               onClick={onSubmit}
-              disabled={!prompt.trim()}
+              disabled={!prompt.trim() && !canSubmitWithoutPrompt}
               className="inline-flex h-9 items-center gap-2 rounded-md-v2 bg-dreamy-brand-hot-v2 px-4 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
             >
               <Send size={14} />
@@ -1691,13 +1665,14 @@ export default function Dreamy() {
     async (action: StudioAction = 'generate', overridePrompt?: string, source?: StudioSegment | null) => {
       if (submitting) return;
       const text = (overridePrompt || prompt).trim();
-      if (!text && action === 'generate') return;
+      const isNavigationDispatch = selectedPage?.executor === 'navigation';
+      if (!text && action === 'generate' && !isNavigationDispatch) return;
 
       const runPrompt = text || {
         extend: 'Extend this into the next shot',
         restyle: 'Restyle this segment',
         'retry-agent': 'Try another agent for this segment',
-        generate: 'Create a new Dreamy segment',
+        generate: isNavigationDispatch && selectedPage ? `Open ${selectedPage.name}` : 'Create a new Dreamy segment',
       }[action];
       const fileForRequest = selectedFile;
       const userId = makeId('user');
@@ -1796,6 +1771,13 @@ export default function Dreamy() {
                 });
                 if (targetPath) {
                   saveLastStudioProjectId(currentProjectId);
+                  saveStudioDispatchSession({
+                    projectId: currentProjectId,
+                    pageId: executionEvent.page?.id || executionEvent.api,
+                    pageName: executionEvent.page?.name || executionEvent.api,
+                    navigationPath: targetPath,
+                    studioReturnPath: executionEvent.studioReturnPath || '/dreamy',
+                  });
                   navigate(targetPath);
                 }
               } else {
@@ -1855,6 +1837,7 @@ export default function Dreamy() {
       prompt,
       registerClientExecution,
       selectedFile,
+      selectedPage,
       selectedPageId,
       selectedSegment,
       submitting,
@@ -1887,6 +1870,7 @@ export default function Dreamy() {
     setProject(null);
     setHubJobs([]);
     forgetLastStudioProjectId();
+    clearStudioDispatchSession();
     setMessages([
       {
         id: 'welcome',
@@ -2089,6 +2073,7 @@ export default function Dreamy() {
           <Composer
             mode={mode}
             prompt={prompt}
+            canSubmitWithoutPrompt={selectedPage?.executor === 'navigation'}
             previewUrl={previewUrl}
             selectedFileName={selectedFile?.name}
             submitting={submitting}
