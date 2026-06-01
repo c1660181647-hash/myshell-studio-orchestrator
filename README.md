@@ -65,7 +65,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 
 Contextual miniapp pages receive route parameters automatically: Bot Detail, Upload, and Tag Generator include the selected `slug_id`; Tag Generator also carries source media as `img` when the dispatch starts from an existing segment.
 
-To add a MyShell page, append a manifest entry with `id`, `name`, `appRoute`, `capabilities`, optional `routeParams`, and optional `intentKeywords`. For deployment-specific page sets, point `STUDIO_PAGES_MANIFEST` at another JSON file with the same shape.
+To add a MyShell page, append a manifest entry with `id`, `name`, `appRoute`, `capabilities`, optional `routeParams`, optional `routeDefaults`, and optional `intentKeywords`. `routeDefaults` are merged into the navigation query string, which lets a page carry fixed parameters such as source, tab, page mode, or referral context without Python changes. For deployment-specific page sets, point `STUDIO_PAGES_MANIFEST` at another JSON file with the same shape.
 
 ## Environment
 

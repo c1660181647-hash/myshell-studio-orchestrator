@@ -121,6 +121,7 @@ export interface StudioPageAdapter {
   status: string;
   dispatchMode?: string;
   routeParams?: string[];
+  routeDefaults?: Record<string, string>;
   intentKeywords?: string[];
   registrySource?: 'code' | 'manifest' | string;
   manifestVersion?: string;

@@ -196,6 +196,43 @@ class StudioApiTest(unittest.TestCase):
                 inferred = page_for_dispatch({}, "dreamy-miniapp", "open daily boost rewards")
                 self.assertEqual(inferred["id"], "daily-boost")
 
+    def test_manifest_route_defaults_are_added_to_navigation_path(self) -> None:
+        manifest = {
+            "version": "test",
+            "pages": [
+                {
+                    "id": "daily-boost",
+                    "name": "Daily Boost",
+                    "appRoute": "/daily-boost?tab=home",
+                    "capabilities": ["boost-status", "boost-claim"],
+                    "intentKeywords": ["daily boost"],
+                    "routeDefaults": {
+                        "source": "studio",
+                        "surface": "boost center",
+                    },
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manifest_path = Path(tmp_dir) / "pages.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with patch.dict(os.environ, {"STUDIO_PAGES_MANIFEST": str(manifest_path)}):
+                with self.client.stream(
+                    "POST",
+                    "/api/studio/run",
+                    data={"message": "open daily boost"},
+                ) as response:
+                    self.assertEqual(response.status_code, 200)
+                    events = _sse_events("".join(response.iter_text()))
+
+        execution = next(payload for name, payload in events if name == "execution_request")
+        self.assertEqual(execution["api"], "daily-boost")
+        self.assertEqual(
+            execution["navigationPath"],
+            "/daily-boost?tab=home&source=studio&surface=boost+center",
+        )
+
     def test_navigation_page_dispatch_returns_navigation_execution(self) -> None:
         with self.client.stream(
             "POST",

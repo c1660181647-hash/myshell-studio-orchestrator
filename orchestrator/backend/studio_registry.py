@@ -23,6 +23,7 @@ def _navigation_page(
     route_params: list[str] | None = None,
     base_url: str = MINIAPP_BASE_URL,
     intent_keywords: list[str] | None = None,
+    route_defaults: dict[str, str] | None = None,
     manifest_version: str = "",
     registry_source: str = "code",
 ) -> dict[str, Any]:
@@ -44,6 +45,8 @@ def _navigation_page(
         page["manifestVersion"] = manifest_version
     if intent_keywords:
         page["intentKeywords"] = intent_keywords
+    if route_defaults:
+        page["routeDefaults"] = route_defaults
     return page
 
 
@@ -117,6 +120,17 @@ def _as_str_list(value: Any) -> list[str]:
     return [item for item in value if isinstance(item, str) and item.strip()]
 
 
+def _as_str_dict(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, str] = {}
+    for key, item in value.items():
+        key_text = str(key).strip()
+        if key_text and item is not None:
+            normalized[key_text] = str(item)
+    return normalized
+
+
 def _page_from_manifest(raw_page: dict[str, Any], manifest_version: str) -> dict[str, Any]:
     page_id = str(raw_page.get("id") or "").strip()
     if not page_id:
@@ -132,6 +146,7 @@ def _page_from_manifest(raw_page: dict[str, Any], manifest_version: str) -> dict
         route_params=_as_str_list(raw_page.get("routeParams")),
         base_url=str(raw_page.get("baseUrl") or MINIAPP_BASE_URL),
         intent_keywords=_as_str_list(raw_page.get("intentKeywords")),
+        route_defaults=_as_str_dict(raw_page.get("routeDefaults")),
         manifest_version=manifest_version,
         registry_source="manifest",
     )

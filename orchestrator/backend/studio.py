@@ -6,7 +6,7 @@ import uuid
 import base64
 from datetime import UTC, datetime
 from typing import Any, Optional
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import Body, File, Form, HTTPException, Query, UploadFile
 from sse_starlette.sse import EventSourceResponse
@@ -56,7 +56,9 @@ def _navigation_path_for_page(
         return ""
 
     route_params = set(page.get("routeParams") or [])
-    query: dict[str, str] = {}
+    parsed_path = urlsplit(path)
+    query: dict[str, str] = {key: value for key, value in parse_qsl(parsed_path.query, keep_blank_values=True)}
+    query.update({key: str(value) for key, value in (page.get("routeDefaults") or {}).items() if value is not None})
     bot_slug = (route or {}).get("bot", {}).get("slug") or ""
     if "slug_id" in route_params and bot_slug:
         query["slug_id"] = bot_slug
@@ -65,8 +67,8 @@ def _navigation_path_for_page(
         if source_url:
             query["img"] = source_url
     if not query:
-        return path
-    return f"{path}?{urlencode(query)}"
+        return urlunsplit((parsed_path.scheme, parsed_path.netloc, parsed_path.path, "", parsed_path.fragment))
+    return urlunsplit((parsed_path.scheme, parsed_path.netloc, parsed_path.path, urlencode(query), parsed_path.fragment))
 
 
 def _navigation_contract(

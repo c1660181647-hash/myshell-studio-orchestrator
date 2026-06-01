@@ -15,7 +15,7 @@ The backend exposes the Studio API for MyShell page and agent dispatch. It keeps
 
 When `/api/studio/run` receives the default Dreamy page selection, the backend can infer registered miniapp navigation targets from the prompt, for example Library, Upload, Tag Generator, Settings, Energy, Earn, Share Invite, Explore, AI Picks, Bot Detail, or Checkin. Explicit non-default `page_id` values always take priority over prompt inference.
 
-Miniapp navigation pages are loaded from `backend/studio_pages_manifest.json`. Set `STUDIO_PAGES_MANIFEST=/path/to/pages.json` to extend or replace the page set per environment. Manifest entries support `id`, `name`, `appRoute`, `capabilities`, optional `routeParams`, and optional `intentKeywords`; matching intent keywords join the same prompt router used by the default page selection.
+Miniapp navigation pages are loaded from `backend/studio_pages_manifest.json`. Set `STUDIO_PAGES_MANIFEST=/path/to/pages.json` to extend or replace the page set per environment. Manifest entries support `id`, `name`, `appRoute`, `capabilities`, optional `routeParams`, optional `routeDefaults`, and optional `intentKeywords`; matching intent keywords join the same prompt router used by the default page selection. `routeDefaults` are merged into the generated navigation query before dynamic values like `slug_id` and `img`.
 
 ## Evidence Rules
 
