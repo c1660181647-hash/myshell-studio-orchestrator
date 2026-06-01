@@ -205,6 +205,43 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("img", tag_body["missingRouteParams"])
         self.assertEqual(tag_body["routeParams"], ["slug_id", "img"])
 
+    def test_studio_overview_groups_pages_agents_and_job_counts(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "queue dreamy segment", "agent_id": "dreamy-miniapp-executor"},
+        ) as response:
+            dreamy_events = _sse_events("".join(response.iter_text()))
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "open my generated library", "page_id": "library"},
+        ) as response:
+            library_events = _sse_events("".join(response.iter_text()))
+
+        dreamy_job_id = next(payload for name, payload in dreamy_events if name == "execution_request")["jobId"]
+        library_job_id = next(payload for name, payload in library_events if name == "execution_request")["jobId"]
+
+        overview = self.client.get("/api/studio/overview")
+        self.assertEqual(overview.status_code, 200)
+        body = overview.json()
+        self.assertEqual(body["totals"]["jobs"], 2)
+        self.assertEqual(body["totals"]["queued"], 1)
+        self.assertEqual(body["totals"]["done"], 1)
+
+        pages = {page["id"]: page for page in body["pages"]}
+        self.assertEqual(pages["dreamy-miniapp"]["jobCounts"]["queued"], 1)
+        self.assertEqual(pages["dreamy-miniapp"]["latestJob"]["jobId"], dreamy_job_id)
+        self.assertIn("dreamy-miniapp-executor", pages["dreamy-miniapp"]["agentIds"])
+        self.assertEqual(pages["library"]["jobCounts"]["done"], 1)
+        self.assertEqual(pages["library"]["latestJob"]["jobId"], library_job_id)
+        self.assertIn("miniapp-page-navigator", pages["library"]["agentIds"])
+
+        agents = {agent["id"]: agent for agent in body["agents"]}
+        self.assertEqual(agents["dreamy-miniapp-executor"]["jobCounts"]["queued"], 1)
+        self.assertEqual(agents["miniapp-page-navigator"]["jobCounts"]["done"], 1)
+        self.assertEqual([job["jobId"] for job in body["latestJobs"]], [library_job_id, dreamy_job_id])
+
     def test_health_reports_delivery_components(self) -> None:
         health = self.client.get("/api/health")
         self.assertEqual(health.status_code, 200)

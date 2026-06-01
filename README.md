@@ -48,6 +48,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `GET /api/health`
 - `GET /api/pages`
 - `GET /api/agents`
+- `GET /api/studio/overview`
 - `GET /api/studio/dispatch-preview`
 - `POST /api/studio/run`
 - `GET /api/studio/projects`
@@ -61,6 +62,8 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `POST /api/studio/jobs/{job_id}/retry`
 
 `/api/pages` returns registry metadata plus runtime `authStatus`, `dispatchReady`, `dispatchStatus`, and `dispatchMessage` for each MyShell page, so operators can tell whether a page is ready, client-delegated, or blocked by missing credentials before dispatch.
+
+`/api/studio/overview` aggregates pages, agents, latest jobs, and status counts for the Studio command center. Page summaries include runtime readiness, related agent ids, per-status job counts, and the latest job for that page.
 
 `/api/studio/dispatch-preview` preflights a target page without creating a job. It returns the resolved page, executor, agent, auth status, navigation path, route params, and `missingRouteParams`, which lets the Studio UI show exactly where a dispatch will go before it runs.
 

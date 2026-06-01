@@ -148,6 +148,33 @@ export interface StudioPageAdapter {
   capabilities: string[];
 }
 
+export type StudioStatusCounts = Record<StudioStatus | string, number>;
+
+export interface StudioOverviewPage extends StudioPageAdapter {
+  agentIds: string[];
+  jobCounts: StudioStatusCounts;
+  latestJob?: StudioJob | null;
+}
+
+export interface StudioOverviewAgent extends StudioAgentCapability {
+  jobCounts: StudioStatusCounts;
+  latestJob?: StudioJob | null;
+}
+
+export interface StudioOverview {
+  checkedAt: string;
+  totals: {
+    pages: number;
+    agents: number;
+    jobs: number;
+    issues: number;
+    [status: string]: number;
+  };
+  pages: StudioOverviewPage[];
+  agents: StudioOverviewAgent[];
+  latestJobs: StudioJob[];
+}
+
 export interface StudioAgentCapability {
   id: string;
   label: string;
@@ -546,6 +573,12 @@ export async function fetchStudioPages(): Promise<StudioPageAdapter[]> {
   if (!response.ok) throw new Error(`Studio pages ${response.status}: ${response.statusText}`);
   const body = await response.json();
   return body.pages || [];
+}
+
+export async function fetchStudioOverview(limit = 50): Promise<StudioOverview> {
+  const response = await fetch(getStudioRootEndpoint(`/api/studio/overview?limit=${encodeURIComponent(String(limit))}`));
+  if (!response.ok) throw new Error(`Studio overview ${response.status}: ${response.statusText}`);
+  return response.json();
 }
 
 export async function fetchStudioDispatchPreview(

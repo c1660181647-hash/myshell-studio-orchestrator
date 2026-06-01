@@ -32,6 +32,7 @@ VALID_MODES = {"player", "canvas"}
 VALID_ACTIONS = {"generate", "extend", "restyle", "retry-agent"}
 VALID_STATUSES = {"draft", "queued", "running", "done", "timeout", "auth_missing", "error", "cancelled"}
 READY_AUTH_STATUSES = {"ok", "ready", "client_delegated"}
+STATUS_COUNT_KEYS = ("draft", "queued", "running", "done", "timeout", "auth_missing", "error", "cancelled")
 
 PLACEHOLDER_POSTERS = {
     "generate": "/gallery/creative-whale.jpg",
@@ -113,6 +114,73 @@ def _page_with_runtime_status(page: dict[str, Any]) -> dict[str, Any]:
         "dispatchReady": dispatch_ready,
         "dispatchStatus": dispatch_status,
         "dispatchMessage": auth_status.get("message") or page.get("dispatchMode") or "",
+    }
+
+
+def _empty_status_counts() -> dict[str, int]:
+    return {status: 0 for status in STATUS_COUNT_KEYS}
+
+
+def _status_counts(jobs: list[dict[str, Any]]) -> dict[str, int]:
+    counts = _empty_status_counts()
+    for job in jobs:
+        status = str(job.get("status") or "running")
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def _page_agent_ids(page: dict[str, Any], page_jobs: list[dict[str, Any]], agents: list[dict[str, Any]]) -> list[str]:
+    agent_ids = {
+        agent["id"]
+        for agent in agents
+        if agent.get("pageId") == page["id"] or (page.get("executor") == "navigation" and agent["id"] == "miniapp-page-navigator")
+    }
+    agent_ids.update(str(job.get("agentId")) for job in page_jobs if job.get("agentId"))
+    return sorted(agent_ids)
+
+
+def _studio_overview(limit: int = 50) -> dict[str, Any]:
+    pages = list_studio_pages()
+    agents = list_studio_agents()
+    jobs = STUDIO_STORE.list_jobs(limit=500)
+    latest_jobs = [_job_with_evidence(job) for job in jobs[: max(1, min(limit, 100))]]
+    total_counts = _status_counts(jobs)
+
+    page_summaries: list[dict[str, Any]] = []
+    for page in pages:
+        page_jobs = [job for job in jobs if job.get("pageId") == page["id"] or job.get("api") == page["id"]]
+        page_summaries.append(
+            {
+                **_page_with_runtime_status(page),
+                "agentIds": _page_agent_ids(page, page_jobs, agents),
+                "jobCounts": _status_counts(page_jobs),
+                "latestJob": _job_with_evidence(page_jobs[0]) if page_jobs else None,
+            }
+        )
+
+    agent_summaries: list[dict[str, Any]] = []
+    for agent in agents:
+        agent_jobs = [job for job in jobs if job.get("agentId") == agent["id"]]
+        agent_summaries.append(
+            {
+                **agent,
+                "jobCounts": _status_counts(agent_jobs),
+                "latestJob": _job_with_evidence(agent_jobs[0]) if agent_jobs else None,
+            }
+        )
+
+    return {
+        "checkedAt": now_iso(),
+        "totals": {
+            "pages": len(pages),
+            "agents": len(agents),
+            "jobs": len(jobs),
+            **total_counts,
+            "issues": total_counts.get("timeout", 0) + total_counts.get("auth_missing", 0) + total_counts.get("error", 0),
+        },
+        "pages": page_summaries,
+        "agents": agent_summaries,
+        "latestJobs": latest_jobs,
     }
 
 
@@ -594,6 +662,10 @@ def register_studio_routes(app) -> None:
     @app.get("/api/agents")
     async def get_studio_agents():
         return {"agents": list_studio_agents()}
+
+    @app.get("/api/studio/overview")
+    async def get_studio_overview(limit: int = Query(50, ge=1, le=100)):
+        return _studio_overview(limit=limit)
 
     @app.get("/api/studio/dispatch-preview")
     async def get_dispatch_preview(

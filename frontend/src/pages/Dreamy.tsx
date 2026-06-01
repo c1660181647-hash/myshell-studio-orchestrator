@@ -45,6 +45,7 @@ import {
   fetchStudioAgents,
   fetchStudioHealth,
   fetchStudioJobs,
+  fetchStudioOverview,
   fetchStudioPages,
   fetchStudioProjects,
   postStudioClientResult,
@@ -72,6 +73,8 @@ import type {
   StudioHealth,
   StudioJob,
   StudioMode,
+  StudioOverview,
+  StudioOverviewPage,
   StudioPageAdapter,
   StudioProgressEvent,
   StudioProject,
@@ -1526,6 +1529,7 @@ export default function Dreamy() {
   const [selectedPageId, setSelectedPageId] = useState<StudioApi | string>('dreamy-miniapp');
   const [selectedAgentId, setSelectedAgentId] = useState(DEFAULT_STUDIO_AGENT_ID);
   const [studioHealth, setStudioHealth] = useState<StudioHealth | null>(null);
+  const [studioOverview, setStudioOverview] = useState<StudioOverview | null>(null);
   const [queueStatusFilter, setQueueStatusFilter] = useState<StudioStatus | 'all'>('all');
   const [queuePageFilter, setQueuePageFilter] = useState<StudioApi | string>('all');
   const [queueAgentFilter, setQueueAgentFilter] = useState('all');
@@ -1561,6 +1565,7 @@ export default function Dreamy() {
     () => (pages.length ? pages : [{ id: 'dreamy-miniapp', name: 'Dreamy Miniapp' } as StudioPageAdapter]),
     [pages],
   );
+  const overviewPages = studioOverview?.pages?.length ? studioOverview.pages : pageOptions;
   const agentOptions = useMemo(
     () => (
       agents.length
@@ -1574,6 +1579,10 @@ export default function Dreamy() {
     setSelectedPageId(nextPageId);
     setSelectedAgentId(defaultAgentIdForPage(nextPage));
   }, [pages]);
+  const selectOverviewPage = useCallback((nextPageId: string) => {
+    changePage(nextPageId);
+    setQueuePageFilter(nextPageId);
+  }, [changePage]);
   const displayedHubJobs = useMemo(
     () => hubJobs.filter((job) => {
       if (queueStatusFilter !== 'all' && job.status !== queueStatusFilter) return false;
@@ -1582,6 +1591,10 @@ export default function Dreamy() {
       return true;
     }),
     [hubJobs, queueAgentFilter, queuePageFilter, queueStatusFilter],
+  );
+  const hubJobsVersion = useMemo(
+    () => hubJobs.map((job) => `${job.jobId}:${job.status}:${job.updatedAt || ''}`).join('|'),
+    [hubJobs],
   );
 
   useEffect(() => {
@@ -1595,11 +1608,13 @@ export default function Dreamy() {
       fetchStudioPages().catch(() => []),
       fetchStudioAgents().catch(() => []),
       fetchStudioHealth().catch(() => null),
-    ]).then(([nextPages, nextAgents, nextHealth]) => {
+      fetchStudioOverview().catch(() => null),
+    ]).then(([nextPages, nextAgents, nextHealth, nextOverview]) => {
       if (cancelled) return;
       setPages(nextPages);
       setAgents(nextAgents);
       setStudioHealth(nextHealth);
+      setStudioOverview(nextOverview);
       setSelectedPageId((current) =>
         nextPages.length && !nextPages.some((page) => page.id === current) ? nextPages[0].id : current,
       );
@@ -1649,6 +1664,16 @@ export default function Dreamy() {
       cancelled = true;
     };
   }, [queueAgentFilter, queuePageFilter, queueStatusFilter]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchStudioOverview().then((overview) => {
+      if (!cancelled) setStudioOverview(overview);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [hubJobsVersion]);
 
   useEffect(() => {
     if (!selectedPageId) return;
@@ -2211,6 +2236,56 @@ export default function Dreamy() {
           <span className="min-w-[160px] truncate text-[11px] text-Cr-text-subtler-v2">
             {previewDispatchMessage || previewPage?.authMode || 'No runtime status'}
           </span>
+        </div>
+      </div>
+
+      <div className="shrink-0 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs font-semibold text-Cr-text-subtle-v2">
+            <Layers3 size={14} />
+            Page Registry
+          </div>
+          <div className="flex items-center gap-2">
+            <Pill>{`${studioOverview?.totals?.pages || overviewPages.length} pages`}</Pill>
+            <Pill tone={studioOverview?.totals?.issues ? 'danger' : 'default'}>{`${studioOverview?.totals?.issues || 0} issues`}</Pill>
+          </div>
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+          {overviewPages.map((page) => {
+            const overviewPage = page as StudioOverviewPage;
+            const counts = overviewPage.jobCounts || {};
+            const queued = counts.queued || 0;
+            const running = counts.running || 0;
+            const done = counts.done || 0;
+            const issueCount = (counts.timeout || 0) + (counts.auth_missing || 0) + (counts.error || 0);
+            const active = page.id === selectedPageId;
+            return (
+              <button
+                key={page.id}
+                type="button"
+                onClick={() => selectOverviewPage(page.id)}
+                className={`grid min-w-[210px] gap-2 rounded-lg-v2 border p-2 text-left text-xs transition-colors ${
+                  active
+                    ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
+                    : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 active:bg-Cr-beta-white-8-v2'
+                }`}
+                aria-label={`Select ${page.name} page`}
+              >
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <div className="min-w-0 truncate font-semibold text-Cr-text-default-v2">{page.name}</div>
+                  <Pill tone={healthPillTone(page.dispatchStatus)}>{page.dispatchStatus || 'unknown'}</Pill>
+                </div>
+                <div className="flex min-w-0 items-center justify-between gap-2 text-[11px] text-Cr-text-subtler-v2">
+                  <span className="truncate">{page.executor}</span>
+                  <span className="shrink-0">{`Q${queued} R${running} D${done}`}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[11px] text-Cr-text-subtlest-v2">
+                  <span className="truncate">{overviewPage.latestJob?.status || page.dispatchMode || page.authMode}</span>
+                  {issueCount > 0 && <span className="font-semibold text-Cr-text-critical-default-v2">{`${issueCount} issue`}</span>}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
