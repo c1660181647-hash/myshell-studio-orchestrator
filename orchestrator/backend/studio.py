@@ -992,12 +992,16 @@ def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dic
         "sourceSummary": f"Using segment {segment.get('parentSegmentId')}" if segment.get("parentSegmentId") else "Retrying original prompt",
     }
     graph = _set_graph_status(project, route, segment)
+    contract = _navigation_contract(page, route, source_segment)
+    navigation_path = contract.get("navigationPath", "")
     return {
         "executor": page["executor"],
         "api": page["id"],
         "page": page,
         "agentId": job.get("agentId") or _agent_id_for_page(page),
-        **_navigation_contract(page, route, source_segment),
+        **contract,
+        "routeParams": page.get("routeParams") or [],
+        "missingRouteParams": _missing_route_params(page, navigation_path),
         "jobId": job["jobId"],
         "segmentId": job["segmentId"],
         "botSlug": job.get("botSlug", ""),
@@ -1221,6 +1225,10 @@ def register_studio_routes(app) -> None:
             route["executor"] = page["executor"]
             route["agentId"] = _agent_id_for_dispatch(page, agent_id)
             route.update(_navigation_contract(page, route, source_segment))
+            navigation_path = route.get("navigationPath", "")
+            missing_route_params = _missing_route_params(page, navigation_path)
+            route["routeParams"] = page.get("routeParams") or []
+            route["missingRouteParams"] = missing_route_params
             yield _event("route", route)
 
             yield _event(
@@ -1262,6 +1270,8 @@ def register_studio_routes(app) -> None:
                     "page": page,
                     "agentId": job["agentId"],
                     **_navigation_contract(page, route, source_segment),
+                    "routeParams": page.get("routeParams") or [],
+                    "missingRouteParams": missing_route_params,
                     "jobId": job["jobId"],
                     "segmentId": segment["id"],
                     "botSlug": route["bot"]["slug"],
@@ -1279,17 +1289,26 @@ def register_studio_routes(app) -> None:
             yield _event("job", {"job": job})
 
             if page["executor"] == "navigation":
-                segment["status"] = "done"
-                segment["evidence"] = _evidence(
-                    "done",
-                    page["id"],
-                    accepted=True,
-                    message=f"Navigation dispatch prepared for {page['name']} at {_navigation_path_for_page(page, route, source_segment)}.",
-                )
+                if missing_route_params:
+                    segment["status"] = "error"
+                    segment["evidence"] = _evidence(
+                        "error",
+                        page["id"],
+                        accepted=False,
+                        message=f"Missing route parameters: {', '.join(missing_route_params)}.",
+                    )
+                else:
+                    segment["status"] = "done"
+                    segment["evidence"] = _evidence(
+                        "done",
+                        page["id"],
+                        accepted=True,
+                        message=f"Navigation dispatch prepared for {page['name']} at {_navigation_path_for_page(page, route, source_segment)}.",
+                    )
                 segment["updatedAt"] = now_iso()
                 _update_job(
                     job,
-                    status="done",
+                    status=segment["status"],
                     evidence=segment["evidence"],
                     authStatus=adapter_auth_status(page["id"]),
                 )

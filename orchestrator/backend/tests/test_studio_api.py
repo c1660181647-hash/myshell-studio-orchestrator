@@ -602,6 +602,27 @@ class StudioApiTest(unittest.TestCase):
                 self.assertTrue(execution["navigationPath"].startswith(prefix), execution["navigationPath"])
                 self.assertIn(execution["botSlug"], execution["navigationPath"])
 
+    def test_navigation_run_with_missing_route_params_records_error_evidence(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "open this tattoo generator", "page_id": "tag-generator"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        execution = next(payload for name, payload in events if name == "execution_request")
+        job_payloads = [payload["job"] for name, payload in events if name == "job"]
+        done = next(payload for name, payload in events if name == "done")
+
+        self.assertEqual(execution["executor"], "navigation")
+        self.assertEqual(execution["missingRouteParams"], ["img"])
+        self.assertTrue(execution["navigationPath"].startswith("/tag-generator?slug_id="), execution["navigationPath"])
+        self.assertEqual(job_payloads[-1]["status"], "error")
+        self.assertFalse(job_payloads[-1]["evidence"]["accepted"])
+        self.assertIn("Missing route parameters: img", job_payloads[-1]["evidence"]["message"])
+        self.assertEqual(done["status"], "error")
+
     def test_project_and_job_queue_endpoints_include_evidence_trail(self) -> None:
         with self.client.stream(
             "POST",

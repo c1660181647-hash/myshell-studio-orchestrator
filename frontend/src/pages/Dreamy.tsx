@@ -2139,6 +2139,16 @@ export default function Dreamy() {
                 await registerClientExecution(executionEvent, currentProjectId, fileForRequest, assistantId);
               } else if (executionEvent.executor === 'navigation') {
                 const targetPath = normalizeStudioNavigationPath(executionEvent.navigationPath);
+                const missingRouteParams = executionEvent.missingRouteParams || [];
+                if (missingRouteParams.length) {
+                  updateAssistant(assistantId, {
+                    pending: false,
+                    segmentId: executionEvent.segmentId,
+                    content: `Missing ${missingRouteParams.join(', ')} for ${executionEvent.page?.name || executionEvent.api}.`,
+                    error: executionEvent.evidence?.message || `Missing route parameters: ${missingRouteParams.join(', ')}`,
+                  });
+                  return;
+                }
                 updateAssistant(assistantId, {
                   pending: false,
                   segmentId: executionEvent.segmentId,

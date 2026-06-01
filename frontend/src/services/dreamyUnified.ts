@@ -399,6 +399,8 @@ export interface StudioExecutionRequest {
   clientAction?: 'navigate' | string;
   navigationPath?: string;
   studioReturnPath?: string;
+  routeParams?: string[];
+  missingRouteParams?: string[];
   jobId: string;
   segmentId: string;
   botSlug: string;
