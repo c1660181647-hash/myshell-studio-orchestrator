@@ -119,6 +119,7 @@ export interface StudioPageAdapter {
   authMode: string;
   status: string;
   dispatchMode?: string;
+  routeParams?: string[];
   botCount?: number;
   capabilities: string[];
 }

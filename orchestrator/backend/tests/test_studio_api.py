@@ -184,6 +184,28 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(job_payloads[-1]["status"], "done")
         self.assertEqual(job_payloads[-1]["evidence"]["accepted"], True)
 
+    def test_contextual_navigation_pages_include_required_query_params(self) -> None:
+        expected = {
+            "bot-detail": "/bot?slug_id=",
+            "upload": "/upload?slug_id=",
+            "tag-generator": "/tag-generator?slug_id=",
+        }
+
+        for page_id, prefix in expected.items():
+            with self.subTest(page_id=page_id):
+                with self.client.stream(
+                    "POST",
+                    "/api/studio/run",
+                    data={"message": "open this tattoo generator", "page_id": page_id},
+                ) as response:
+                    self.assertEqual(response.status_code, 200)
+                    events = _sse_events("".join(response.iter_text()))
+
+                execution = next(payload for name, payload in events if name == "execution_request")
+                self.assertEqual(execution["executor"], "navigation")
+                self.assertTrue(execution["navigationPath"].startswith(prefix), execution["navigationPath"])
+                self.assertIn(execution["botSlug"], execution["navigationPath"])
+
     def test_project_and_job_queue_endpoints_include_evidence_trail(self) -> None:
         with self.client.stream(
             "POST",

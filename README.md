@@ -61,6 +61,8 @@ http://127.0.0.1:5174/?test_route=dreamy
 
 `/api/studio/projects` and `/api/studio/jobs` power restart recovery and queue views. Job responses include `evidenceTrail`, and retry responses include a client `executionRequest` when the adapter must run from the authenticated miniapp browser.
 
+Contextual miniapp pages receive route parameters automatically: Bot Detail, Upload, and Tag Generator include the selected `slug_id`; Tag Generator also carries source media as `img` when the dispatch starts from an existing segment.
+
 ## Environment
 
 Copy the example files and fill local values:

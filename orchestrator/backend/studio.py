@@ -6,6 +6,7 @@ import uuid
 import base64
 from datetime import UTC, datetime
 from typing import Any, Optional
+from urllib.parse import urlencode
 
 from fastapi import Body, File, Form, HTTPException, Query, UploadFile
 from sse_starlette.sse import EventSourceResponse
@@ -45,16 +46,39 @@ def _agent_id_for_page(page: dict[str, Any]) -> str:
     return "myshell-art-cdp-executor" if page["id"] == "myshell-art" else "dreamy-miniapp-executor"
 
 
-def _navigation_path_for_page(page: dict[str, Any]) -> str:
-    return page.get("appRoute") or ""
+def _navigation_path_for_page(
+    page: dict[str, Any],
+    route: dict[str, Any] | None = None,
+    source_segment: Optional[StudioSegment] = None,
+) -> str:
+    path = page.get("appRoute") or ""
+    if not path:
+        return ""
+
+    route_params = set(page.get("routeParams") or [])
+    query: dict[str, str] = {}
+    bot_slug = (route or {}).get("bot", {}).get("slug") or ""
+    if "slug_id" in route_params and bot_slug:
+        query["slug_id"] = bot_slug
+    if "img" in route_params and source_segment:
+        source_url = source_segment.get("url") or source_segment.get("posterUrl") or ""
+        if source_url:
+            query["img"] = source_url
+    if not query:
+        return path
+    return f"{path}?{urlencode(query)}"
 
 
-def _navigation_contract(page: dict[str, Any]) -> dict[str, Any]:
+def _navigation_contract(
+    page: dict[str, Any],
+    route: dict[str, Any] | None = None,
+    source_segment: Optional[StudioSegment] = None,
+) -> dict[str, Any]:
     if page.get("executor") != "navigation":
         return {}
     return {
         "clientAction": "navigate",
-        "navigationPath": _navigation_path_for_page(page),
+        "navigationPath": _navigation_path_for_page(page, route, source_segment),
         "studioReturnPath": "/dreamy",
     }
 
@@ -356,7 +380,7 @@ def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dic
         "executor": page["executor"],
         "api": page["id"],
         "page": page,
-        **_navigation_contract(page),
+        **_navigation_contract(page, route, source_segment),
         "jobId": job["jobId"],
         "segmentId": job["segmentId"],
         "botSlug": job.get("botSlug", ""),
@@ -377,6 +401,7 @@ def _create_job(
     segment: StudioSegment,
     route: dict[str, Any],
     page: dict[str, Any],
+    source_segment: Optional[StudioSegment] = None,
     status: str = "queued",
 ) -> dict[str, Any]:
     auth_status = adapter_auth_status(page["id"])
@@ -395,7 +420,7 @@ def _create_job(
         "agentId": _agent_id_for_page(page),
         "executor": page["executor"],
         "api": page["id"],
-        **_navigation_contract(page),
+        **_navigation_contract(page, route, source_segment),
         "status": status,
         "action": segment["action"],
         "botSlug": segment["botSlug"],
@@ -543,7 +568,7 @@ def register_studio_routes(app) -> None:
             route["page"] = page
             route["api"] = page["id"]
             route["executor"] = page["executor"]
-            route.update(_navigation_contract(page))
+            route.update(_navigation_contract(page, route, source_segment))
             yield _event("route", route)
 
             yield _event(
@@ -562,7 +587,7 @@ def register_studio_routes(app) -> None:
                 normalized_action,
                 source_segment_id,
             )
-            job = _create_job(project, segment, route, page)
+            job = _create_job(project, segment, route, page, source_segment)
             graph = _set_graph_status(project, route, segment)
             _append_message(
                 project,
@@ -583,7 +608,7 @@ def register_studio_routes(app) -> None:
                     "executor": route["executor"],
                     "api": page["id"],
                     "page": page,
-                    **_navigation_contract(page),
+                    **_navigation_contract(page, route, source_segment),
                     "jobId": job["jobId"],
                     "segmentId": segment["id"],
                     "botSlug": route["bot"]["slug"],
@@ -606,7 +631,7 @@ def register_studio_routes(app) -> None:
                     "done",
                     page["id"],
                     accepted=True,
-                    message=f"Navigation dispatch prepared for {page['name']} at {_navigation_path_for_page(page)}.",
+                    message=f"Navigation dispatch prepared for {page['name']} at {_navigation_path_for_page(page, route, source_segment)}.",
                 )
                 segment["updatedAt"] = now_iso()
                 _update_job(

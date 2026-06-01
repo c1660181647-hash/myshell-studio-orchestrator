@@ -12,6 +12,7 @@ def _navigation_page(
     capabilities: list[str],
     *,
     kind: str = "miniapp-page",
+    route_params: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": page_id,
@@ -23,6 +24,7 @@ def _navigation_page(
         "authMode": "telegram-init-data",
         "status": "available",
         "dispatchMode": "open-page",
+        "routeParams": route_params or [],
         "capabilities": capabilities,
     }
 
@@ -85,18 +87,21 @@ def list_studio_pages() -> list[dict[str, Any]]:
             "Bot Detail",
             "/bot",
             ["get-by-slug", "form-schema", "bot-profile"],
+            route_params=["slug_id"],
         ),
         _navigation_page(
             "upload",
             "Upload",
             "/upload",
             ["image-upload", "bot-generate", "custom-form"],
+            route_params=["slug_id"],
         ),
         _navigation_page(
             "tag-generator",
             "Tag Generator",
             "/tag-generator",
             ["self-director", "prompt-compose", "bot-generate"],
+            route_params=["slug_id", "img"],
         ),
         _navigation_page(
             "library",

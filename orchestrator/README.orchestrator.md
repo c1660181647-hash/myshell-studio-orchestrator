@@ -17,6 +17,8 @@ The backend exposes the Studio API for MyShell page and agent dispatch. It keeps
 
 The backend never marks placeholder media as complete. Generation `done` is accepted only when a fresh media URL or task result is registered. Navigation pages complete with accepted route evidence and return `clientAction: navigate` plus `navigationPath` for the Studio frontend to execute while keeping the return dock available. Missing cookies become `auth_missing`; long-running or failed adapters become `timeout` or `error`.
 
+Contextual navigation pages can declare `routeParams`. The current registry uses this to append `slug_id` for Bot Detail, Upload, and Tag Generator, plus `img` for Tag Generator when source media exists.
+
 ## Local Backend
 
 ```bash
