@@ -45,6 +45,20 @@ class StudioStore:
                 """
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_project_id ON jobs(project_id)")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS evidence (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT NOT NULL,
+                    project_id TEXT NOT NULL,
+                    segment_id TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_job_id ON evidence(job_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_project_id ON evidence(project_id)")
 
     def save_project(self, project: dict[str, Any]) -> None:
         with self._lock, self._connect() as conn:
@@ -62,10 +76,19 @@ class StudioStore:
             row = conn.execute("SELECT payload FROM projects WHERE id = ?", (project_id,)).fetchone()
         return json.loads(row["payload"]) if row else None
 
+    def list_projects(self, limit: int = 50) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT payload FROM projects ORDER BY updated_at DESC LIMIT ?",
+                (max(1, min(limit, 200)),),
+            ).fetchall()
+        return [json.loads(row["payload"]) for row in rows]
+
     def delete_project(self, project_id: str) -> None:
         with self._lock, self._connect() as conn:
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
             conn.execute("DELETE FROM jobs WHERE project_id = ?", (project_id,))
+            conn.execute("DELETE FROM evidence WHERE project_id = ?", (project_id,))
 
     def save_job(self, job: dict[str, Any]) -> None:
         with self._lock, self._connect() as conn:
@@ -106,7 +129,7 @@ class StudioStore:
             ).fetchone()
         return json.loads(row["payload"]) if row else None
 
-    def list_jobs(self, project_id: str | None = None) -> list[dict[str, Any]]:
+    def list_jobs(self, project_id: str | None = None, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
         query = "SELECT payload FROM jobs"
         params: tuple[Any, ...] = ()
         if project_id:
@@ -115,12 +138,51 @@ class StudioStore:
         query += " ORDER BY updated_at DESC"
         with self._lock, self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
+        jobs = [json.loads(row["payload"]) for row in rows]
+        if status:
+            jobs = [job for job in jobs if job.get("status") == status]
+        return jobs[: max(1, min(limit, 500))]
+
+    def save_evidence(self, job: dict[str, Any], evidence: dict[str, Any]) -> None:
+        if not evidence:
+            return
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO evidence(job_id, project_id, segment_id, payload, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    job["jobId"],
+                    job["projectId"],
+                    job["segmentId"],
+                    json.dumps(evidence, ensure_ascii=False),
+                    evidence.get("checkedAt") or job.get("updatedAt", ""),
+                ),
+            )
+
+    def list_evidence(self, job_id: str | None = None, project_id: str | None = None) -> list[dict[str, Any]]:
+        query = "SELECT payload FROM evidence"
+        params: list[Any] = []
+        clauses: list[str] = []
+        if job_id:
+            clauses.append("job_id = ?")
+            params.append(job_id)
+        if project_id:
+            clauses.append("project_id = ?")
+            params.append(project_id)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY created_at DESC, id DESC"
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
         return [json.loads(row["payload"]) for row in rows]
 
     def reset_all(self) -> None:
         with self._lock, self._connect() as conn:
             conn.execute("DELETE FROM projects")
             conn.execute("DELETE FROM jobs")
+            conn.execute("DELETE FROM evidence")
 
 
 STUDIO_STORE = StudioStore()

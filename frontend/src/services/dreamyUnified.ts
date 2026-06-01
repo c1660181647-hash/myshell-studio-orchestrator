@@ -138,6 +138,7 @@ export interface StudioJob {
   attempt?: number;
   createdAt?: string;
   updatedAt?: string;
+  evidenceTrail?: StudioEvidence[];
 }
 
 export interface StudioSegment {
@@ -456,6 +457,13 @@ export async function fetchStudioProject(projectId: string): Promise<StudioProje
   return response.json();
 }
 
+export async function fetchStudioProjects(limit = 50): Promise<StudioProject[]> {
+  const response = await fetch(getStudioRootEndpoint(`/api/studio/projects?limit=${encodeURIComponent(String(limit))}`));
+  if (!response.ok) throw new Error(`Studio projects ${response.status}: ${response.statusText}`);
+  const body = await response.json();
+  return body.projects || [];
+}
+
 export async function fetchStudioPages(): Promise<StudioPageAdapter[]> {
   const response = await fetch(getStudioRootEndpoint('/api/pages'));
   if (!response.ok) throw new Error(`Studio pages ${response.status}: ${response.statusText}`);
@@ -474,6 +482,18 @@ export async function fetchStudioJob(jobId: string): Promise<StudioJob> {
   const response = await fetch(getStudioJobEndpoint(jobId));
   if (!response.ok) throw new Error(`Studio job ${response.status}: ${response.statusText}`);
   return response.json();
+}
+
+export async function fetchStudioJobs(options: { projectId?: string; status?: StudioStatus | string; limit?: number } = {}): Promise<StudioJob[]> {
+  const params = new URLSearchParams();
+  if (options.projectId) params.set('project_id', options.projectId);
+  if (options.status) params.set('status', options.status);
+  params.set('limit', String(options.limit || 100));
+  const query = params.toString();
+  const response = await fetch(getStudioRootEndpoint(`/api/studio/jobs${query ? `?${query}` : ''}`));
+  if (!response.ok) throw new Error(`Studio jobs ${response.status}: ${response.statusText}`);
+  const body = await response.json();
+  return body.jobs || [];
 }
 
 export async function postStudioClientResult(
@@ -497,7 +517,7 @@ export async function cancelStudioJob(jobId: string): Promise<{ project?: Studio
   return response.json();
 }
 
-export async function retryStudioJob(jobId: string): Promise<{ project?: StudioProject | null; job: StudioJob }> {
+export async function retryStudioJob(jobId: string): Promise<{ project?: StudioProject | null; job: StudioJob; executionRequest?: StudioExecutionRequest | null }> {
   const response = await fetch(`${getStudioJobEndpoint(jobId)}/retry`, { method: 'POST' });
   if (!response.ok) throw new Error(`Studio retry ${response.status}: ${response.statusText}`);
   return response.json();

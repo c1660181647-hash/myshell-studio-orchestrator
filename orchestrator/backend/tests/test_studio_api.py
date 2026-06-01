@@ -138,6 +138,52 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(retried.json()["job"]["status"], "queued")
         self.assertEqual(retried.json()["job"]["attempt"], 2)
 
+    def test_project_and_job_queue_endpoints_include_evidence_trail(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "queue evidence segment"},
+        ) as response:
+            events = _sse_events("".join(response.iter_text()))
+
+        meta = next(payload for name, payload in events if name == "meta")
+        execution = next(payload for name, payload in events if name == "execution_request")
+
+        projects = self.client.get("/api/studio/projects")
+        self.assertEqual(projects.status_code, 200)
+        project_ids = [project["projectId"] for project in projects.json()["projects"]]
+        self.assertIn(meta["projectId"], project_ids)
+
+        jobs = self.client.get("/api/studio/jobs", params={"status": "queued"})
+        self.assertEqual(jobs.status_code, 200)
+        queued_job = next(job for job in jobs.json()["jobs"] if job["jobId"] == execution["jobId"])
+        self.assertEqual(queued_job["projectId"], meta["projectId"])
+        self.assertEqual(queued_job["evidenceTrail"][0]["status"], "queued")
+
+        evidence = self.client.get(f"/api/studio/jobs/{execution['jobId']}/evidence")
+        self.assertEqual(evidence.status_code, 200)
+        self.assertEqual(evidence.json()["evidence"][0]["status"], "queued")
+
+    def test_retry_returns_client_execution_request(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "retryable segment"},
+        ) as response:
+            events = _sse_events("".join(response.iter_text()))
+
+        execution = next(payload for name, payload in events if name == "execution_request")
+        retry = self.client.post(f"/api/studio/jobs/{execution['jobId']}/retry")
+
+        self.assertEqual(retry.status_code, 200)
+        body = retry.json()
+        self.assertEqual(body["job"]["attempt"], 2)
+        self.assertEqual(body["job"]["status"], "queued")
+        self.assertEqual(body["executionRequest"]["executor"], "client")
+        self.assertEqual(body["executionRequest"]["jobId"], execution["jobId"])
+        self.assertEqual(body["executionRequest"]["segmentId"], execution["segmentId"])
+        self.assertEqual(body["executionRequest"]["segment"]["status"], "queued")
+
     def test_done_without_media_is_rejected_as_error_evidence(self) -> None:
         with self.client.stream(
             "POST",

@@ -7,11 +7,11 @@ import base64
 from datetime import UTC, datetime
 from typing import Any, Optional
 
-from fastapi import Body, File, Form, HTTPException, UploadFile
+from fastapi import Body, File, Form, HTTPException, Query, UploadFile
 from sse_starlette.sse import EventSourceResponse
 
 from bot_catalog import MYSHELL_BOTS, get_bot_by_slug
-from studio_registry import list_studio_agents, list_studio_pages, page_for_bot
+from studio_registry import get_page, list_studio_agents, list_studio_pages, page_for_bot
 from studio_runtime import adapter_auth_status
 from studio_store import STUDIO_STORE
 
@@ -278,8 +278,77 @@ def _evidence(
 
 
 def _sync_project_jobs(project: StudioProject) -> None:
-    project["jobs"] = STUDIO_STORE.list_jobs(project["projectId"])
+    project["jobs"] = [_job_with_evidence(job) for job in STUDIO_STORE.list_jobs(project["projectId"])]
     _save_project(project)
+
+
+def _job_with_evidence(job: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not job:
+        return None
+    enriched = dict(job)
+    enriched["evidenceTrail"] = STUDIO_STORE.list_evidence(job_id=job["jobId"])
+    return enriched
+
+
+def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dict[str, Any]:
+    page = get_page(job.get("pageId"))
+    segment = _find_segment(project, job.get("segmentId")) or {
+        "id": job.get("segmentId"),
+        "type": "video" if job.get("botType") == "image-to-video" else "image",
+        "url": job.get("mediaUrl", ""),
+        "posterUrl": job.get("posterUrl", ""),
+        "prompt": job.get("prompt", ""),
+        "botSlug": job.get("botSlug", ""),
+        "botName": job.get("botName", ""),
+        "action": job.get("action", "generate"),
+        "parentSegmentId": None,
+        "status": job.get("status", "queued"),
+        "taskId": job.get("taskId", ""),
+        "jobId": job.get("jobId", ""),
+        "authStatus": job.get("authStatus") or adapter_auth_status(page["id"]),
+        "evidence": job.get("evidence") or {},
+        "createdAt": job.get("createdAt", now_iso()),
+        "updatedAt": job.get("updatedAt", now_iso()),
+    }
+    bot = get_bot_by_slug(job.get("botSlug", "")) or {
+        "slug": job.get("botSlug", ""),
+        "name": job.get("botName", ""),
+        "type": job.get("botType", segment.get("type", "image")),
+        "rating": 4.5,
+        "desc": "",
+    }
+    source_segment = _find_segment(project, segment.get("parentSegmentId"))
+    route = {
+        "bot": {
+            "slug": bot.get("slug") or job.get("botSlug"),
+            "name": bot.get("name") or job.get("botName"),
+            "type": bot.get("type") or job.get("botType"),
+            "rating": bot.get("rating", 4.5),
+            "description": bot.get("desc", ""),
+            "pageUrl": f"https://art.myshell.ai/creative/{bot.get('slug') or job.get('botSlug')}",
+        },
+        "executor": page["executor"],
+        "analysis": "Retry queued from persisted Studio job.",
+        "sourceSummary": f"Using segment {segment.get('parentSegmentId')}" if segment.get("parentSegmentId") else "Retrying original prompt",
+    }
+    graph = _set_graph_status(project, route, segment)
+    return {
+        "executor": page["executor"],
+        "api": page["id"],
+        "page": page,
+        "jobId": job["jobId"],
+        "segmentId": job["segmentId"],
+        "botSlug": job.get("botSlug", ""),
+        "botName": job.get("botName", ""),
+        "botType": job.get("botType", ""),
+        "prompt": job.get("prompt", ""),
+        "action": job.get("action", "generate"),
+        "sourceSegment": source_segment,
+        "agentGraph": graph,
+        "segment": segment,
+        "authStatus": job.get("authStatus") or adapter_auth_status(page["id"]),
+        "evidence": job.get("evidence") or {},
+    }
 
 
 def _create_job(
@@ -324,6 +393,7 @@ def _create_job(
     segment["authStatus"] = auth_status
     segment["evidence"] = evidence
     STUDIO_STORE.save_job(job)
+    STUDIO_STORE.save_evidence(job, evidence)
     _sync_project_jobs(project)
     return job
 
@@ -332,6 +402,8 @@ def _update_job(job: dict[str, Any], **patch: Any) -> dict[str, Any]:
     job.update({key: value for key, value in patch.items() if value is not None})
     job["updatedAt"] = now_iso()
     STUDIO_STORE.save_job(job)
+    if patch.get("evidence"):
+        STUDIO_STORE.save_evidence(job, patch["evidence"])
     return job
 
 
@@ -610,6 +682,13 @@ def register_studio_routes(app) -> None:
 
         return EventSourceResponse(event_generator(), ping=15)
 
+    @app.get("/api/studio/projects")
+    async def list_studio_projects(limit: int = Query(50, ge=1, le=200)):
+        projects = STUDIO_STORE.list_projects(limit=limit)
+        for project in projects:
+            project["jobs"] = [_job_with_evidence(job) for job in STUDIO_STORE.list_jobs(project["projectId"])]
+        return {"projects": projects, "count": len(projects)}
+
     @app.get("/api/studio/projects/{project_id}")
     async def get_studio_project(project_id: str):
         project = _get_project(project_id)
@@ -744,12 +823,28 @@ def register_studio_routes(app) -> None:
         STUDIO_STORE.delete_project(project_id)
         return {"projectId": project_id, "status": "reset"}
 
+    @app.get("/api/studio/jobs")
+    async def list_studio_jobs(
+        project_id: Optional[str] = Query(None),
+        status: Optional[str] = Query(None),
+        limit: int = Query(100, ge=1, le=500),
+    ):
+        jobs = STUDIO_STORE.list_jobs(project_id=project_id, status=status, limit=limit)
+        return {"jobs": [_job_with_evidence(job) for job in jobs], "count": len(jobs)}
+
+    @app.get("/api/studio/jobs/{job_id}/evidence")
+    async def get_studio_job_evidence(job_id: str):
+        job = STUDIO_STORE.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {"jobId": job_id, "evidence": STUDIO_STORE.list_evidence(job_id=job_id)}
+
     @app.get("/api/studio/jobs/{job_id}")
     async def get_studio_job(job_id: str):
         job = STUDIO_STORE.get_job(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
-        return job
+        return _job_with_evidence(job)
 
     @app.post("/api/studio/jobs/{job_id}/cancel")
     async def cancel_studio_job(job_id: str):
@@ -770,7 +865,7 @@ def register_studio_routes(app) -> None:
                 segment["updatedAt"] = now_iso()
             project["updatedAt"] = now_iso()
             _sync_project_jobs(project)
-        return {"job": job, "project": project}
+        return {"job": _job_with_evidence(job), "project": project}
 
     @app.post("/api/studio/jobs/{job_id}/retry")
     async def retry_studio_job(job_id: str):
@@ -791,5 +886,8 @@ def register_studio_routes(app) -> None:
                 segment["evidence"] = job["evidence"]
                 segment["updatedAt"] = now_iso()
             project["updatedAt"] = now_iso()
+            execution_request = _build_execution_request(project, job)
             _sync_project_jobs(project)
-        return {"job": job, "project": project}
+        else:
+            execution_request = None
+        return {"job": _job_with_evidence(job), "project": project, "executionRequest": execution_request}

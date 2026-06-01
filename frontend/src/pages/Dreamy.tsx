@@ -42,7 +42,9 @@ import {
   cancelStudioJob,
   extractGenerateTaskMedia,
   fetchStudioAgents,
+  fetchStudioJobs,
   fetchStudioPages,
+  fetchStudioProjects,
   postStudioClientResult,
   resetStudioProject,
   retryStudioJob,
@@ -111,6 +113,7 @@ interface ChatItem {
 }
 
 const DEFAULT_DREAMY_SLUG = 'ai-porn-generator';
+const LAST_STUDIO_PROJECT_KEY = 'dreamy-studio:last-project-id';
 
 const LOCAL_POSTERS = [exampleGood, exampleMultiple];
 
@@ -130,6 +133,33 @@ function makeId(prefix: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function readLastStudioProjectId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(LAST_STUDIO_PROJECT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveLastStudioProjectId(projectId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(LAST_STUDIO_PROJECT_KEY, projectId);
+  } catch {
+    // Storage can be unavailable in embedded browsers; persistence is best-effort.
+  }
+}
+
+function forgetLastStudioProjectId(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(LAST_STUDIO_PROJECT_KEY);
+  } catch {
+    // Storage can be unavailable in embedded browsers; reset still works server-side.
+  }
 }
 
 function statusTone(status?: string): string {
@@ -1433,6 +1463,7 @@ export default function Dreamy() {
   const [previewUrl, setPreviewUrl] = useState('');
   const [pages, setPages] = useState<StudioPageAdapter[]>([]);
   const [agents, setAgents] = useState<StudioAgentCapability[]>([]);
+  const [hubJobs, setHubJobs] = useState<StudioJob[]>([]);
   const [selectedPageId, setSelectedPageId] = useState<StudioApi | string>('dreamy-miniapp');
 
   const selectedSegment = useMemo(() => {
@@ -1465,21 +1496,44 @@ export default function Dreamy() {
       if (cancelled) return;
       setPages(nextPages);
       setAgents(nextAgents);
-      if (nextPages.length && !nextPages.some((page) => page.id === selectedPageId)) {
-        setSelectedPageId(nextPages[0].id);
-      }
+      setSelectedPageId((current) =>
+        nextPages.length && !nextPages.some((page) => page.id === current) ? nextPages[0].id : current,
+      );
     });
     return () => {
       cancelled = true;
     };
-  }, [selectedPageId]);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      fetchStudioProjects(20).catch(() => []),
+      fetchStudioJobs({ limit: 50 }).catch(() => []),
+    ]).then(([storedProjects, storedJobs]) => {
+      if (cancelled) return;
+      setHubJobs(storedJobs);
+      if (!storedProjects.length) return;
+      const lastProjectId = readLastStudioProjectId();
+      const restored = storedProjects.find((item) => item.projectId === lastProjectId) || storedProjects[0];
+      setProject((current) => current || restored);
+      saveLastStudioProjectId(restored.projectId);
+      setMode(restored.mode || 'player');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const mergeProject = useCallback((incoming: StudioProject) => {
     setProject(incoming);
+    setHubJobs(incoming.jobs || []);
+    saveLastStudioProjectId(incoming.projectId);
     setMode(incoming.mode || 'player');
   }, []);
 
   const mergeJob = useCallback((job: StudioJob) => {
+    setHubJobs((current) => [job, ...current.filter((item) => item.jobId !== job.jobId)]);
     setProject((prev) => {
       if (!prev) return prev;
       const jobs = [job, ...(prev.jobs || []).filter((item) => item.jobId !== job.jobId)];
@@ -1801,6 +1855,8 @@ export default function Dreamy() {
   const resetProject = async () => {
     const projectId = project?.projectId;
     setProject(null);
+    setHubJobs([]);
+    forgetLastStudioProjectId();
     setMessages([
       {
         id: 'welcome',
@@ -1841,10 +1897,46 @@ export default function Dreamy() {
   };
 
   const retryJob = async (jobId: string) => {
-    const result = await retryStudioJob(jobId).catch(() => null);
+    const assistantId = makeId('assistant');
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: assistantId,
+        role: 'assistant',
+        content: 'Retrying queued job...',
+        pending: true,
+        createdAt: nowIso(),
+        steps: [{ step: 'retry', message: 'Recovering persisted job context', progress: 18 }],
+      },
+    ]);
+    const result = await retryStudioJob(jobId).catch((error) => {
+      updateAssistant(assistantId, {
+        pending: false,
+        content: 'Retry could not be queued.',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    });
     if (!result) return;
     if (result.project) mergeProject(result.project);
     else mergeJob(result.job);
+    const request = result.executionRequest;
+    if (request?.executor === 'client') {
+      await registerClientExecution(request, result.project?.projectId || result.job.projectId, null, assistantId).catch((error) => {
+        updateAssistant(assistantId, {
+          pending: false,
+          segmentId: result.job.segmentId,
+          content: 'Retry was queued, but client execution needs attention.',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+      return;
+    }
+    updateAssistant(assistantId, {
+      pending: false,
+      segmentId: result.job.segmentId,
+      content: request?.executor === 'server' ? 'Server adapter retry is queued.' : 'Retry queued.',
+    });
   };
 
   return (
@@ -1938,7 +2030,7 @@ export default function Dreamy() {
               <div>
                 <div className="text-sm font-semibold">Conversation</div>
                 <div className="text-[11px] text-Cr-text-subtler-v2">
-                  {project?.conversationId || 'No session'} · {selectedPage?.name || 'Dreamy Miniapp'} · {agents.length} agents
+                  {project?.conversationId || 'No session'} · {selectedPage?.name || 'Dreamy Miniapp'} · {agents.length} agents · {hubJobs.length} jobs
                 </div>
               </div>
             </div>
