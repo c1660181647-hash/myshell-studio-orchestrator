@@ -49,6 +49,7 @@ import {
   fetchStudioOverview,
   fetchStudioPages,
   fetchStudioProjects,
+  fetchStudioReadiness,
   postStudioClientResult,
   resetStudioProject,
   retryStudioJob,
@@ -79,6 +80,7 @@ import type {
   StudioPageAdapter,
   StudioProgressEvent,
   StudioProject,
+  StudioReadiness,
   StudioRouteEvent,
   StudioRunEvent,
   StudioSegment,
@@ -178,7 +180,7 @@ function statusPillTone(status?: string): 'default' | 'hot' | 'success' | 'dange
 function healthPillTone(status?: string): 'default' | 'hot' | 'success' | 'danger' {
   if (status === 'ok' || status === 'ready' || status === 'client_delegated') return 'success';
   if (status === 'auth_missing' || status === 'unavailable' || status === 'degraded') return 'hot';
-  if (status === 'error') return 'danger';
+  if (status === 'error' || status === 'blocked') return 'danger';
   return 'default';
 }
 
@@ -454,6 +456,44 @@ function StudioHealthStrip({ health }: { health: StudioHealth | null }) {
               }`}
             />
             {label} {status}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function StudioReadinessStrip({ readiness }: { readiness: StudioReadiness | null }) {
+  const gates = readiness?.gates || [];
+  const summary = readiness?.summary;
+
+  return (
+    <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
+      <Pill tone={healthPillTone(readiness?.status)}>
+        {readiness ? `Delivery ${readiness.status}` : 'Delivery checking'}
+      </Pill>
+      {summary && <Pill>{`${summary.ready}/${summary.total} ready`}</Pill>}
+      {gates.map((gate) => {
+        const tone = healthPillTone(gate.status);
+        const Icon = tone === 'success' ? CheckCircle2 : AlertTriangle;
+        return (
+          <span
+            key={gate.id}
+            title={gate.message || gate.id}
+            className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2"
+          >
+            <Icon
+              size={12}
+              className={
+                tone === 'success'
+                  ? 'text-Cr-text-success-default-v2'
+                  : tone === 'danger'
+                    ? 'text-Cr-text-critical-default-v2'
+                    : 'text-dreamy-brand-hot-v2'
+              }
+            />
+            <span className="max-w-[120px] truncate">{gate.label}</span>
+            <span className="text-Cr-text-subtlest-v2">{gate.status}</span>
           </span>
         );
       })}
@@ -1531,6 +1571,7 @@ export default function Dreamy() {
   const [selectedAgentId, setSelectedAgentId] = useState(DEFAULT_STUDIO_AGENT_ID);
   const [studioHealth, setStudioHealth] = useState<StudioHealth | null>(null);
   const [studioOverview, setStudioOverview] = useState<StudioOverview | null>(null);
+  const [studioReadiness, setStudioReadiness] = useState<StudioReadiness | null>(null);
   const [queueStatusFilter, setQueueStatusFilter] = useState<StudioStatus | 'all'>('all');
   const [queuePageFilter, setQueuePageFilter] = useState<StudioApi | string>('all');
   const [queueAgentFilter, setQueueAgentFilter] = useState('all');
@@ -1611,12 +1652,14 @@ export default function Dreamy() {
       fetchStudioAgents().catch(() => []),
       fetchStudioHealth().catch(() => null),
       fetchStudioOverview().catch(() => null),
-    ]).then(([nextPages, nextAgents, nextHealth, nextOverview]) => {
+      fetchStudioReadiness().catch(() => null),
+    ]).then(([nextPages, nextAgents, nextHealth, nextOverview, nextReadiness]) => {
       if (cancelled) return;
       setPages(nextPages);
       setAgents(nextAgents);
       setStudioHealth(nextHealth);
       setStudioOverview(nextOverview);
+      setStudioReadiness(nextReadiness);
       setSelectedPageId((current) =>
         nextPages.length && !nextPages.some((page) => page.id === current) ? nextPages[0].id : current,
       );
@@ -1669,8 +1712,13 @@ export default function Dreamy() {
 
   useEffect(() => {
     let cancelled = false;
-    void fetchStudioOverview().then((overview) => {
-      if (!cancelled) setStudioOverview(overview);
+    void Promise.all([
+      fetchStudioOverview().catch(() => null),
+      fetchStudioReadiness().catch(() => null),
+    ]).then(([overview, readiness]) => {
+      if (cancelled) return;
+      if (overview) setStudioOverview(overview);
+      if (readiness) setStudioReadiness(readiness);
     }).catch(() => undefined);
     return () => {
       cancelled = true;
@@ -2176,6 +2224,7 @@ export default function Dreamy() {
         agentId: queueAgentFilter === 'all' ? undefined : queueAgentFilter,
       }).then((jobs) => setHubJobs(jobs)).catch(() => undefined),
       fetchStudioOverview().then((overview) => setStudioOverview(overview)).catch(() => undefined),
+      fetchStudioReadiness().then((readiness) => setStudioReadiness(readiness)).catch(() => undefined),
     ]);
     setMessages((prev) => [
       ...prev,
@@ -2228,6 +2277,7 @@ export default function Dreamy() {
       </header>
 
       <StudioHealthStrip health={studioHealth} />
+      <StudioReadinessStrip readiness={studioReadiness} />
 
       <div className="grid shrink-0 gap-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
         <label className="grid gap-1">

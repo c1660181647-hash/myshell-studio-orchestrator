@@ -331,6 +331,43 @@ class StudioApiTest(unittest.TestCase):
             self.assertIn(component_id, components)
             self.assertIn("status", components[component_id])
 
+    def test_studio_readiness_reports_delivery_gates(self) -> None:
+        readiness = self.client.get("/api/studio/readiness")
+
+        self.assertEqual(readiness.status_code, 200)
+        self.assertEqual(readiness.headers.get("content-type", "").split(";")[0], "application/json")
+        body = readiness.json()
+        self.assertIn(body["status"], {"ready", "degraded"})
+        self.assertIn("checkedAt", body)
+        self.assertEqual(body["summary"]["total"], len(body["gates"]))
+
+        gates = {gate["id"]: gate for gate in body["gates"]}
+        expected_gate_ids = {
+            "backend",
+            "storage",
+            "page-registry",
+            "agent-registry",
+            "dispatch-preview",
+            "overview",
+            "myshell-art-auth",
+            "job-store",
+        }
+        self.assertTrue(expected_gate_ids.issubset(gates.keys()))
+
+        self.assertEqual(gates["backend"]["status"], "ready")
+        self.assertTrue(gates["backend"]["required"])
+        self.assertEqual(gates["storage"]["status"], "ready")
+        self.assertGreaterEqual(gates["page-registry"]["evidence"]["pageCount"], 13)
+        self.assertEqual(gates["page-registry"]["evidence"]["missingPageIds"], [])
+        self.assertGreaterEqual(gates["agent-registry"]["evidence"]["agentCount"], 7)
+        self.assertEqual(gates["agent-registry"]["evidence"]["missingAgentIds"], [])
+        self.assertEqual(gates["dispatch-preview"]["status"], "ready")
+        self.assertEqual(gates["dispatch-preview"]["evidence"]["navigationPath"], "/library")
+        self.assertEqual(gates["overview"]["status"], "ready")
+        self.assertIn(gates["myshell-art-auth"]["status"], {"ready", "auth_missing"})
+        self.assertFalse(gates["myshell-art-auth"]["required"])
+        self.assertEqual(gates["job-store"]["status"], "ready")
+
     def test_pages_cover_existing_myshell_miniapp_routes(self) -> None:
         pages = self.client.get("/api/pages")
         self.assertEqual(pages.status_code, 200)

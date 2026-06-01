@@ -13,7 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from bot_catalog import MYSHELL_BOTS, get_bot_by_slug
 from studio_registry import get_page, list_studio_agents, list_studio_pages, page_for_dispatch
-from studio_runtime import adapter_auth_status
+from studio_runtime import adapter_auth_status, runtime_health
 from studio_store import STUDIO_STORE
 
 try:
@@ -34,6 +34,32 @@ VALID_STATUSES = {"draft", "queued", "running", "done", "timeout", "auth_missing
 READY_AUTH_STATUSES = {"ok", "ready", "client_delegated"}
 STATUS_COUNT_KEYS = ("draft", "queued", "running", "done", "timeout", "auth_missing", "error", "cancelled")
 TERMINAL_CANCEL_STATUSES = {"done", "cancelled"}
+CORE_DELIVERY_PAGE_IDS = {
+    "dreamy-miniapp",
+    "myshell-art",
+    "explore",
+    "ai-picks",
+    "bot-detail",
+    "upload",
+    "tag-generator",
+    "library",
+    "energy-store",
+    "earn",
+    "share-invite",
+    "settings",
+    "checkin",
+}
+CORE_DELIVERY_AGENT_IDS = {
+    "intent-router",
+    "asset-planner",
+    "dreamy-miniapp-executor",
+    "myshell-art-cdp-executor",
+    "miniapp-page-navigator",
+    "evidence-verifier",
+    "timeline",
+}
+READY_GATE_STATUSES = {"ok", "ready", "client_delegated"}
+BLOCKED_GATE_STATUSES = {"blocked", "error"}
 
 PLACEHOLDER_POSTERS = {
     "generate": "/gallery/creative-whale.jpg",
@@ -182,6 +208,207 @@ def _studio_overview(limit: int = 50) -> dict[str, Any]:
         "pages": page_summaries,
         "agents": agent_summaries,
         "latestJobs": latest_jobs,
+    }
+
+
+def _delivery_gate(
+    gate_id: str,
+    label: str,
+    status: str,
+    *,
+    required: bool = True,
+    message: str = "",
+    evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": gate_id,
+        "label": label,
+        "status": "ready" if status in READY_GATE_STATUSES else status,
+        "required": required,
+        "message": message,
+        "evidence": evidence or {},
+    }
+
+
+def _component_gate_status(component: dict[str, Any] | None, *, required: bool = True) -> str:
+    status = str((component or {}).get("status") or "unknown")
+    if status in READY_GATE_STATUSES:
+        return "ready"
+    if status == "auth_missing":
+        return "auth_missing"
+    if status in {"unavailable", "degraded"}:
+        return status
+    return "blocked" if required else "degraded"
+
+
+def _readiness_summary(gates: list[dict[str, Any]]) -> dict[str, int]:
+    summary = {"ready": 0, "degraded": 0, "blocked": 0, "total": len(gates)}
+    for gate in gates:
+        status = str(gate.get("status") or "unknown")
+        if status == "ready":
+            summary["ready"] += 1
+        elif status in BLOCKED_GATE_STATUSES:
+            summary["blocked"] += 1
+        else:
+            summary["degraded"] += 1
+    return summary
+
+
+def _readiness_status(gates: list[dict[str, Any]]) -> str:
+    if any(gate.get("required") and gate.get("status") in BLOCKED_GATE_STATUSES for gate in gates):
+        return "blocked"
+    if any(gate.get("status") != "ready" for gate in gates):
+        return "degraded"
+    return "ready"
+
+
+async def _studio_readiness() -> dict[str, Any]:
+    health = await runtime_health(STUDIO_STORE.path)
+    components = health.get("components") or {}
+    pages = list_studio_pages()
+    agents = list_studio_agents()
+    page_ids = {page["id"] for page in pages}
+    agent_ids = {agent["id"] for agent in agents}
+    missing_page_ids = sorted(CORE_DELIVERY_PAGE_IDS - page_ids)
+    missing_agent_ids = sorted(CORE_DELIVERY_AGENT_IDS - agent_ids)
+
+    gates = [
+        _delivery_gate(
+            "backend",
+            "Backend",
+            _component_gate_status(components.get("backend")),
+            message=str((components.get("backend") or {}).get("message") or "FastAPI runtime is serving requests"),
+            evidence=components.get("backend") or {},
+        ),
+        _delivery_gate(
+            "storage",
+            "Storage",
+            _component_gate_status(components.get("storage")),
+            message=str((components.get("storage") or {}).get("path") or STUDIO_STORE.path),
+            evidence=components.get("storage") or {"path": STUDIO_STORE.path},
+        ),
+        _delivery_gate(
+            "chrome-cdp",
+            "Chrome CDP",
+            _component_gate_status(components.get("chromeCdp"), required=False),
+            required=False,
+            message=str((components.get("chromeCdp") or {}).get("url") or ""),
+            evidence=components.get("chromeCdp") or {},
+        ),
+        _delivery_gate(
+            "cookie-injection",
+            "Cookie Injection",
+            _component_gate_status(components.get("cookieInjection"), required=False),
+            required=False,
+            message=str((components.get("cookieInjection") or {}).get("message") or ""),
+            evidence=components.get("cookieInjection") or {},
+        ),
+        _delivery_gate(
+            "page-registry",
+            "Page Registry",
+            "ready" if not missing_page_ids else "blocked",
+            message=f"{len(pages)} registered MyShell pages",
+            evidence={"pageCount": len(pages), "missingPageIds": missing_page_ids},
+        ),
+        _delivery_gate(
+            "agent-registry",
+            "Agent Registry",
+            "ready" if not missing_agent_ids else "blocked",
+            message=f"{len(agents)} registered Studio agents",
+            evidence={"agentCount": len(agents), "missingAgentIds": missing_agent_ids},
+        ),
+    ]
+
+    try:
+        preview = await _dispatch_preview(
+            message="open my generated library",
+            action="generate",
+            page_id="library",
+        )
+        preview_ready = (
+            preview.get("executor") == "navigation"
+            and preview.get("clientAction") == "navigate"
+            and preview.get("navigationPath") == "/library"
+            and not preview.get("missingRouteParams")
+        )
+        gates.append(
+            _delivery_gate(
+                "dispatch-preview",
+                "Dispatch Preview",
+                "ready" if preview_ready else "blocked",
+                message=str(preview.get("navigationPath") or ""),
+                evidence={
+                    "pageId": (preview.get("page") or {}).get("id"),
+                    "agentId": preview.get("agentId"),
+                    "executor": preview.get("executor"),
+                    "navigationPath": preview.get("navigationPath"),
+                    "missingRouteParams": preview.get("missingRouteParams") or [],
+                },
+            )
+        )
+    except Exception as exc:
+        gates.append(
+            _delivery_gate(
+                "dispatch-preview",
+                "Dispatch Preview",
+                "blocked",
+                message=str(exc),
+            )
+        )
+
+    try:
+        overview = _studio_overview(limit=10)
+        overview_ready = overview.get("totals", {}).get("pages", 0) >= len(CORE_DELIVERY_PAGE_IDS)
+        gates.append(
+            _delivery_gate(
+                "overview",
+                "Studio Overview",
+                "ready" if overview_ready else "blocked",
+                message=f"{overview.get('totals', {}).get('jobs', 0)} jobs indexed",
+                evidence={
+                    "pageCount": overview.get("totals", {}).get("pages", 0),
+                    "agentCount": overview.get("totals", {}).get("agents", 0),
+                    "jobCount": overview.get("totals", {}).get("jobs", 0),
+                    "issues": overview.get("totals", {}).get("issues", 0),
+                },
+            )
+        )
+    except Exception as exc:
+        gates.append(_delivery_gate("overview", "Studio Overview", "blocked", message=str(exc)))
+
+    art_auth = adapter_auth_status("myshell-art")
+    gates.append(
+        _delivery_gate(
+            "myshell-art-auth",
+            "MyShell Art Auth",
+            str(art_auth.get("status") or "unknown"),
+            required=False,
+            message=str(art_auth.get("message") or ""),
+            evidence=art_auth,
+        )
+    )
+
+    try:
+        sample_jobs = STUDIO_STORE.list_jobs(limit=1)
+        gates.append(
+            _delivery_gate(
+                "job-store",
+                "Job Store",
+                "ready",
+                message="SQLite job store can be queried",
+                evidence={"sampleSize": len(sample_jobs), "path": STUDIO_STORE.path},
+            )
+        )
+    except Exception as exc:
+        gates.append(_delivery_gate("job-store", "Job Store", "blocked", message=str(exc), evidence={"path": STUDIO_STORE.path}))
+
+    summary = _readiness_summary(gates)
+    return {
+        "status": _readiness_status(gates),
+        "checkedAt": now_iso(),
+        "summary": summary,
+        "gates": gates,
+        "health": health,
     }
 
 
@@ -707,6 +934,10 @@ def register_studio_routes(app) -> None:
     @app.get("/api/studio/overview")
     async def get_studio_overview(limit: int = Query(50, ge=1, le=100)):
         return _studio_overview(limit=limit)
+
+    @app.get("/api/studio/readiness")
+    async def get_studio_readiness():
+        return await _studio_readiness()
 
     @app.get("/api/studio/dispatch-preview")
     async def get_dispatch_preview(

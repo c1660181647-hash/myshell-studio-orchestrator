@@ -12,6 +12,7 @@ MyShell Studio Orchestrator is a unified agent dispatch center for Dreamy miniap
 - Prompt-aware page routing: default Studio runs can infer page targets such as Library, Upload, Settings, Energy, Earn, or Checkin from natural language; explicit page selections still win.
 - Manifest-driven page expansion via `orchestrator/backend/studio_pages_manifest.json` or `STUDIO_PAGES_MANIFEST`, so new MyShell miniapp surfaces can be added without changing Python router code.
 - Health checks that report backend, storage, Chrome CDP, MyShell cookies, cookie injection, and Dreamy auth delegation separately, with the same status visible in Studio.
+- Delivery readiness gates that combine health, registry coverage, dispatch preview, overview, MyShell Art auth, and job-store checks into a single Studio handoff status.
 
 ## Repository Layout
 
@@ -49,6 +50,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `GET /api/pages`
 - `GET /api/agents`
 - `GET /api/studio/overview`
+- `GET /api/studio/readiness`
 - `GET /api/studio/dispatch-preview`
 - `POST /api/studio/run`
 - `GET /api/studio/projects`
@@ -65,6 +67,8 @@ http://127.0.0.1:5174/?test_route=dreamy
 `/api/pages` returns registry metadata plus runtime `authStatus`, `dispatchReady`, `dispatchStatus`, and `dispatchMessage` for each MyShell page, so operators can tell whether a page is ready, client-delegated, or blocked by missing credentials before dispatch.
 
 `/api/studio/overview` aggregates pages, agents, latest jobs, and status counts for the Studio command center. Page summaries include runtime readiness, related agent ids, per-status job counts, and the latest job for that page.
+
+`/api/studio/readiness` returns delivery gates for the handoff surface: backend, storage, Chrome CDP, cookie injection, page registry, agent registry, dispatch preview, overview, MyShell Art auth, and job store. Required gate failures make the response `blocked`; optional auth/CDP gaps are surfaced as `degraded` or `auth_missing` rather than hidden as success.
 
 `/api/studio/dispatch-preview` preflights a target page without creating a job. It returns the resolved page, executor, agent, auth status, navigation path, route params, and `missingRouteParams`, which lets the Studio UI show exactly where a dispatch will go before it runs.
 

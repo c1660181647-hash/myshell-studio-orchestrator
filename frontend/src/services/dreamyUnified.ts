@@ -125,6 +125,28 @@ export interface StudioHealth {
   components: Record<string, StudioHealthComponent>;
 }
 
+export interface StudioReadinessGate {
+  id: string;
+  label: string;
+  status: 'ready' | 'degraded' | 'blocked' | 'auth_missing' | 'unavailable' | string;
+  required: boolean;
+  message?: string;
+  evidence?: Record<string, unknown>;
+}
+
+export interface StudioReadiness {
+  status: 'ready' | 'degraded' | 'blocked' | string;
+  checkedAt: string;
+  summary: {
+    ready: number;
+    degraded: number;
+    blocked: number;
+    total: number;
+  };
+  gates: StudioReadinessGate[];
+  health?: StudioHealth;
+}
+
 export interface StudioPageAdapter {
   id: StudioApi;
   name: string;
@@ -578,6 +600,12 @@ export async function fetchStudioPages(): Promise<StudioPageAdapter[]> {
 export async function fetchStudioOverview(limit = 50): Promise<StudioOverview> {
   const response = await fetch(getStudioRootEndpoint(`/api/studio/overview?limit=${encodeURIComponent(String(limit))}`));
   if (!response.ok) throw new Error(`Studio overview ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function fetchStudioReadiness(): Promise<StudioReadiness> {
+  const response = await fetch(getStudioRootEndpoint('/api/studio/readiness'));
+  if (!response.ok) throw new Error(`Studio readiness ${response.status}: ${response.statusText}`);
   return response.json();
 }
 
