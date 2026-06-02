@@ -32,8 +32,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend code
 COPY orchestrator/backend/ ./
 
-# Copy built frontend
+# Copy built frontend and route source used by readiness coverage
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
+COPY --from=frontend-build /app/frontend/src/App.tsx /app/frontend/src/App.tsx
 
 # Copy startup script
 COPY orchestrator/start-cloud.sh /app/start-cloud.sh

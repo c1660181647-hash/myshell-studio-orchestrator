@@ -794,6 +794,13 @@ class StudioApiTest(unittest.TestCase):
 
         self.assertEqual(source_path, Path("/app/frontend/src/App.tsx"))
 
+    def test_cloud_run_image_keeps_frontend_route_source_for_readiness(self) -> None:
+        dockerfile = BACKEND_DIR.parent / "Dockerfile"
+        content = dockerfile.read_text(encoding="utf-8")
+
+        self.assertIn("/app/frontend/src/App.tsx", content)
+        self.assertIn("COPY --from=frontend-build /app/frontend/src/App.tsx", content)
+
     def test_delivery_audit_packages_machine_readable_acceptance_evidence(self) -> None:
         with self.client.stream(
             "POST",
