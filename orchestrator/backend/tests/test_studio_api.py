@@ -489,11 +489,13 @@ class StudioApiTest(unittest.TestCase):
             patch.dict(os.environ, {"MYSHELL_CDP_URL": "http://cdp.internal:9333"}),
             patch.object(bridge_worker.httpx, "AsyncClient", return_value=FakeAsyncClient()),
         ):
-            with self.assertRaises(IndexError):
-                asyncio.run(bridge_worker.generate("seedream-multi-chart", "Generate", ""))
+            result = asyncio.run(bridge_worker.generate("seedream-multi-chart", "Generate", ""))
 
         self.assertTrue(requested_urls)
         self.assertEqual(requested_urls[0], "http://cdp.internal:9333/json")
+        self.assertEqual(result["status"], "error")
+        self.assertIn("no inspectable pages", result["message"])
+        self.assertIn("http://cdp.internal:9333", result["message"])
 
     def test_studio_readiness_reports_delivery_gates(self) -> None:
         readiness = self.client.get("/api/studio/readiness")

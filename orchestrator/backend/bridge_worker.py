@@ -14,7 +14,13 @@ def _cdp_url():
     return os.environ.get("MYSHELL_CDP_URL", DEFAULT_CDP_URL)
 
 async def generate(bot_slug, gen_button, image_b64):
-    pages = (await httpx.AsyncClient().get(f"{_cdp_url()}/json")).json()
+    cdp_url = _cdp_url()
+    pages = (await httpx.AsyncClient().get(f"{cdp_url}/json")).json()
+    if not pages:
+        return {
+            "status": "error",
+            "message": f"Chrome CDP returned no inspectable pages at {cdp_url}; start or refresh Chrome.",
+        }
     # Find art.myshell.ai tab or first page
     tab = next((p for p in pages if 'art.myshell.ai' in p.get('url', '')), pages[0])
     ws_url = tab["webSocketDebuggerUrl"]
