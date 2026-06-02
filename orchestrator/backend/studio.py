@@ -3529,6 +3529,186 @@ def _dreamy_input_images(prompt: str, source_segment: StudioSegment | None) -> l
     return [source_url, prompt] if source_url else [prompt]
 
 
+def _job_route_for_graph(job: dict[str, Any], analysis: str = "Dreamy result refreshed.") -> dict[str, Any]:
+    return {
+        "bot": {
+            "slug": job.get("botSlug") or "",
+            "name": job.get("botName") or "Dreamy Miniapp",
+            "type": job.get("botType") or "image",
+        },
+        "executor": job.get("executor") or "server",
+        "analysis": analysis,
+        "sourceSummary": "Timeline updated from persisted job evidence.",
+    }
+
+
+def _evidence_with_job_context(job: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:
+    current = job.get("evidence") if isinstance(job.get("evidence"), dict) else {}
+    context_keys = (
+        "dispatchSessionId",
+        "dispatchTargetId",
+        "dispatchTargetPageId",
+        "coverageVerification",
+    )
+    return {
+        **{key: current[key] for key in context_keys if current.get(key)},
+        **evidence,
+    }
+
+
+def _sync_dispatch_target_from_polled_job(job: dict[str, Any], segment: StudioSegment, status: str) -> None:
+    evidence = job.get("evidence") if isinstance(job.get("evidence"), dict) else {}
+    dispatch_session_id = evidence.get("dispatchSessionId")
+    dispatch_target_id = evidence.get("dispatchTargetId")
+    if not dispatch_session_id or not dispatch_target_id:
+        return
+    if status not in {"done", "error", "timeout", "auth_missing", "cancelled"}:
+        return
+    target_status = "completed" if status == "done" and (segment.get("evidence") or {}).get("accepted") else "error"
+    try:
+        _update_dispatch_session_target(
+            str(dispatch_session_id),
+            str(dispatch_target_id),
+            status=target_status,
+            evidence={
+                "dispatchSessionId": str(dispatch_session_id),
+                "dispatchTargetId": str(dispatch_target_id),
+                "jobId": segment.get("jobId") or job.get("jobId") or "",
+                "segmentId": segment.get("id") or "",
+                "accepted": bool((segment.get("evidence") or {}).get("accepted")),
+                "mediaUrl": segment.get("url") or "",
+                "posterUrl": segment.get("posterUrl") or "",
+                "taskId": segment.get("taskId") or job.get("taskId") or "",
+                "message": (segment.get("evidence") or {}).get("message") or "",
+            },
+        )
+    except HTTPException:
+        return
+
+
+def _apply_dreamy_media_to_job(
+    project: StudioProject,
+    segment: StudioSegment,
+    job: dict[str, Any],
+    media: dict[str, str],
+    *,
+    auth_status: dict[str, Any],
+    message_prefix: str,
+) -> dict[str, Any]:
+    output_job_id = media.get("taskId") or job.get("taskId") or segment.get("taskId") or ""
+    task_status = (media.get("status") or "running").lower()
+    media_url = media.get("mediaUrl") or ""
+    poster_url = media.get("posterUrl") or segment.get("posterUrl") or media_url
+
+    if media_url and task_status in {"completed", "success", "done"}:
+        normalized_status = "done"
+        segment["url"] = media_url
+        segment["posterUrl"] = poster_url
+        evidence = _evidence(
+            "done",
+            "dreamy-miniapp",
+            accepted=True,
+            media_url=media_url,
+            task_id=output_job_id,
+            message=f"{message_prefix} Fresh Dreamy task media accepted.",
+        )
+        job_patch = {
+            "status": "done",
+            "taskId": output_job_id,
+            "mediaUrl": media_url,
+            "posterUrl": poster_url,
+        }
+    elif task_status in {"failed", "failure", "error", "cancelled", "canceled"}:
+        normalized_status = "error"
+        evidence = _evidence(
+            "error",
+            "dreamy-miniapp",
+            task_id=output_job_id,
+            message=f"{message_prefix} Dreamy task {output_job_id} returned {task_status}.",
+        )
+        job_patch = {"status": "error", "taskId": output_job_id, "posterUrl": poster_url}
+    else:
+        normalized_status = "running"
+        evidence = _evidence(
+            "running",
+            "dreamy-miniapp",
+            task_id=output_job_id,
+            message=f"{message_prefix} Dreamy task {output_job_id} is {task_status or 'running'}; poll result for final media.",
+        )
+        job_patch = {"status": "running", "taskId": output_job_id, "posterUrl": poster_url}
+
+    evidence = _evidence_with_job_context(job, evidence)
+    segment["status"] = normalized_status
+    segment["taskId"] = output_job_id
+    segment["authStatus"] = auth_status
+    segment["evidence"] = evidence
+    segment["updatedAt"] = now_iso()
+    job = _update_job(
+        job,
+        **job_patch,
+        authStatus=auth_status,
+        evidence=evidence,
+    )
+    _set_graph_status(project, _job_route_for_graph(job), segment)
+    _save_project(project)
+    _sync_project_jobs(project)
+    _sync_dispatch_target_from_polled_job(job, segment, normalized_status)
+    return job
+
+
+async def _poll_dreamy_job_result(job: dict[str, Any]) -> tuple[dict[str, Any], StudioProject | None]:
+    if job.get("pageId") != "dreamy-miniapp":
+        raise HTTPException(status_code=409, detail="Only Dreamy miniapp jobs can be polled through this endpoint")
+    project = _get_project(str(job.get("projectId") or ""))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    segment = _find_segment(project, str(job.get("segmentId") or ""))
+    if not segment:
+        raise HTTPException(status_code=404, detail="Segment not found")
+
+    task_id = str(job.get("taskId") or segment.get("taskId") or "")
+    auth_status = adapter_auth_status("dreamy-miniapp")
+    if not dreamy_init_data() or auth_status.get("status") != "ready":
+        evidence = _evidence_with_job_context(
+            job,
+            _evidence(
+                "auth_missing",
+                "dreamy-miniapp",
+                task_id=task_id,
+                message="Dreamy server polling needs DREAMY_TELEGRAM_INIT_DATA; result was not requested.",
+            ),
+        )
+        segment["status"] = "auth_missing"
+        segment["authStatus"] = auth_status
+        segment["evidence"] = evidence
+        segment["updatedAt"] = now_iso()
+        job = _update_job(job, status="auth_missing", authStatus=auth_status, evidence=evidence)
+        _set_graph_status(project, _job_route_for_graph(job, "Dreamy poll auth is missing."), segment)
+        _save_project(project)
+        _sync_project_jobs(project)
+        _sync_dispatch_target_from_polled_job(job, segment, "auth_missing")
+        return job, project
+
+    if not task_id:
+        raise HTTPException(status_code=409, detail="Dreamy job has no task id to poll")
+
+    result = await _dreamy_api_request(
+        f"{DREAMY_API_PREFIX}/generate/result",
+        {"output_job_id": task_id},
+        dreamy_init_data(),
+    )
+    media = _dreamy_task_media(result, task_id)
+    job = _apply_dreamy_media_to_job(
+        project,
+        segment,
+        job,
+        media,
+        auth_status=auth_status,
+        message_prefix="Server poll.",
+    )
+    return job, project
+
+
 async def _run_dreamy_server_adapter(
     *,
     project: StudioProject,
@@ -3598,55 +3778,15 @@ async def _run_dreamy_server_adapter(
         if media.get("mediaUrl") and media.get("status") in {"completed", "success", "done"}:
             break
 
-    task_status = media.get("status") or "running"
-    media_url = media.get("mediaUrl") or ""
-    poster_url = media.get("posterUrl") or segment.get("posterUrl") or media_url
-    if media_url and task_status in {"completed", "success", "done"}:
-        segment["status"] = "done"
-        segment["url"] = media_url
-        segment["posterUrl"] = poster_url
-        segment["taskId"] = output_job_id
-        segment["evidence"] = _evidence(
-            "done",
-            "dreamy-miniapp",
-            accepted=True,
-            media_url=media_url,
-            task_id=output_job_id,
-            message="Fresh Dreamy task media accepted from server-side generation.",
-        )
-        job = _update_job(
-            job,
-            status="done",
-            taskId=output_job_id,
-            mediaUrl=media_url,
-            posterUrl=poster_url,
-            authStatus=auth_status,
-            evidence=segment["evidence"],
-        )
-    else:
-        segment["status"] = "running"
-        segment["taskId"] = output_job_id
-        segment["posterUrl"] = poster_url
-        segment["evidence"] = _evidence(
-            "running",
-            "dreamy-miniapp",
-            task_id=output_job_id,
-            message=f"Dreamy task {output_job_id} is {task_status or 'running'}; poll result for final media.",
-        )
-        job = _update_job(
-            job,
-            status="running",
-            taskId=output_job_id,
-            posterUrl=poster_url,
-            authStatus=auth_status,
-            evidence=segment["evidence"],
-        )
-
-    segment["updatedAt"] = now_iso()
-    _set_graph_status(project, route, segment)
-    _save_project(project)
-    _sync_project_jobs(project)
-    return job
+    media["taskId"] = media.get("taskId") or output_job_id
+    return _apply_dreamy_media_to_job(
+        project,
+        segment,
+        job,
+        media,
+        auth_status=auth_status,
+        message_prefix="Server submit.",
+    )
 
 
 def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dict[str, Any]:
@@ -4605,3 +4745,11 @@ def register_studio_routes(app) -> None:
             raise HTTPException(status_code=404, detail="Job not found")
         job, project, execution_request = _retry_job_record(job)
         return {"job": _job_with_evidence(job), "project": project, "executionRequest": execution_request}
+
+    @app.post("/api/studio/jobs/{job_id}/poll")
+    async def poll_studio_job(job_id: str):
+        job = STUDIO_STORE.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        job, project = await _poll_dreamy_job_result(job)
+        return {"job": _job_with_evidence(job), "project": project}

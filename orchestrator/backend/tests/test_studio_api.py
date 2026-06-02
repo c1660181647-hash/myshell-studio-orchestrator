@@ -604,6 +604,119 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(calls[2][0], "/v1/telegram/miniapp/dreamy/generate/result")
         self.assertEqual(calls[1][1]["input_img"], ["generate a neon cyberpunk video clip"])
 
+    def test_poll_dreamy_server_job_accepts_later_media_result(self) -> None:
+        import studio
+
+        result_payloads = [
+            {
+                "tasks": [
+                    {
+                        "status": "running",
+                        "jobId": "dreamy_job_later",
+                        "result": json.dumps({}),
+                    }
+                ]
+            },
+            {
+                "tasks": [
+                    {
+                        "status": "done",
+                        "jobId": "dreamy_job_later",
+                        "result": json.dumps(
+                            {
+                                "outputImg": "https://cdn.example.test/later.mp4",
+                                "outputPreview": "https://cdn.example.test/later-poster.jpg",
+                            }
+                        ),
+                    }
+                ]
+            },
+        ]
+        result_calls: list[dict] = []
+
+        async def fake_dreamy_request(endpoint: str, body: dict, init_data: str) -> dict:
+            self.assertEqual(init_data, "query_id=server-auth")
+            if endpoint.endswith("/get-by-slug"):
+                return {"info": {"botId": "bot_neon_art", "slugId": "neon-art-generator"}}
+            if endpoint.endswith("/generate"):
+                return {"outputJobId": "dreamy_job_later", "queuePosition": 0}
+            if endpoint.endswith("/generate/result"):
+                result_calls.append(body)
+                return result_payloads.pop(0)
+            raise AssertionError(endpoint)
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "DREAMY_TELEGRAM_INIT_DATA": "query_id=server-auth",
+                    "DREAMY_SERVER_POLL_ATTEMPTS": "1",
+                    "DREAMY_SERVER_POLL_INTERVAL_SECONDS": "0",
+                },
+                clear=False,
+            ),
+            patch.object(studio, "_dreamy_api_request", side_effect=fake_dreamy_request),
+            self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={
+                    "message": "generate a slow neon clip",
+                    "action": "extend",
+                    "page_id": "dreamy-miniapp",
+                },
+            ) as response,
+        ):
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+            initial_job = [payload["job"] for name, payload in events if name == "job"][-1]
+            self.assertEqual(initial_job["status"], "running")
+            self.assertEqual(initial_job["taskId"], "dreamy_job_later")
+
+            polled = self.client.post(f"/api/studio/jobs/{initial_job['jobId']}/poll")
+
+        self.assertEqual(polled.status_code, 200)
+        body = polled.json()
+        self.assertEqual(body["job"]["status"], "done")
+        self.assertEqual(body["job"]["mediaUrl"], "https://cdn.example.test/later.mp4")
+        self.assertTrue(body["job"]["evidence"]["accepted"])
+        self.assertEqual(body["project"]["segments"][0]["status"], "done")
+        self.assertEqual(body["project"]["segments"][0]["url"], "https://cdn.example.test/later.mp4")
+        self.assertEqual(result_calls, [{"output_job_id": "dreamy_job_later"}, {"output_job_id": "dreamy_job_later"}])
+
+    def test_poll_dreamy_server_job_reports_auth_missing_without_init_data(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "queue client dreamy segment", "action": "generate"},
+        ) as response:
+            events = _sse_events("".join(response.iter_text()))
+
+        meta = next(payload for name, payload in events if name == "meta")
+        execution = next(payload for name, payload in events if name == "execution_request")
+        updated = self.client.post(
+            f"/api/studio/projects/{meta['projectId']}/client-result",
+            json={
+                "segmentId": execution["segmentId"],
+                "jobId": execution["jobId"],
+                "status": "running",
+                "taskId": "dreamy_client_task",
+                "type": "image",
+                "source": "dreamy-miniapp",
+            },
+        )
+        self.assertEqual(updated.status_code, 200)
+
+        with patch.dict(os.environ, {"DREAMY_TELEGRAM_INIT_DATA": ""}, clear=False):
+            polled = self.client.post(f"/api/studio/jobs/{execution['jobId']}/poll")
+
+        self.assertEqual(polled.status_code, 200)
+        body = polled.json()
+        self.assertEqual(body["job"]["status"], "auth_missing")
+        self.assertEqual(body["job"]["evidence"]["source"], "dreamy-miniapp")
+        self.assertIn("DREAMY_TELEGRAM_INIT_DATA", body["job"]["evidence"]["message"])
+        self.assertEqual(body["project"]["segments"][0]["status"], "auth_missing")
+
     def test_health_reports_cookie_injection_result_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             status_path = Path(tmp_dir) / "cookie-injection-status.json"

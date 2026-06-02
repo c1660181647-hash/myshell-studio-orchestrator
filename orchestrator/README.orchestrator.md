@@ -18,7 +18,7 @@ The backend exposes the Studio API for MyShell page and agent dispatch. It keeps
 - `GET /api/studio/projects/{project_id}/delivery-bundle?download=1` returns the operator handoff bundle as a downloadable JSON attachment. Bundle artifacts include session-level restore links and target-level `target_id` restore links for exact page handoff inspection. Dispatch artifacts keep API `url` values and include Studio-facing `uiUrl` values that open `/dreamy` with the matching session and target. Bundle `remainingTargets` includes both `pending` and `visited` dispatch targets, so opened-but-uncompleted pages stay visible during handoff. Bundle `skippedTargets` includes both plan-time skips and operator-skipped dispatch targets, `errorTargets` lists dispatch targets that need operator review, and `summary.cancelledTargets` keeps cancelled queue scope visible for retry/resume decisions.
 - `GET /api/studio/jobs` lists the persisted queue with optional `project_id` and `status` filters.
 - `GET /api/studio/jobs/{job_id}` and `/evidence` return current state plus evidence history.
-- `POST /api/studio/jobs/{job_id}/cancel` and `/retry` manage persisted jobs. Retry returns an `executionRequest` for client-side miniapp execution when needed.
+- `POST /api/studio/jobs/{job_id}/cancel`, `/retry`, and `/poll` manage persisted jobs. Retry returns an `executionRequest` for client-side miniapp execution when needed. Poll refreshes server-side Dreamy `generate/result` evidence for running jobs and updates the project timeline with accepted media, `running`, `auth_missing`, or explicit error evidence.
 
 When `/api/studio/run` receives the default Dreamy page selection, the backend can infer registered miniapp navigation targets from the prompt, for example Library, Upload, Tag Generator, Settings, Energy, Earn, Share Invite, Explore, AI Picks, Bot Detail, or Checkin. Explicit non-default `page_id` values always take priority over prompt inference.
 
@@ -62,7 +62,7 @@ export DREAMY_SERVER_POLL_ATTEMPTS=3
 export DREAMY_SERVER_POLL_INTERVAL_SECONDS=0.75
 ```
 
-With this configured, `dreamy-miniapp` auth reports `ready` and `/api/studio/run` emits `executor: "server"` for Dreamy jobs. The backend accepts only fresh `generate/result` media as `done`; unfinished tasks remain `running` with the Dreamy task id so the operator can poll, retry, or cancel from the Studio job queue.
+With this configured, `dreamy-miniapp` auth reports `ready` and `/api/studio/run` emits `executor: "server"` for Dreamy jobs. The backend accepts only fresh `generate/result` media as `done`; unfinished tasks remain `running` with the Dreamy task id so the operator can poll through `POST /api/studio/jobs/{job_id}/poll`, retry, or cancel from the Studio job queue.
 
 ## Tests
 

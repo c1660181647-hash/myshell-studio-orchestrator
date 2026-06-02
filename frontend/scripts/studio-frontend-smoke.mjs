@@ -22,12 +22,14 @@ export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'starter-presets',
   'starter-visual-recommendations',
   'starter-bot-preview-image',
+  'starter-bot-preview-gif',
   'starter-preset-direct-generate',
   'starter-preset-prompt-ready',
   'starter-preset-result-visible',
   'preview-segment-rerun',
   'preview-export-all-segments',
   'timeline-export-created',
+  'timeline-export-output-card',
   'video-fast-status',
   'canvas-mode',
   'canvas-auto-flow-presets',
@@ -353,6 +355,24 @@ export async function runStudioFrontendSmoke(options = {}) {
       page.getByTestId('starter-bot-preview-image').first(),
       timeoutMs,
     );
+    try {
+      const previewImage = page.getByTestId('starter-bot-preview-image').first();
+      await previewImage.waitFor({ state: 'visible', timeout: timeoutMs });
+      const previewSource = (await previewImage.getAttribute('src')) || '';
+      checks.push({
+        id: 'starter-bot-preview-gif',
+        label: 'Starter bot preview uses GIF media',
+        ok: /\.gif(?:$|\?)/i.test(previewSource),
+        message: /\.gif(?:$|\?)/i.test(previewSource) ? undefined : `Preview source is not a GIF: ${previewSource}`,
+      });
+    } catch (error) {
+      checks.push({
+        id: 'starter-bot-preview-gif',
+        label: 'Starter bot preview uses GIF media',
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
     await clickEnabled(
       checks,
       page,
@@ -408,6 +428,14 @@ export async function runStudioFrontendSmoke(options = {}) {
       'timeline-export-created',
       'Timeline export result is visible',
       chatLog.getByText(/Timeline export/i),
+      timeoutMs,
+    );
+    await checkVisible(
+      checks,
+      page,
+      'timeline-export-output-card',
+      'Timeline export output card',
+      page.getByTestId('timeline-export-output-card'),
       timeoutMs,
     );
     await checkVisible(

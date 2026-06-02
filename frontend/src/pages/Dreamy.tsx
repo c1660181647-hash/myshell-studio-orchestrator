@@ -35,6 +35,9 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
+import presetCharacterGif from '../assets/dreamy-preset-character.gif';
+import presetCinematicGif from '../assets/dreamy-preset-cinematic.gif';
+import presetStyleGif from '../assets/dreamy-preset-style.gif';
 import exampleGood from '../assets/example-good.png';
 import exampleMultiple from '../assets/example-multiple.png';
 import exampleSmall from '../assets/example-small.png';
@@ -67,6 +70,7 @@ import {
   getStudioDispatchTargetHref,
   getStudioRootEndpoint,
   planStudioDispatchBatch,
+  pollStudioJob,
   postStudioClientResult,
   resetStudioProject,
   resolveStudioAction,
@@ -216,6 +220,7 @@ interface CanvasFlowPreset {
 const DEFAULT_DREAMY_SLUG = 'ai-porn-generator';
 const LOCAL_POSTERS = [exampleGood, exampleMultiple];
 const DEFAULT_STUDIO_AGENT_ID = 'dreamy-miniapp-executor';
+const TRANSIENT_STUDIO_STATUSES = new Set(['queued', 'running']);
 const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
   {
     id: 'cinematic-portrait',
@@ -225,7 +230,7 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
     recommendation: 'Best first move for a strong source image before video.',
-    visualUrl: exampleGood,
+    visualUrl: presetCinematicGif,
     workflow: 'Text to image',
     steps: ['Prompt', 'Image source', 'Timeline slot'],
     estimatedWaitSeconds: 10,
@@ -238,7 +243,7 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
     recommendation: 'Good when the next step is image-to-video motion.',
-    visualUrl: exampleMultiple,
+    visualUrl: presetCharacterGif,
     workflow: 'Text to image to video',
     steps: ['Prompt', 'Character image', 'Video segment'],
     estimatedWaitSeconds: 12,
@@ -251,7 +256,7 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
     recommendation: 'Useful for restyle passes and cover frames.',
-    visualUrl: exampleSmall,
+    visualUrl: presetStyleGif,
     workflow: 'Reference image to style',
     steps: ['Prompt', 'Poster frame', 'Restyle'],
     estimatedWaitSeconds: 8,
@@ -360,6 +365,28 @@ const CANVAS_FLOW_PRESETS: CanvasFlowPreset[] = [
     ],
   },
 ];
+
+function rankStarterPresets(
+  presets: StudioStarterPreset[],
+  sourceSegment?: StudioSegment | null,
+  hasReferenceImage = false,
+): StudioStarterPreset[] {
+  const preferredOrder =
+    sourceSegment?.type === 'image'
+      ? ['character-scene', 'style-poster', 'cinematic-portrait']
+      : sourceSegment?.type === 'video'
+        ? ['style-poster', 'character-scene', 'cinematic-portrait']
+        : hasReferenceImage
+          ? ['style-poster', 'character-scene', 'cinematic-portrait']
+          : ['cinematic-portrait', 'character-scene', 'style-poster'];
+  const order = new Map(preferredOrder.map((id, index) => [id, index]));
+  return [...presets].sort((left, right) => (order.get(left.id) ?? 99) - (order.get(right.id) ?? 99));
+}
+
+function isTransientStudioStatus(status?: string): boolean {
+  return Boolean(status && TRANSIENT_STUDIO_STATUSES.has(status));
+}
+
 const QUEUE_STATUS_OPTIONS: Array<StudioStatus | 'all'> = [
   'all',
   'queued',
@@ -2088,6 +2115,8 @@ function PreviewPanel({
   const evidence = selectedSegment?.evidence || selectedJob?.evidence;
   const authStatus = selectedSegment?.authStatus || selectedJob?.authStatus;
   const activeJobId = selectedSegment?.jobId || selectedJob?.jobId;
+  const latestTimelineExport = project?.timelineExports?.[0] || null;
+  const latestTimelineMediaUrl = resolveStudioDisplayAssetUrl(latestTimelineExport?.mediaUrl);
 
   return (
     <section className="relative flex min-h-0 flex-col rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2">
@@ -2202,6 +2231,45 @@ function PreviewPanel({
             {timelineExporting ? 'Exporting' : 'Export all segments'}
           </button>
         </div>
+
+        {latestTimelineExport && (
+          <div
+            data-testid="timeline-export-output-card"
+            className="grid gap-2 rounded-lg-v2 border border-dreamy-brand-hot-v2/35 bg-dreamy-brand-hot-v2/10 p-3 text-xs text-Cr-text-subtle-v2 sm:grid-cols-[minmax(0,1fr)_auto]"
+          >
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold text-Cr-text-default-v2">Long video output</span>
+                <Pill tone={latestTimelineExport.status === 'ready' ? 'success' : statusPillTone(latestTimelineExport.status)}>
+                  {latestTimelineExport.status}
+                </Pill>
+                <Pill>{`${latestTimelineExport.summary.videoSegments} video clips`}</Pill>
+              </div>
+              <div className="mt-1 truncate text-Cr-text-subtler-v2">
+                {latestTimelineExport.evidence?.message || `${latestTimelineExport.summary.totalSegments} timeline segments packaged.`}
+              </div>
+              {latestTimelineMediaUrl && (
+                <a
+                  href={latestTimelineMediaUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 inline-flex max-w-full items-center gap-1.5 truncate font-semibold text-dreamy-brand-hot-v2"
+                >
+                  <ExternalLink size={13} />
+                  <span className="truncate">Open composed video</span>
+                </a>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => downloadJsonPayload(latestTimelineExport, `dreamy-timeline-export-${latestTimelineExport.exportId}.json`)}
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-3 font-semibold text-Cr-text-default-v2 active:bg-Cr-beta-white-12-v2"
+            >
+              <Download size={13} />
+              Manifest
+            </button>
+          </div>
+        )}
 
         {selectedSegment && (
           <div className="grid gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 p-3 text-xs text-Cr-text-subtle-v2 sm:grid-cols-[1fr_auto]">
@@ -3153,6 +3221,7 @@ export default function Dreamy() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const restoredDispatchUrlRef = useRef('');
+  const autoPollNoticeRef = useRef<Record<string, string>>({});
   const [mode, setMode] = useState<StudioMode>('player');
   const [activeTab, setActiveTab] = useState<TabKey>('chat');
   const [prompt, setPrompt] = useState('');
@@ -3210,6 +3279,10 @@ export default function Dreamy() {
     const id = project?.selectedSegmentId;
     return project?.segments.find((segment) => segment.id === id) || project?.segments[project.segments.length - 1] || null;
   }, [project]);
+  const recommendedStarterPresets = useMemo(
+    () => rankStarterPresets(DREAMY_STARTER_PRESETS, selectedSegment, Boolean(selectedFile)),
+    [selectedFile, selectedSegment?.id, selectedSegment?.type],
+  );
 
   const selectedJob = useMemo(() => {
     const jobId = selectedSegment?.jobId;
@@ -4084,6 +4157,65 @@ export default function Dreamy() {
       return { ...prev, jobs, segments, updatedAt: nowIso() };
     });
   }, []);
+
+  useEffect(() => {
+    const jobId = selectedSegment?.jobId || selectedJob?.jobId;
+    const currentStatus = selectedJob?.status || selectedSegment?.status;
+    if (!project?.projectId || !jobId || hasTelegramInitData() || !isTransientStudioStatus(currentStatus)) return;
+
+    let cancelled = false;
+    let polling = false;
+    const poll = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const result = await pollStudioJob(jobId);
+        if (cancelled) return;
+        if (result.project) mergeProject(result.project);
+        else mergeJob(result.job);
+
+        if (!isTransientStudioStatus(result.job.status)) {
+          const noticeKey = `${jobId}:${result.job.status}`;
+          if (autoPollNoticeRef.current[jobId] !== noticeKey) {
+            autoPollNoticeRef.current[jobId] = noticeKey;
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: makeId('assistant'),
+                role: 'assistant',
+                content:
+                  result.job.status === 'done'
+                    ? 'Auto-refresh attached the generated media.'
+                    : `Auto-refresh returned ${result.job.status}.`,
+                error: result.job.status === 'auth_missing' ? result.job.authStatus?.message : undefined,
+                createdAt: nowIso(),
+              },
+            ]);
+          }
+        }
+      } catch {
+        // Auto-refresh is opportunistic; the manual Refresh button keeps the explicit failure path visible.
+      } finally {
+        polling = false;
+      }
+    };
+
+    const initialTimer = window.setTimeout(poll, 900);
+    const intervalTimer = window.setInterval(poll, 4200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(initialTimer);
+      window.clearInterval(intervalTimer);
+    };
+  }, [
+    mergeJob,
+    mergeProject,
+    project?.projectId,
+    selectedJob?.jobId,
+    selectedJob?.status,
+    selectedSegment?.jobId,
+    selectedSegment?.status,
+  ]);
 
   const updateAssistant = useCallback((id: string, patch: Partial<ChatItem>) => {
     setMessages((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
@@ -4988,6 +5120,37 @@ export default function Dreamy() {
 
   const refreshSelectedTask = async () => {
     if (!project || !selectedSegment?.taskId) return;
+    if (!hasTelegramInitData() && selectedSegment.jobId) {
+      const result = await pollStudioJob(selectedSegment.jobId).catch((error) => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: makeId('assistant'),
+            role: 'assistant',
+            content: 'Server result poll failed.',
+            error: error instanceof Error ? error.message : String(error),
+            createdAt: nowIso(),
+          },
+        ]);
+        return null;
+      });
+      if (!result) return;
+      if (result.project) mergeProject(result.project);
+      else mergeJob(result.job);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content:
+            result.job.status === 'done'
+              ? 'Server poll accepted fresh Dreamy media.'
+              : `Server poll returned ${result.job.status}.`,
+          createdAt: nowIso(),
+        },
+      ]);
+      return;
+    }
     const result = await fetchGenerateResult(selectedSegment.taskId).catch(() => null);
     const media = extractGenerateTaskMedia(result);
     const status = media.status === 'completed' || media.status === 'success' || media.status === 'done' ? 'done' : selectedSegment.status;
@@ -5634,7 +5797,7 @@ export default function Dreamy() {
             prompt={prompt}
             canSubmitWithoutPrompt={selectedPage?.executor === 'navigation'}
             showStarterPresets={mode === 'player'}
-            starterPresets={DREAMY_STARTER_PRESETS}
+            starterPresets={recommendedStarterPresets}
             selectedStarterPresetId={selectedStarterPresetId}
             previewUrl={previewUrl}
             selectedFileName={selectedFile?.name}

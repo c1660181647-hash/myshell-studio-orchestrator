@@ -1586,6 +1586,12 @@ export async function retryStudioJob(jobId: string): Promise<{ project?: StudioP
   return response.json();
 }
 
+export async function pollStudioJob(jobId: string): Promise<{ project?: StudioProject | null; job: StudioJob }> {
+  const response = await fetch(`${getStudioJobEndpoint(jobId)}/poll`, { method: 'POST' });
+  if (!response.ok) throw new Error(`Studio poll ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
 export async function bulkStudioJobs(options: {
   action: 'cancel' | 'retry';
   projectId?: string;
