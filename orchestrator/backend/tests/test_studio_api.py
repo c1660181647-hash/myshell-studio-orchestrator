@@ -307,6 +307,24 @@ class StudioApiTest(unittest.TestCase):
         agent_ids = {agent["id"] for agent in agents.json()["agents"]}
         self.assertIn("evidence-verifier", agent_ids)
 
+        previews = self.client.get("/api/studio/bot-previews")
+        self.assertEqual(previews.status_code, 200)
+        preview_body = previews.json()
+        preview_by_slug = {preview["botSlug"]: preview for preview in preview_body["previews"]}
+        self.assertIn("ai-porn-generator", preview_by_slug)
+        self.assertIn("seedream-multi-chart", preview_by_slug)
+        self.assertEqual(preview_body["summary"]["dreamyBots"], 2)
+        self.assertGreaterEqual(preview_body["summary"]["artBots"], 38)
+        self.assertEqual(preview_body["summary"]["ready"], preview_body["summary"]["total"])
+        self.assertTrue(preview_by_slug["ai-porn-generator"]["mediaUrl"].startswith("/generated/bot-previews/"))
+        self.assertTrue(preview_by_slug["seedream-multi-chart"]["accepted"])
+
+        bots = self.client.get("/api/bots")
+        self.assertEqual(bots.status_code, 200)
+        first_bot = bots.json()["bots"][0]
+        self.assertIn("preview", first_bot)
+        self.assertTrue(first_bot["preview"]["mediaUrl"].startswith("/generated/bot-previews/"))
+
         with self.client.stream(
             "POST",
             "/api/studio/run",

@@ -18,6 +18,7 @@ MyShell Studio Orchestrator is a unified agent dispatch center for Dreamy miniap
 - Dispatch matrix coverage for every registered MyShell page, including executor, default agent, route path, missing route params, auth status, and recommended dispatch action.
 - Batch dispatch planning for all ready MyShell targets, with openable navigation paths, executor groups, and explicit skip reasons for auth gaps or missing route params.
 - Recoverable dispatch sessions that persist batch target progress, next openable target, visited/completed/skipped/cancelled/error states, queue cancel/retry, and queue recovery after refresh or cross-page navigation.
+- Real MyShell-generated bot preview assets for Dreamy and the registered MyShell Art bot catalog, served from `frontend/public/generated/bot-previews/manifest.json` and exposed through `/api/studio/bot-previews`.
 - One-click coverage verification for ready navigation surfaces, with accepted dispatch evidence for each verified page and explicit skip reasons for missing params, auth gaps, or non-batch-safe executors.
 - Handoff snapshots that package health, readiness, overview, dispatch matrix, coverage, project delivery evidence, artifacts, gaps, and next actions into a single delivery decision.
 
@@ -57,6 +58,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 - `GET /api/pages`
 - `GET /api/agents`
 - `GET /api/studio/overview`
+- `GET /api/studio/bot-previews`
 - `GET /api/studio/dispatch-matrix`
 - `POST /api/studio/dispatch-batch`
 - `POST /api/studio/dispatch-sessions`
@@ -91,6 +93,8 @@ http://127.0.0.1:5174/?test_route=dreamy
 `/api/pages` returns registry metadata plus runtime `authStatus`, `dispatchReady`, `dispatchStatus`, and `dispatchMessage` for each MyShell page, so operators can tell whether a page is ready, client-delegated, or blocked by missing credentials before dispatch.
 
 `/api/studio/overview` aggregates pages, agents, latest jobs, and status counts for the Studio command center. Page summaries include runtime readiness, related agent ids, per-status job counts, and the latest job for that page.
+
+`/api/studio/bot-previews` returns the Studio bot preview registry for Dreamy and all registered MyShell Art bots. Each preview includes `status`, `accepted`, `mediaUrl`, `source`, source widget metadata, and evidence. The checked-in manifest uses real MyShell OpenAPI image results stored under `/generated/bot-previews/`; missing future assets report `needs_generation` or `auth_missing` instead of being shown as completed previews.
 
 `/api/studio/dispatch-matrix` returns a full page-to-agent routing matrix for every registered MyShell surface. It includes the recommended action (`navigate`, `execute-client`, or `execute-server`), default agent id, executor, auth status, navigation path, route params, missing params, and readiness summary so operators can audit and launch dispatch targets from one panel. Pass `project_id` and optional `source_segment_id` to compute contextual routes from the current media segment, such as filling Tag Generator's required `img` parameter from an accepted image. The Studio UI exposes each navigation target with Dispatch, Open, and Copy controls so operators can either run the adapter path or open/share the exact resolved page URL.
 
@@ -145,6 +149,7 @@ Important backend settings:
 
 - `STUDIO_STORE_PATH` - SQLite path for project/job/evidence persistence. Defaults to `orchestrator/backend/.studio/studio.sqlite3`.
 - `STUDIO_PAGES_MANIFEST` - Optional path to a JSON manifest that extends or replaces registered MyShell miniapp pages.
+- `STUDIO_BOT_PREVIEWS_MANIFEST` - Optional path to a JSON manifest for real MyShell-generated bot preview assets. Defaults to the checked-in `/generated/bot-previews` manifest.
 - `STUDIO_FRONTEND_APP_ROUTES_FILE` - Optional path to the frontend App route source used for readiness route coverage. Defaults to `frontend/src/App.tsx` when present.
 - `DREAMY_TELEGRAM_INIT_DATA` - Optional Telegram miniapp init data for server-side Dreamy execution. If set, `/api/studio/run` can submit Dreamy generate/result jobs from the backend; if omitted, Dreamy remains `client_delegated` and the browser miniapp session runs jobs.
 - `DREAMY_API_BASE_URL` - Dreamy API origin, default `https://api.myshell.fun`.

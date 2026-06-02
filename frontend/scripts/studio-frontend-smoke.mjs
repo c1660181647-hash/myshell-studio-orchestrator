@@ -23,7 +23,10 @@ export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'starter-presets',
   'starter-visual-recommendations',
   'starter-bot-preview-image',
-  'starter-bot-preview-gif',
+  'starter-bot-preview-real',
+  'all-bot-previews',
+  'all-bot-preview-card',
+  'all-bot-preview-image',
   'starter-preset-direct-generate',
   'starter-preset-prompt-ready',
   'starter-preset-result-visible',
@@ -364,20 +367,39 @@ export async function runStudioFrontendSmoke(options = {}) {
       page.getByTestId('starter-bot-preview-image').first(),
       timeoutMs,
     );
+    await checkVisible(checks, page, 'all-bot-previews', 'All connected bot previews', page.getByTestId('all-bot-previews'), timeoutMs);
+    await checkVisible(
+      checks,
+      page,
+      'all-bot-preview-card',
+      'All connected bot preview cards',
+      page.getByTestId('all-bot-preview-card').first(),
+      timeoutMs,
+    );
+    await checkVisible(
+      checks,
+      page,
+      'all-bot-preview-image',
+      'All connected bot preview images',
+      page.getByTestId('all-bot-preview-image').first(),
+      timeoutMs,
+    );
     try {
       const previewImage = page.getByTestId('starter-bot-preview-image').first();
       await previewImage.waitFor({ state: 'visible', timeout: timeoutMs });
       const previewSource = (await previewImage.getAttribute('src')) || '';
       checks.push({
-        id: 'starter-bot-preview-gif',
-        label: 'Starter bot preview uses GIF media',
-        ok: /\.gif(?:$|\?)/i.test(previewSource),
-        message: /\.gif(?:$|\?)/i.test(previewSource) ? undefined : `Preview source is not a GIF: ${previewSource}`,
+        id: 'starter-bot-preview-real',
+        label: 'Starter bot preview uses generated MyShell media',
+        ok: /\/generated\/bot-previews\//i.test(previewSource),
+        message: /\/generated\/bot-previews\//i.test(previewSource)
+          ? undefined
+          : `Preview source is not a generated MyShell asset: ${previewSource}`,
       });
     } catch (error) {
       checks.push({
-        id: 'starter-bot-preview-gif',
-        label: 'Starter bot preview uses GIF media',
+        id: 'starter-bot-preview-real',
+        label: 'Starter bot preview uses generated MyShell media',
         ok: false,
         message: error instanceof Error ? error.message : String(error),
       });

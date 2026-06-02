@@ -17,6 +17,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from orchestrator import orchestrate_stream
 from bot_catalog import MYSHELL_BOTS, PROMPT_GALLERY, get_bots_by_type
+from bot_previews import list_bot_previews, load_preview_manifest, preview_for_bot
 from studio import register_studio_routes
 from studio_runtime import runtime_health
 from studio_store import STUDIO_STORE
@@ -119,6 +120,8 @@ async def get_gallery(category: Optional[str] = None, limit: int = 12):
 async def get_bots(type: Optional[str] = None):
     """Get available bots. Optional filter: type=text-to-image|image-to-image|image-to-video"""
     bots = get_bots_by_type(type) if type else MYSHELL_BOTS
+    preview_manifest = list_bot_previews()
+    preview_source_manifest = load_preview_manifest()
     return {
         "total": len(bots),
         "bots": [
@@ -132,9 +135,16 @@ async def get_bots(type: Optional[str] = None):
                 "gen_button": b.get("gen_button", ""),
                 "page_url": f"https://art.myshell.ai/creative/{b['slug']}",
                 "keywords": b.get("keywords", []),
+                "preview": preview_for_bot({**b, "pageId": "myshell-art"}, preview_source_manifest),
             }
             for b in bots
         ],
+        "previews": {
+            "version": preview_manifest["version"],
+            "source": preview_manifest["source"],
+            "generatedAt": preview_manifest["generatedAt"],
+            "summary": preview_manifest["summary"],
+        },
         "summary": {
             "text-to-image": len(get_bots_by_type("text-to-image")),
             "image-to-image": len(get_bots_by_type("image-to-image")),
@@ -182,8 +192,11 @@ if os.path.exists(frontend_dist):
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-# Serve generated images
-generated_dir = os.path.join(frontend_dist, "generated")
+# Serve generated images — public/generated in local dev, dist/generated in Docker.
+generated_dir = _first_existing_path(
+    os.path.join(frontend_public, "generated"),
+    os.path.join(frontend_dist, "generated"),
+)
 os.makedirs(generated_dir, exist_ok=True)
 app.mount("/generated", StaticFiles(directory=generated_dir), name="generated")
 

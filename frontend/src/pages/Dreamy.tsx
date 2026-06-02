@@ -55,6 +55,7 @@ import {
   fetchStudioDispatchMatrix,
   fetchStudioDispatchPreview,
   fetchStudioAgents,
+  fetchStudioBotPreviews,
   fetchStudioHandoffSnapshot,
   fetchStudioHealth,
   fetchStudioJobs,
@@ -101,6 +102,8 @@ import type {
   StudioAgentNode,
   StudioActionResolveResult,
   StudioApi,
+  StudioBotPreview,
+  StudioBotPreviewsResponse,
   StudioCoverageReport,
   StudioDeliveryAudit,
   StudioDeliveryBundle,
@@ -200,8 +203,14 @@ interface StudioStarterPreset {
   pageId: StudioApi | string;
   pageName: string;
   agentId: string;
+  botSlug: string;
   recommendation: string;
   visualUrl: string;
+  fallbackVisualUrl: string;
+  previewStatus: string;
+  previewAccepted: boolean;
+  previewSource: string;
+  previewLabel: string;
   workflow: string;
   steps: string[];
   estimatedWaitSeconds: number;
@@ -229,8 +238,14 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
     pageId: 'dreamy-miniapp',
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
+    botSlug: DEFAULT_DREAMY_SLUG,
     recommendation: 'Best first move for a strong source image before video.',
     visualUrl: presetCinematicGif,
+    fallbackVisualUrl: presetCinematicGif,
+    previewStatus: 'fallback',
+    previewAccepted: false,
+    previewSource: 'local-gif-fallback',
+    previewLabel: 'Local fallback',
     workflow: 'Text to image',
     steps: ['Prompt', 'Image source', 'Timeline slot'],
     estimatedWaitSeconds: 10,
@@ -242,8 +257,14 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
     pageId: 'dreamy-miniapp',
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
+    botSlug: 'image-to-video-generator',
     recommendation: 'Good when the next step is image-to-video motion.',
     visualUrl: presetCharacterGif,
+    fallbackVisualUrl: presetCharacterGif,
+    previewStatus: 'fallback',
+    previewAccepted: false,
+    previewSource: 'local-gif-fallback',
+    previewLabel: 'Local fallback',
     workflow: 'Text to image to video',
     steps: ['Prompt', 'Character image', 'Video segment'],
     estimatedWaitSeconds: 12,
@@ -255,8 +276,14 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
     pageId: 'dreamy-miniapp',
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
+    botSlug: 'neon-art-generator',
     recommendation: 'Useful for restyle passes and cover frames.',
     visualUrl: presetStyleGif,
+    fallbackVisualUrl: presetStyleGif,
+    previewStatus: 'fallback',
+    previewAccepted: false,
+    previewSource: 'local-gif-fallback',
+    previewLabel: 'Local fallback',
     workflow: 'Reference image to style',
     steps: ['Prompt', 'Poster frame', 'Restyle'],
     estimatedWaitSeconds: 8,
@@ -381,6 +408,40 @@ function rankStarterPresets(
           : ['cinematic-portrait', 'character-scene', 'style-poster'];
   const order = new Map(preferredOrder.map((id, index) => [id, index]));
   return [...presets].sort((left, right) => (order.get(left.id) ?? 99) - (order.get(right.id) ?? 99));
+}
+
+function previewLabelFor(preview?: StudioBotPreview): string {
+  if (!preview) return 'Local fallback';
+  if (preview.status === 'ready' && preview.accepted) {
+    return preview.botSpecific ? 'Bot result' : 'MyShell result';
+  }
+  if (preview.status === 'auth_missing' || preview.evidence?.status === 'auth_missing') return 'Needs auth';
+  if (preview.status === 'needs_generation') return 'Needs refresh';
+  return preview.status || 'Preview pending';
+}
+
+function hydrateStarterPresets(
+  presets: StudioStarterPreset[],
+  previewsResponse: StudioBotPreviewsResponse | null,
+): StudioStarterPreset[] {
+  if (!previewsResponse?.previews?.length) return presets;
+  const previewBySlug = new Map(previewsResponse.previews.map((preview) => [preview.botSlug, preview]));
+  return presets.map((preset) => {
+    const manifestStarter = previewsResponse.starterPresets?.[preset.id];
+    const previewSlug = manifestStarter?.botSlug || preset.botSlug;
+    const preview = previewBySlug.get(previewSlug);
+    const previewMedia = resolveStudioDisplayAssetUrl(preview?.thumbnailUrl || preview?.mediaUrl || preview?.posterUrl);
+    const visualUrl = preview?.status === 'ready' && preview.accepted && previewMedia ? previewMedia : preset.fallbackVisualUrl;
+    return {
+      ...preset,
+      botSlug: previewSlug,
+      visualUrl,
+      previewStatus: preview?.status || preset.previewStatus,
+      previewAccepted: Boolean(preview?.accepted),
+      previewSource: preview?.source || preset.previewSource,
+      previewLabel: previewLabelFor(preview),
+    };
+  });
 }
 
 function isTransientStudioStatus(status?: string): boolean {
@@ -3032,9 +3093,12 @@ function RecommendationAgentPanel({
         <img src={preset.visualUrl} alt="" className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
         <div className="absolute -left-6 top-0 h-full w-12 rotate-12 animate-pulse bg-white/20 blur-sm" />
-        <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+        <div
+          data-testid={preset.previewAccepted ? 'ai-recommendation-real-preview' : 'ai-recommendation-preview-fallback'}
+          className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white"
+        >
           <Bot size={10} />
-          AI pick
+          {preset.previewLabel}
         </div>
       </div>
       <div className="min-w-0">
@@ -3042,6 +3106,7 @@ function RecommendationAgentPanel({
           <span className="text-xs font-semibold text-Cr-text-default-v2">{preset.title}</span>
           <Pill tone="hot">{preset.workflow}</Pill>
           <Pill>{`${preset.estimatedWaitSeconds}s target`}</Pill>
+          <Pill tone={preset.previewAccepted ? 'success' : 'hot'}>{preset.previewLabel}</Pill>
         </div>
         <div className="mt-1 text-xs leading-5 text-Cr-text-subtle-v2">{preset.recommendation}</div>
         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -3072,6 +3137,7 @@ function Composer({
   canSubmitWithoutPrompt,
   showStarterPresets,
   starterPresets,
+  botPreviewCards,
   selectedStarterPresetId,
   previewUrl,
   selectedFileName,
@@ -3089,6 +3155,7 @@ function Composer({
   canSubmitWithoutPrompt?: boolean;
   showStarterPresets?: boolean;
   starterPresets?: StudioStarterPreset[];
+  botPreviewCards?: StudioBotPreview[];
   selectedStarterPresetId?: string;
   previewUrl: string;
   selectedFileName?: string;
@@ -3103,6 +3170,7 @@ function Composer({
 }) {
   const visiblePresets = showStarterPresets ? starterPresets || [] : [];
   const recommendedPreset = visiblePresets[0];
+  const visibleBotPreviewCards = showStarterPresets ? botPreviewCards || [] : [];
 
   return (
     <div className="shrink-0 border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-3">
@@ -3142,8 +3210,11 @@ function Composer({
                       className="h-full w-full object-cover transition-transform duration-500 group-active:scale-105"
                     />
                     <span className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-black/10" />
-                    <span className="absolute left-2 top-2 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                      GIF preview
+                    <span
+                      data-testid={preset.previewAccepted ? 'starter-bot-preview-real' : 'starter-bot-preview-fallback'}
+                      className="absolute left-2 top-2 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                    >
+                      {preset.previewLabel}
                     </span>
                     <span className="absolute bottom-0 left-0 h-0.5 w-2/3 animate-pulse rounded-r bg-dreamy-brand-hot-v2" />
                   </span>
@@ -3157,11 +3228,58 @@ function Composer({
                       )}
                     </span>
                     <span className="line-clamp-2 text-[11px] leading-4 text-Cr-text-subtler-v2">{preset.recommendation}</span>
-                    <span className="text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2">{preset.workflow}</span>
+                    <span
+                      data-testid="starter-bot-preview-state"
+                      className="text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2"
+                    >
+                      {preset.previewAccepted ? `${preset.workflow} · ${preset.previewSource}` : `${preset.workflow} · ${preset.previewStatus}`}
+                    </span>
                   </span>
                 </button>
               ))}
             </div>
+            {!!visibleBotPreviewCards.length && (
+              <div data-testid="all-bot-previews" className="mt-2 grid gap-2">
+                <div className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
+                  <span className="inline-flex min-w-0 items-center gap-2">
+                    <Bot size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
+                    <span className="truncate">Connected MyShell bots</span>
+                  </span>
+                  <Pill tone={visibleBotPreviewCards.every((preview) => preview.accepted) ? 'success' : 'hot'}>
+                    {`${visibleBotPreviewCards.filter((preview) => preview.accepted).length}/${visibleBotPreviewCards.length} real`}
+                  </Pill>
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+                  {visibleBotPreviewCards.map((preview) => {
+                    const imageUrl = resolveStudioDisplayAssetUrl(preview.thumbnailUrl || preview.mediaUrl || preview.posterUrl);
+                    return (
+                      <div
+                        key={preview.botSlug}
+                        data-testid="all-bot-preview-card"
+                        className="grid w-[132px] shrink-0 overflow-hidden rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2"
+                      >
+                        <div className="relative h-[72px] bg-black/25">
+                          {imageUrl ? (
+                            <img data-testid="all-bot-preview-image" src={imageUrl} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="grid h-full place-items-center text-Cr-text-subtlest-v2">
+                              <Bot size={18} />
+                            </div>
+                          )}
+                          <span className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                            {previewLabelFor(preview)}
+                          </span>
+                        </div>
+                        <div className="grid gap-1 p-2">
+                          <span className="truncate text-[11px] font-semibold text-Cr-text-default-v2">{preview.botName}</span>
+                          <span className="truncate text-[10px] uppercase text-Cr-text-subtlest-v2">{preview.botType || preview.pageId || 'bot'}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
         <textarea
@@ -3246,6 +3364,7 @@ export default function Dreamy() {
   const [selectedStarterPresetId, setSelectedStarterPresetId] = useState('');
   const [pages, setPages] = useState<StudioPageAdapter[]>([]);
   const [agents, setAgents] = useState<StudioAgentCapability[]>([]);
+  const [botPreviews, setBotPreviews] = useState<StudioBotPreviewsResponse | null>(null);
   const [hubJobs, setHubJobs] = useState<StudioJob[]>([]);
   const [selectedPageId, setSelectedPageId] = useState<StudioApi | string>('dreamy-miniapp');
   const [selectedAgentId, setSelectedAgentId] = useState(DEFAULT_STUDIO_AGENT_ID);
@@ -3281,9 +3400,23 @@ export default function Dreamy() {
     const id = project?.selectedSegmentId;
     return project?.segments.find((segment) => segment.id === id) || project?.segments[project.segments.length - 1] || null;
   }, [project]);
+  const hydratedStarterPresets = useMemo(
+    () => hydrateStarterPresets(DREAMY_STARTER_PRESETS, botPreviews),
+    [botPreviews],
+  );
   const recommendedStarterPresets = useMemo(
-    () => rankStarterPresets(DREAMY_STARTER_PRESETS, selectedSegment, Boolean(selectedFile)),
-    [selectedFile, selectedSegment?.id, selectedSegment?.type],
+    () => rankStarterPresets(hydratedStarterPresets, selectedSegment, Boolean(selectedFile)),
+    [hydratedStarterPresets, selectedFile, selectedSegment?.id, selectedSegment?.type],
+  );
+  const connectedBotPreviewCards = useMemo(
+    () =>
+      [...(botPreviews?.previews || [])].sort((left, right) => {
+        const leftDreamy = left.pageId === 'dreamy-miniapp' ? 0 : 1;
+        const rightDreamy = right.pageId === 'dreamy-miniapp' ? 0 : 1;
+        if (leftDreamy !== rightDreamy) return leftDreamy - rightDreamy;
+        return left.botName.localeCompare(right.botName);
+      }),
+    [botPreviews],
   );
 
   const selectedJob = useMemo(() => {
@@ -3910,16 +4043,18 @@ export default function Dreamy() {
     void Promise.all([
       fetchStudioPages().catch(() => []),
       fetchStudioAgents().catch(() => []),
+      fetchStudioBotPreviews().catch(() => null),
       fetchStudioHealth().catch(() => null),
       fetchStudioOverview().catch(() => null),
       fetchStudioReadiness().catch(() => null),
       fetchStudioDeliveryAudit().catch(() => null),
       fetchStudioDispatchMatrix().catch(() => null),
       fetchStudioCoverage().catch(() => null),
-    ]).then(([nextPages, nextAgents, nextHealth, nextOverview, nextReadiness, nextAudit, nextMatrix, nextCoverage]) => {
+    ]).then(([nextPages, nextAgents, nextBotPreviews, nextHealth, nextOverview, nextReadiness, nextAudit, nextMatrix, nextCoverage]) => {
       if (cancelled) return;
       setPages(nextPages);
       setAgents(nextAgents);
+      setBotPreviews(nextBotPreviews);
       setStudioHealth(nextHealth);
       setStudioOverview(nextOverview);
       setStudioReadiness(nextReadiness);
@@ -5800,6 +5935,7 @@ export default function Dreamy() {
             canSubmitWithoutPrompt={selectedPage?.executor === 'navigation'}
             showStarterPresets={mode === 'player'}
             starterPresets={recommendedStarterPresets}
+            botPreviewCards={connectedBotPreviewCards}
             selectedStarterPresetId={selectedStarterPresetId}
             previewUrl={previewUrl}
             selectedFileName={selectedFile?.name}

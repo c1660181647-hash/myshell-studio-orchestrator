@@ -113,6 +113,48 @@ export interface StudioEvidence {
   checkedAt?: string;
 }
 
+export interface StudioBotPreview {
+  botSlug: string;
+  botName: string;
+  botType?: string;
+  pageId?: StudioApi | string;
+  status: 'ready' | 'needs_generation' | StudioStatus | string;
+  accepted: boolean;
+  mediaUrl?: string;
+  thumbnailUrl?: string;
+  posterUrl?: string;
+  assetId?: string;
+  source?: string;
+  sourceWidgetId?: string;
+  sourceWidgetName?: string;
+  originalRemoteUrl?: string;
+  generatedPrompt?: string;
+  checkedAt?: string;
+  previewKind?: string;
+  botSpecific?: boolean;
+  message?: string;
+  evidence?: StudioEvidence;
+}
+
+export interface StudioBotPreviewsResponse {
+  version: string;
+  source: string;
+  generatedAt?: string;
+  checkedAt: string;
+  manifestPath?: string;
+  summary: {
+    total: number;
+    ready: number;
+    needsGeneration: number;
+    assets: number;
+    dreamyBots: number;
+    artBots: number;
+  };
+  assets: Array<Record<string, unknown>>;
+  starterPresets: Record<string, { botSlug?: string; assetId?: string }>;
+  previews: StudioBotPreview[];
+}
+
 export interface StudioAuthStatus {
   status: 'ready' | 'client_delegated' | 'auth_missing' | 'unavailable' | string;
   mode?: string;
@@ -1540,6 +1582,12 @@ export async function fetchStudioAgents(): Promise<StudioAgentCapability[]> {
   if (!response.ok) throw new Error(`Studio agents ${response.status}: ${response.statusText}`);
   const body = await response.json();
   return body.agents || [];
+}
+
+export async function fetchStudioBotPreviews(): Promise<StudioBotPreviewsResponse> {
+  const response = await fetch(getStudioRootEndpoint('/api/studio/bot-previews'));
+  if (!response.ok) throw new Error(`Studio bot previews ${response.status}: ${response.statusText}`);
+  return response.json();
 }
 
 export async function fetchStudioHealth(): Promise<StudioHealth> {

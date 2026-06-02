@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from bot_catalog import MYSHELL_BOTS, get_bot_by_slug
+from bot_previews import list_bot_previews
 from studio_registry import get_page, list_studio_agents, list_studio_pages, page_for_dispatch
 from studio_runtime import adapter_auth_status, dreamy_api_base_url, dreamy_init_data, runtime_health
 from studio_store import STUDIO_STORE
@@ -4130,6 +4131,10 @@ def register_studio_routes(app) -> None:
     @app.get("/api/agents")
     async def get_studio_agents():
         return {"agents": list_studio_agents()}
+
+    @app.get("/api/studio/bot-previews")
+    async def get_studio_bot_previews():
+        return list_bot_previews()
 
     @app.get("/api/studio/overview")
     async def get_studio_overview(limit: int = Query(50, ge=1, le=100)):

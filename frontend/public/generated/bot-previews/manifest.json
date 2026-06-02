@@ -1,0 +1,90 @@
+{
+  "version": "2026-06-02-myshell-real-preview-v1",
+  "generatedAt": "2026-06-02T15:45:00.000Z",
+  "source": "myshell-openapi-widget",
+  "assets": [
+    {
+      "id": "cinematic-neon-city",
+      "title": "Cinematic Neon City",
+      "mediaUrl": "/generated/bot-previews/cinematic-neon-city.png",
+      "thumbnailUrl": "/generated/bot-previews/cinematic-neon-city.png",
+      "originalRemoteUrl": "https://www.myshellstatic.com/image/chat/embed_obj/202606021539/bc489de5bb544c62a7ba164dd06252ad.jpeg",
+      "source": "myshell-openapi-widget",
+      "sourceWidgetId": "1912154065390264321",
+      "sourceWidgetName": "GPT4o Image",
+      "prompt": "Create a safe 16:9 bot preview image for MyShell Studio: cinematic neon rainy city street, glossy reflections, editorial AI art, high detail, no text, no logos",
+      "checkedAt": "2026-06-02T15:39:00.000Z"
+    },
+    {
+      "id": "character-scene",
+      "title": "Character Scene",
+      "mediaUrl": "/generated/bot-previews/character-scene.png",
+      "thumbnailUrl": "/generated/bot-previews/character-scene.png",
+      "originalRemoteUrl": "https://www.myshellstatic.com/image/chat/embed_obj/202606021541/8fd86b9b25b44b74b41b150769d2434c.jpeg",
+      "source": "myshell-openapi-widget",
+      "sourceWidgetId": "1912154065390264321",
+      "sourceWidgetName": "GPT4o Image",
+      "prompt": "Create a safe 16:9 bot preview image for a MyShell character image bot: polished full body character concept in a neon city street, cinematic lighting, glossy rain, no text, no logos",
+      "checkedAt": "2026-06-02T15:41:00.000Z"
+    },
+    {
+      "id": "style-transfer",
+      "title": "Style Transfer",
+      "mediaUrl": "/generated/bot-previews/style-transfer.png",
+      "thumbnailUrl": "/generated/bot-previews/style-transfer.png",
+      "originalRemoteUrl": "https://www.myshellstatic.com/image/chat/embed_obj/202606021542/95caf84a71a34d00b29bdc215cc30417.jpeg",
+      "source": "myshell-openapi-widget",
+      "sourceWidgetId": "1912154065390264321",
+      "sourceWidgetName": "GPT4o Image",
+      "prompt": "Create a safe 16:9 bot preview image for a MyShell style transfer bot: portrait photo transformed into glowing neon poster art, vivid colors, crisp editorial composition, no text, no logos",
+      "checkedAt": "2026-06-02T15:42:00.000Z"
+    },
+    {
+      "id": "collectible-product",
+      "title": "Collectible Product",
+      "mediaUrl": "/generated/bot-previews/collectible-product.png",
+      "thumbnailUrl": "/generated/bot-previews/collectible-product.png",
+      "originalRemoteUrl": "https://www.myshellstatic.com/image/chat/embed_obj/202606021543/c10b74bee0a74d7db345255022792f2e.jpeg",
+      "source": "myshell-openapi-widget",
+      "sourceWidgetId": "1912154065390264321",
+      "sourceWidgetName": "GPT4o Image",
+      "prompt": "Create a safe 16:9 bot preview image for a MyShell 3D collectible and product bot: cute blind box figurine, isometric studio lighting, premium product render, clean background, no text, no logos",
+      "checkedAt": "2026-06-02T15:43:00.000Z"
+    },
+    {
+      "id": "video-motion",
+      "title": "Video Motion",
+      "mediaUrl": "/generated/bot-previews/video-motion.png",
+      "thumbnailUrl": "/generated/bot-previews/video-motion.png",
+      "originalRemoteUrl": "https://www.myshellstatic.com/image/chat/embed_obj/202606021544/f36ce61bc1874fe6999e0183587d3251.jpeg",
+      "source": "myshell-openapi-widget",
+      "sourceWidgetId": "1912154065390264321",
+      "sourceWidgetName": "GPT4o Image",
+      "prompt": "Create a safe 16:9 bot preview image for a MyShell image-to-video bot: cinematic storyboard frame with motion trails, rainy cyberpunk street, video timeline energy, high detail, no text, no logos",
+      "checkedAt": "2026-06-02T15:44:00.000Z"
+    },
+    {
+      "id": "creative-toolkit",
+      "title": "Creative Toolkit",
+      "mediaUrl": "/generated/bot-previews/creative-toolkit.png",
+      "thumbnailUrl": "/generated/bot-previews/creative-toolkit.png",
+      "originalRemoteUrl": "https://www.myshellstatic.com/image/chat/embed_obj/202606021545/0f1b1ae2c11f45d5884146f4d5c5cc50.jpeg",
+      "source": "myshell-openapi-widget",
+      "sourceWidgetId": "1912154065390264321",
+      "sourceWidgetName": "GPT4o Image",
+      "prompt": "Create a safe 16:9 bot preview image for MyShell utility image bots: modern AI creative toolkit scene with room design board, banner mockup, portrait filter samples, polished UI-like composition, no readable text, no logos",
+      "checkedAt": "2026-06-02T15:45:00.000Z"
+    }
+  ],
+  "botPreviews": {
+    "ai-porn-generator": { "assetId": "cinematic-neon-city", "botSpecific": false },
+    "image-to-video-generator": { "assetId": "video-motion", "botSpecific": false },
+    "seedream-multi-chart": { "assetId": "character-scene", "botSpecific": false },
+    "sora-video-generator": { "assetId": "video-motion", "botSpecific": false }
+  },
+  "starterPresets": {
+    "cinematic-portrait": { "botSlug": "ai-porn-generator", "assetId": "cinematic-neon-city" },
+    "character-scene": { "botSlug": "image-to-video-generator", "assetId": "character-scene" },
+    "style-poster": { "botSlug": "neon-art-generator", "assetId": "style-transfer" }
+  }
+}
