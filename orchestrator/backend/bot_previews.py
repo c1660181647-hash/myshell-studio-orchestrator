@@ -9,8 +9,11 @@ from typing import Any
 from bot_catalog import MYSHELL_BOTS
 
 PREVIEW_BASE_PATH = "/generated/bot-previews"
+MODULE_DIR = Path(__file__).resolve().parent
 DEFAULT_MANIFEST_PATHS = [
-    Path(__file__).resolve().parents[2] / "frontend" / "public" / "generated" / "bot-previews" / "manifest.json",
+    MODULE_DIR.parent.parent / "frontend" / "public" / "generated" / "bot-previews" / "manifest.json",
+    MODULE_DIR / "frontend" / "dist" / "generated" / "bot-previews" / "manifest.json",
+    MODULE_DIR.parent / "frontend" / "dist" / "generated" / "bot-previews" / "manifest.json",
     Path("/app/frontend/dist/generated/bot-previews/manifest.json"),
 ]
 
