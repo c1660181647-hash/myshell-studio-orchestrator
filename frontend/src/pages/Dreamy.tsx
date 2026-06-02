@@ -2636,6 +2636,7 @@ export default function Dreamy() {
   const [deliveryBundleLoading, setDeliveryBundleLoading] = useState(false);
   const [dispatchBatchPlanning, setDispatchBatchPlanning] = useState(false);
   const [dispatchSessionRunning, setDispatchSessionRunning] = useState(false);
+  const [deliveryDrawerOpen, setDeliveryDrawerOpen] = useState(false);
 
   const selectedSegment = useMemo(() => {
     const id = project?.selectedSegmentId;
@@ -4541,51 +4542,79 @@ export default function Dreamy() {
         onChange={handleFileChange}
       />
 
-      <div className="hidden">
-      <StudioHealthStrip health={studioHealth} />
-      <StudioReadinessStrip readiness={studioReadiness} />
-      <StudioDeliveryAuditStrip
-        audit={deliveryAudit}
-        refreshing={deliveryAuditRefreshing}
-        resolvingActionId={resolvingAuditActionId}
-        resolvingBatch={resolvingAuditBatch}
-        onRefresh={() => void refreshDeliveryAudit({ interactive: true })}
-        onDownload={downloadDeliveryAudit}
-        onResolveAction={(action) => void resolveAuditAction(action)}
-        onResolveSafeActions={() => void resolveSafeAuditActions()}
-      />
-      <StudioDeliveryReportStrip projectId={project?.projectId} report={deliveryReport} />
-      <StudioCoverageStrip
-        coverage={coverageReport}
-        verifying={coverageVerifyRunning}
-        onVerify={() => void runCoverageVerification()}
-      />
-      <StudioHandoffSnapshotStrip
-        snapshot={handoffSnapshot}
-        bundle={deliveryBundle}
-        refreshing={handoffRefreshing}
-        bundling={deliveryBundleLoading}
-        onRefresh={() => void refreshHandoffSnapshot({ interactive: true })}
-        onBundle={() => void refreshDeliveryBundle()}
-      />
-      <StudioDispatchBatchStrip
-        plan={dispatchBatchPlan}
-        session={dispatchSession}
-        planning={dispatchBatchPlanning}
-        sessionRunning={dispatchSessionRunning}
-        selectedPageCount={selectedDispatchBatchPageIds.length}
-        onPlan={() => void planDispatchBatch()}
-        onPlanRemaining={() => void planDispatchBatch({ excludeCovered: true })}
-        onPlanSelected={() => void planDispatchBatch({ pageIds: selectedDispatchBatchPageIds })}
-        onStartSession={() => void startDispatchSession()}
-        onStartSelectedSession={() => void startDispatchSession({ pageIds: selectedDispatchBatchPageIds })}
-        onCancelSession={() => void cancelDispatchSession()}
-        onRetrySession={() => void retryDispatchSession()}
-        onOpenTarget={(target) => void runDispatchBatchTarget(target)}
-        onCompleteTarget={(target) => void completeDispatchSessionTarget(target)}
-        onErrorTarget={(target) => void reviewDispatchSessionTarget(target, 'error')}
-        onSkipTarget={(target) => void reviewDispatchSessionTarget(target, 'skipped')}
-      />
+      {deliveryDrawerOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/55 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Delivery evidence center">
+          <button
+            type="button"
+            className="absolute inset-0"
+            aria-label="Close delivery evidence center"
+            onClick={() => setDeliveryDrawerOpen(false)}
+          />
+          <aside className="relative z-10 flex h-full w-full max-w-[960px] flex-col border-l border-white/10 bg-[#090a0f] shadow-2xl">
+            <div className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 bg-[#0f1016] px-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <PanelRightOpen size={15} className="text-dreamy-brand-hot-v2" />
+                  Delivery Evidence
+                </div>
+                <div className="truncate text-[11px] text-Cr-text-subtler-v2">
+                  Readiness, coverage, handoff, dispatch matrix, and recoverable queue controls.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeliveryDrawerOpen(false)}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md-v2 border border-white/10 bg-white/[0.04] text-Cr-text-subtler-v2 active:bg-white/[0.08]"
+                aria-label="Close delivery evidence center"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <StudioHealthStrip health={studioHealth} />
+              <StudioReadinessStrip readiness={studioReadiness} />
+              <StudioDeliveryAuditStrip
+                audit={deliveryAudit}
+                refreshing={deliveryAuditRefreshing}
+                resolvingActionId={resolvingAuditActionId}
+                resolvingBatch={resolvingAuditBatch}
+                onRefresh={() => void refreshDeliveryAudit({ interactive: true })}
+                onDownload={downloadDeliveryAudit}
+                onResolveAction={(action) => void resolveAuditAction(action)}
+                onResolveSafeActions={() => void resolveSafeAuditActions()}
+              />
+              <StudioDeliveryReportStrip projectId={project?.projectId} report={deliveryReport} />
+              <StudioCoverageStrip
+                coverage={coverageReport}
+                verifying={coverageVerifyRunning}
+                onVerify={() => void runCoverageVerification()}
+              />
+              <StudioHandoffSnapshotStrip
+                snapshot={handoffSnapshot}
+                bundle={deliveryBundle}
+                refreshing={handoffRefreshing}
+                bundling={deliveryBundleLoading}
+                onRefresh={() => void refreshHandoffSnapshot({ interactive: true })}
+                onBundle={() => void refreshDeliveryBundle()}
+              />
+              <StudioDispatchBatchStrip
+                plan={dispatchBatchPlan}
+                session={dispatchSession}
+                planning={dispatchBatchPlanning}
+                sessionRunning={dispatchSessionRunning}
+                selectedPageCount={selectedDispatchBatchPageIds.length}
+                onPlan={() => void planDispatchBatch()}
+                onPlanRemaining={() => void planDispatchBatch({ excludeCovered: true })}
+                onPlanSelected={() => void planDispatchBatch({ pageIds: selectedDispatchBatchPageIds })}
+                onStartSession={() => void startDispatchSession()}
+                onStartSelectedSession={() => void startDispatchSession({ pageIds: selectedDispatchBatchPageIds })}
+                onCancelSession={() => void cancelDispatchSession()}
+                onRetrySession={() => void retryDispatchSession()}
+                onOpenTarget={(target) => void runDispatchBatchTarget(target)}
+                onCompleteTarget={(target) => void completeDispatchSessionTarget(target)}
+                onErrorTarget={(target) => void reviewDispatchSessionTarget(target, 'error')}
+                onSkipTarget={(target) => void reviewDispatchSessionTarget(target, 'skipped')}
+              />
 
       <div className="grid shrink-0 gap-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
         <label className="grid gap-1">
@@ -4811,7 +4840,10 @@ export default function Dreamy() {
           )}
         </div>
       </div>
+            </div>
+          </aside>
       </div>
+      )}
 
       <div className={`${mode === 'canvas' ? 'hidden' : 'grid'} h-11 shrink-0 grid-cols-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-1 lg:hidden`}>
         {(['chat', 'preview'] as TabKey[]).map((tab) => (
@@ -4924,9 +4956,19 @@ export default function Dreamy() {
         {!!previewMissingParams.length && <Pill tone="hot">{`Missing ${previewMissingParams.join(', ')}`}</Pill>}
         <button
           type="button"
+          onClick={() => setDeliveryDrawerOpen(true)}
+          className="ml-auto inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-dreamy-brand-hot-v2/50 bg-dreamy-brand-hot-v2/10 px-2 font-semibold text-dreamy-brand-hot-v2"
+          aria-haspopup="dialog"
+          aria-expanded={deliveryDrawerOpen}
+        >
+          <PanelRightOpen size={12} />
+          Evidence
+        </button>
+        <button
+          type="button"
           disabled={dispatchBatchPlanning}
           onClick={() => void planDispatchBatch({ excludeCovered: true })}
-          className="ml-auto inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-white/10 bg-white/[0.04] px-2 font-semibold text-Cr-text-subtle-v2 disabled:opacity-40"
+          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-white/10 bg-white/[0.04] px-2 font-semibold text-Cr-text-subtle-v2 disabled:opacity-40"
         >
           <GitBranch size={12} />
           Plan remaining
