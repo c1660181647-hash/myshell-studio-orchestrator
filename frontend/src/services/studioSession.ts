@@ -146,9 +146,9 @@ export function readStudioDispatchSession(): StudioDispatchSession | null {
     const raw = window.localStorage.getItem(STUDIO_DISPATCH_SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StudioDispatchSession>;
-    if (!parsed.projectId) return null;
+    if (!parsed.projectId && !parsed.sessionId && !parsed.targetId && !parsed.pageId) return null;
     return {
-      projectId: parsed.projectId,
+      projectId: parsed.projectId || '',
       sessionId: parsed.sessionId,
       targetId: parsed.targetId,
       pageId: parsed.pageId,

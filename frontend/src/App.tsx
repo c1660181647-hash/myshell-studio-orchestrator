@@ -183,7 +183,7 @@ function StudioReturnDock() {
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-32px)] items-center gap-1 rounded-full-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-1 shadow-[0_10px_28px_rgba(0,0,0,0.32)]">
+    <div className="fixed bottom-4 right-4 z-[120] flex max-w-[calc(100vw-32px)] items-center gap-1 rounded-full-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-1 shadow-[0_10px_28px_rgba(0,0,0,0.32)]">
       <button
         type="button"
         onClick={() => {

@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "smoke:studio": "node scripts/studio-frontend-smoke.mjs",
+    "test:studio-session": "node --test --experimental-strip-types scripts/studio-session.test.mjs",
     "test:studio-smoke": "node --test scripts/studio-frontend-smoke.test.mjs",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build -o storybook-static"

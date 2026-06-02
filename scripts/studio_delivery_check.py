@@ -112,12 +112,14 @@ def build_delivery_plan(
     frontend_port: int,
     workspace_screenshot_path: Path,
     evidence_screenshot_path: Path,
+    frontend_smoke_report_path: Path | None = None,
     frontend_mode: str = DEFAULT_FRONTEND_MODE,
 ) -> DeliveryPlan:
     backend_url = f"http://127.0.0.1:{backend_port}"
     frontend_url = f"http://127.0.0.1:{frontend_port}"
     backend_cwd = repo_root / "orchestrator" / "backend"
     frontend_cwd = repo_root / "frontend"
+    frontend_smoke_report = frontend_smoke_report_path or evidence_screenshot_path.with_name("frontend-smoke.json")
     if frontend_mode not in {"preview", "dev"}:
         raise ValueError(f"Unsupported frontend mode: {frontend_mode}")
     frontend_env = {
@@ -171,6 +173,8 @@ def build_delivery_plan(
                 str(workspace_screenshot_path),
                 "--evidence-screenshot",
                 str(evidence_screenshot_path),
+                "--report",
+                str(frontend_smoke_report),
             ],
             env={"STUDIO_FRONTEND_URL": frontend_url},
         ),
@@ -322,10 +326,23 @@ def extract_json_object_from_output(output: str) -> dict[str, Any] | None:
     return None
 
 
-def build_step_reports(steps: list[StepResult]) -> dict[str, Any]:
+def read_json_report(path: Path | None) -> dict[str, Any] | None:
+    if not path or not path.exists():
+        return None
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def build_step_reports(steps: list[StepResult], frontend_smoke_report_path: Path | None = None) -> dict[str, Any]:
     reports: dict[str, Any] = {}
+    frontend_smoke_file = read_json_report(frontend_smoke_report_path)
+    if frontend_smoke_file:
+        reports["frontendSmoke"] = frontend_smoke_file
     for step in steps:
-        if step.id == "frontend-smoke":
+        if step.id == "frontend-smoke" and "frontendSmoke" not in reports:
             frontend_smoke = extract_json_object_from_output(step.output)
             if frontend_smoke:
                 reports["frontendSmoke"] = frontend_smoke
@@ -346,9 +363,21 @@ def create_delivery_summary(
     report_path: Path,
     steps: list[StepResult],
     frontend_mode: str = DEFAULT_FRONTEND_MODE,
+    frontend_smoke_report_path: Path | None = None,
 ) -> dict[str, Any]:
     failures = [step.to_json() for step in steps if not step.ok]
-    reports = build_step_reports(steps)
+    reports = build_step_reports(steps, frontend_smoke_report_path)
+    artifacts: dict[str, Any] = {
+        "directory": str(artifacts_dir),
+        "report": str(report_path),
+        "screenshot": str(evidence_screenshot_path),
+        "workspaceScreenshot": str(workspace_screenshot_path),
+        "evidenceScreenshot": str(evidence_screenshot_path),
+        "backendLog": str(artifacts_dir / "backend.log"),
+        "frontendLog": str(artifacts_dir / "frontend.log"),
+    }
+    if frontend_smoke_report_path:
+        artifacts["frontendSmokeReport"] = str(frontend_smoke_report_path)
     return {
         "status": "failed" if failures else "ok",
         "checkedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -356,15 +385,7 @@ def create_delivery_summary(
         "backendUrl": f"http://127.0.0.1:{backend_port}",
         "frontendUrl": f"http://127.0.0.1:{frontend_port}",
         "frontendMode": frontend_mode,
-        "artifacts": {
-            "directory": str(artifacts_dir),
-            "report": str(report_path),
-            "screenshot": str(evidence_screenshot_path),
-            "workspaceScreenshot": str(workspace_screenshot_path),
-            "evidenceScreenshot": str(evidence_screenshot_path),
-            "backendLog": str(artifacts_dir / "backend.log"),
-            "frontendLog": str(artifacts_dir / "frontend.log"),
-        },
+        "artifacts": artifacts,
         "summary": {
             "total": len(steps),
             "passed": len([step for step in steps if step.ok]),
@@ -396,6 +417,7 @@ def run_delivery_check(args: argparse.Namespace) -> dict[str, Any]:
         if args.evidence_screenshot or args.screenshot
         else artifacts_dir / "dreamy-evidence.png"
     )
+    frontend_smoke_report_path = artifacts_dir / "frontend-smoke.json"
     report_path = Path(args.report).resolve() if args.report else artifacts_dir / "summary.json"
     plan = build_delivery_plan(
         repo_root=repo_root,
@@ -403,6 +425,7 @@ def run_delivery_check(args: argparse.Namespace) -> dict[str, Any]:
         frontend_port=frontend_port,
         workspace_screenshot_path=workspace_screenshot_path,
         evidence_screenshot_path=evidence_screenshot_path,
+        frontend_smoke_report_path=frontend_smoke_report_path,
         frontend_mode=args.frontend_mode,
     )
 
@@ -419,6 +442,7 @@ def run_delivery_check(args: argparse.Namespace) -> dict[str, Any]:
             report_path=report_path,
             steps=steps,
             frontend_mode=plan.frontend_mode,
+            frontend_smoke_report_path=frontend_smoke_report_path,
         )
         write_delivery_summary(summary, report_path)
         return summary

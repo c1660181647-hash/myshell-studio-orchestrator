@@ -57,20 +57,31 @@ test('createStudioSmokeInitScript bypasses the production age gate for smoke run
 });
 
 test('createSmokeSummary fails when required dispatch queue interaction checks are missing', () => {
+  const requiredDispatchChecks = [
+    'dispatch-batch-planned',
+    'dispatch-session-started',
+    'dispatch-next-target-ready',
+    'dispatch-navigation-target-selected',
+    'dispatch-selected-batch-planned',
+    'dispatch-selected-session-started',
+    'dispatch-target-opened',
+    'studio-return-dock-visible',
+    'studio-return-restored',
+    'dispatch-target-visited',
+  ];
+  for (const id of requiredDispatchChecks) {
+    assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes(id), `${id} should be required`);
+  }
   const summary = createSmokeSummary({
     frontendUrl: 'http://127.0.0.1:5174',
     checkedAt: '2026-06-02T00:00:00.000Z',
     checks: [{ id: 'studio-title', label: 'Studio title', ok: true }],
-    requiredCheckIds: REQUIRED_STUDIO_CHECK_IDS.filter((id) => (
-      id === 'dispatch-batch-planned' ||
-      id === 'dispatch-session-started' ||
-      id === 'dispatch-next-target-ready'
-    )),
+    requiredCheckIds: requiredDispatchChecks,
   });
 
   assert.equal(summary.status, 'failed');
   assert.deepEqual(
     summary.failures.map((failure) => failure.id),
-    ['dispatch-batch-planned', 'dispatch-session-started', 'dispatch-next-target-ready'],
+    requiredDispatchChecks,
   );
 });

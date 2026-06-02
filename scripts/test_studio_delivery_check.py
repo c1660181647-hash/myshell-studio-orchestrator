@@ -76,6 +76,7 @@ class StudioDeliveryCheckTest(unittest.TestCase):
         self.assertIn("/repo/tmp/dreamy-workspace.png", plan.frontend_smoke.command)
         self.assertIn("--evidence-screenshot", plan.frontend_smoke.command)
         self.assertIn("/repo/tmp/dreamy-evidence.png", plan.frontend_smoke.command)
+        self.assertIn("--report", plan.frontend_smoke.command)
 
     def test_dev_frontend_mode_skips_build_and_uses_vite_dev_server(self) -> None:
         repo_root = Path("/repo")
@@ -149,6 +150,33 @@ class StudioDeliveryCheckTest(unittest.TestCase):
 
         self.assertEqual(summary["reports"]["frontendSmoke"]["summary"]["total"], 22)
         self.assertEqual(summary["reports"]["frontendSmoke"]["checks"][0]["id"], "dispatch-session-started")
+
+    def test_create_delivery_summary_prefers_frontend_smoke_report_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            frontend_report_path = Path(temp_dir) / "frontend-smoke.json"
+            frontend_report_path.write_text(studio_delivery_check.json.dumps({
+                "status": "ok",
+                "summary": {"total": 32, "passed": 32, "failed": 0, "consoleErrors": 0},
+                "checks": [{"id": "studio-return-restored", "ok": True}],
+            }), encoding="utf-8")
+
+            summary = studio_delivery_check.create_delivery_summary(
+                repo_root=Path("/repo"),
+                backend_port=19090,
+                frontend_port=15174,
+                artifacts_dir=Path("/repo/.studio-delivery-check"),
+                workspace_screenshot_path=Path("/repo/.studio-delivery-check/dreamy-workspace.png"),
+                evidence_screenshot_path=Path("/repo/.studio-delivery-check/dreamy-evidence.png"),
+                report_path=Path("/repo/.studio-delivery-check/summary.json"),
+                frontend_smoke_report_path=frontend_report_path,
+                steps=[
+                    studio_delivery_check.StepResult(id="frontend-smoke", ok=True, output='{"id":"truncated-check"}'),
+                ],
+            )
+
+            self.assertEqual(summary["reports"]["frontendSmoke"]["summary"]["total"], 32)
+            self.assertEqual(summary["reports"]["frontendSmoke"]["checks"][0]["id"], "studio-return-restored")
+            self.assertEqual(summary["artifacts"]["frontendSmokeReport"], str(frontend_report_path))
 
     def test_write_delivery_summary_creates_report_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

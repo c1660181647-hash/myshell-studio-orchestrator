@@ -27,6 +27,13 @@ export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'dispatch-batch-planned',
   'dispatch-session-started',
   'dispatch-next-target-ready',
+  'dispatch-navigation-target-selected',
+  'dispatch-selected-batch-planned',
+  'dispatch-selected-session-started',
+  'dispatch-target-opened',
+  'studio-return-dock-visible',
+  'studio-return-restored',
+  'dispatch-target-visited',
   'open-evidence-drawer',
   'delivery-evidence',
   'page-selector',
@@ -121,6 +128,7 @@ function parseArgs(argv) {
     screenshotPath: defaultEvidenceScreenshot,
     workspaceScreenshotPath: path.join(defaultScreenshotDir, 'dreamy-workspace.png'),
     evidenceScreenshotPath: defaultEvidenceScreenshot,
+    reportPath: process.env.STUDIO_FRONTEND_SMOKE_REPORT || '',
     allowConsoleErrors: false,
     headed: false,
   };
@@ -144,6 +152,9 @@ function parseArgs(argv) {
     } else if (arg === '--evidence-screenshot') {
       args.evidenceScreenshotPath = next;
       args.screenshotPath = next;
+      index += 1;
+    } else if (arg === '--report') {
+      args.reportPath = next;
       index += 1;
     } else if (arg === '--no-screenshot') {
       args.screenshotPath = '';
@@ -176,6 +187,7 @@ function usage() {
     '  --screenshot <path>           Legacy alias for --evidence-screenshot',
     '  --workspace-screenshot <path> Canvas workspace screenshot path',
     '  --evidence-screenshot <path>  Delivery Evidence drawer screenshot path',
+    '  --report <path>               Write the full smoke JSON report to a file',
     '  --no-screenshot               Skip screenshot capture',
     '  --allow-console-errors        Record console errors without failing the smoke',
     '  --headed                      Launch a visible browser',
@@ -199,7 +211,7 @@ async function checkVisible(checks, page, id, label, locator, timeoutMs) {
 async function clickVisible(checks, page, id, label, locator, timeoutMs) {
   try {
     await locator.first().waitFor({ state: 'visible', timeout: timeoutMs });
-    await locator.first().click();
+    await locator.first().click({ timeout: timeoutMs });
     checks.push({ id, label, ok: true });
   } catch (error) {
     checks.push({
@@ -240,7 +252,7 @@ async function clickEnabled(checks, page, id, label, locator, timeoutMs) {
     await checkEnabled(checks, page, id, label, target, timeoutMs);
     const recorded = checks.find((check) => check.id === id);
     if (!recorded?.ok) return;
-    await target.click();
+    await target.click({ timeout: timeoutMs });
   } catch (error) {
     checks.push({
       id,
@@ -303,15 +315,32 @@ export async function runStudioFrontendSmoke(options = {}) {
     await checkVisible(checks, page, 'footer-evidence', 'Evidence footer control', page.getByRole('button', { name: /evidence/i }), timeoutMs);
     await checkVisible(checks, page, 'footer-plan-remaining', 'Plan remaining footer control', page.getByRole('button', { name: /plan remaining/i }), timeoutMs);
     await checkVisible(checks, page, 'footer-start-queue', 'Start queue footer control', page.getByRole('button', { name: /start queue/i }), timeoutMs);
-    await clickEnabled(checks, page, 'dispatch-plan-remaining-click', 'Click Plan Remaining', page.getByRole('button', { name: /plan remaining/i }), timeoutMs);
-    await checkEnabled(checks, page, 'dispatch-batch-planned', 'Dispatch batch planned and queue start enabled', page.getByRole('button', { name: /start queue/i }), timeoutMs);
-    await clickEnabled(checks, page, 'dispatch-start-queue-click', 'Click Start Queue', page.getByRole('button', { name: /start queue/i }), timeoutMs);
     await captureScreenshot(page, screenshotPaths.workspaceScreenshotPath);
 
     await clickVisible(checks, page, 'open-evidence-drawer', 'Open evidence drawer', page.getByRole('button', { name: /evidence/i }), timeoutMs);
     await checkVisible(checks, page, 'delivery-evidence', 'Delivery Evidence drawer', page.getByText('Delivery Evidence'), timeoutMs);
+    await clickVisible(
+      checks,
+      page,
+      'dispatch-navigation-target-selected',
+      'Select Explore navigation target',
+      page.getByLabel(/include explore in selected dispatch batch/i),
+      timeoutMs,
+    );
+    await clickEnabled(checks, page, 'dispatch-plan-selected-click', 'Click Plan Selected', page.getByRole('button', { name: /plan selected/i }), timeoutMs);
+    await checkVisible(checks, page, 'dispatch-batch-planned', 'Dispatch batch planned', page.getByText(/Batch (ready|planned)/i), timeoutMs);
+    await checkEnabled(checks, page, 'dispatch-selected-batch-planned', 'Selected dispatch batch planned', page.getByRole('button', { name: /start selected/i }), timeoutMs);
+    await clickEnabled(checks, page, 'dispatch-start-selected-click', 'Click Start Selected', page.getByRole('button', { name: /start selected/i }), timeoutMs);
     await checkVisible(checks, page, 'dispatch-session-started', 'Dispatch session started', page.getByText(/Queue active/i), timeoutMs);
+    await checkVisible(checks, page, 'dispatch-selected-session-started', 'Selected dispatch session started', page.getByText(/Queue active/i), timeoutMs);
     await checkEnabled(checks, page, 'dispatch-next-target-ready', 'Next dispatch target is ready', page.getByRole('button', { name: /open next|run next/i }), timeoutMs);
+    await clickEnabled(checks, page, 'dispatch-open-next-click', 'Click Open Next', page.getByRole('button', { name: /open next/i }), timeoutMs);
+    await checkVisible(checks, page, 'dispatch-target-opened', 'Dispatch target page opened', page.getByRole('button', { name: /return to studio/i }), timeoutMs);
+    await checkVisible(checks, page, 'studio-return-dock-visible', 'Studio return dock is visible', page.getByRole('button', { name: /return to studio/i }), timeoutMs);
+    await clickVisible(checks, page, 'studio-return-click', 'Click Return to Studio', page.getByRole('button', { name: /return to studio/i }), timeoutMs);
+    await checkVisible(checks, page, 'studio-return-restored', 'Studio restored after target navigation', page.getByText('Dreamy Studio').first(), timeoutMs);
+    await clickVisible(checks, page, 'reopen-evidence-drawer', 'Reopen evidence drawer after return', page.getByRole('button', { name: /evidence/i }), timeoutMs);
+    await checkVisible(checks, page, 'dispatch-target-visited', 'Dispatch target marked visited after return', page.getByText(/Focus Explore visited|1 visited/i), timeoutMs);
     await checkVisible(checks, page, 'page-selector', 'Page selector', page.getByLabel('Studio page adapter').last(), timeoutMs);
     await checkVisible(checks, page, 'agent-selector', 'Agent selector', page.getByLabel('Studio agent').last(), timeoutMs);
     await checkVisible(checks, page, 'page-registry', 'Page Registry section', page.getByText('Page Registry'), timeoutMs);
@@ -351,6 +380,10 @@ async function main() {
     return;
   }
   const summary = await runStudioFrontendSmoke(args);
+  if (args.reportPath) {
+    await fs.mkdir(path.dirname(args.reportPath), { recursive: true });
+    await fs.writeFile(args.reportPath, `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+  }
   console.log(JSON.stringify(summary, null, 2));
   if (summary.status !== 'ok') {
     process.exitCode = 1;
