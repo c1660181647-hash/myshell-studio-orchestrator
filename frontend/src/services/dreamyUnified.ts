@@ -1210,8 +1210,16 @@ export async function fetchStudioDispatchSessions(options: {
   return body.sessions || [];
 }
 
-export async function fetchStudioDispatchSession(sessionId: string): Promise<StudioDispatchSession> {
-  const response = await fetch(getStudioRootEndpoint(`/api/studio/dispatch-sessions/${encodeURIComponent(sessionId)}`));
+export async function fetchStudioDispatchSession(
+  sessionId: string,
+  options: { targetId?: string } = {},
+): Promise<StudioDispatchSession> {
+  const params = new URLSearchParams();
+  if (options.targetId) params.set('target_id', options.targetId);
+  const query = params.toString();
+  const response = await fetch(
+    getStudioRootEndpoint(`/api/studio/dispatch-sessions/${encodeURIComponent(sessionId)}${query ? `?${query}` : ''}`),
+  );
   if (!response.ok) throw new Error(`Studio dispatch session ${response.status}: ${response.statusText}`);
   return response.json();
 }

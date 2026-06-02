@@ -597,6 +597,19 @@ function artifactHref(artifact: StudioHandoffArtifact): string {
   return getStudioRootEndpoint(artifact.url || artifact.endpoint);
 }
 
+function readDispatchSessionRestoreParams(): { sessionId?: string; targetId?: string } {
+  if (typeof window === 'undefined') return {};
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return {
+      sessionId: params.get('dispatch_session_id') || params.get('session_id') || undefined,
+      targetId: params.get('target_id') || params.get('dispatch_target_id') || undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
 function StudioArtifactLinks({
   artifacts,
   limit = 4,
@@ -958,12 +971,16 @@ function StudioDispatchBatchStrip({
 }) {
   const summary = plan?.summary;
   const sessionSummary = session?.summary;
+  const focusedTarget =
+    session?.focusedTarget ||
+    (session?.focusedTargetId ? session.targets.find((target) => target.id === session.focusedTargetId) : null);
   const nextNavigationTarget =
     session?.targets.find((target) => target.status === 'pending' && target.executor === 'navigation' && target.navigationPath) ||
     plan?.targets.find((target) => target.executor === 'navigation' && target.navigationPath);
   const visitedTarget = session?.targets.find((target) => target.status === 'visited');
   const skipped = plan?.skippedTargets || [];
   const visibleTargets = (session?.targets || plan?.targets || []).slice(0, 5);
+  const focusedTargetVisible = focusedTarget && !visibleTargets.some((target) => target.id === focusedTarget.id);
 
   return (
     <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
@@ -1039,6 +1056,11 @@ function StudioDispatchBatchStrip({
       )}
       {sessionSummary && (
         <>
+          {focusedTarget && (
+            <Pill tone={focusedTarget.status === 'completed' ? 'success' : focusedTarget.status === 'error' ? 'danger' : 'hot'}>
+              {`Focus ${focusedTarget.pageName} ${focusedTarget.status}`}
+            </Pill>
+          )}
           <Pill tone={sessionSummary.pending ? 'hot' : 'default'}>{`${sessionSummary.pending} pending`}</Pill>
           <Pill tone={sessionSummary.visited ? 'hot' : 'default'}>{`${sessionSummary.visited} visited`}</Pill>
           <Pill tone={sessionSummary.completed ? 'success' : 'default'}>{`${sessionSummary.completed} done`}</Pill>
@@ -1057,6 +1079,17 @@ function StudioDispatchBatchStrip({
           <span className="text-Cr-text-subtlest-v2">{String('status' in target ? target.status : target.executor)}</span>
         </span>
       ))}
+      {focusedTargetVisible && (
+        <span
+          key={focusedTarget.id}
+          title={focusedTarget.navigationPath || focusedTarget.dispatchMessage || focusedTarget.recommendedAction}
+          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2"
+        >
+          <GitBranch size={12} className="text-dreamy-brand-hot-v2" />
+          <span className="max-w-[120px] truncate">{focusedTarget.pageName}</span>
+          <span className="text-Cr-text-subtlest-v2">{focusedTarget.status}</span>
+        </span>
+      )}
       {skipped.slice(0, 4).map((target) => (
         <span
           key={target.id}
@@ -2208,6 +2241,7 @@ export default function Dreamy() {
   const { energy, refresh } = useEnergy();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const restoredDispatchUrlRef = useRef('');
   const [mode, setMode] = useState<StudioMode>('player');
   const [activeTab, setActiveTab] = useState<TabKey>('chat');
   const [prompt, setPrompt] = useState('');
@@ -2345,6 +2379,25 @@ export default function Dreamy() {
     setCoverageReport(snapshot.reports.coverage);
     setDeliveryReport(snapshot.reports.deliveryReport || null);
   }, []);
+
+  const applyDispatchSession = useCallback((session: StudioDispatchSession) => {
+    setDispatchSession(session);
+    setDispatchBatchPlan({
+      status: session.planStatus || session.status,
+      readyForDispatch: session.readyForDispatch,
+      checkedAt: session.checkedAt,
+      projectId: session.projectId,
+      sourceSegmentId: session.sourceSegmentId,
+      sourceMediaUrl: session.sourceMediaUrl,
+      summary: session.summary,
+      targets: session.targets,
+      skippedTargets: session.skippedTargets,
+      matrix: session.matrix,
+      handoffSnapshot: session.handoffSnapshot,
+    });
+    if (session.projectId) saveLastStudioProjectId(session.projectId);
+    if (session.handoffSnapshot) applyHandoffSnapshot(session.handoffSnapshot);
+  }, [applyHandoffSnapshot]);
 
   const applyDeliveryAudit = useCallback((audit: StudioDeliveryAudit) => {
     setDeliveryAudit(audit);
@@ -2539,22 +2592,7 @@ export default function Dreamy() {
         sourceSegmentId: studioContextSourceSegmentId,
         limit: 50,
       });
-      setDispatchSession(session);
-      setDispatchBatchPlan({
-        status: session.planStatus || session.status,
-        readyForDispatch: session.readyForDispatch,
-        checkedAt: session.checkedAt,
-        projectId: session.projectId,
-        sourceSegmentId: session.sourceSegmentId,
-        sourceMediaUrl: session.sourceMediaUrl,
-        summary: session.summary,
-        targets: session.targets,
-        skippedTargets: session.skippedTargets,
-        matrix: session.matrix,
-        handoffSnapshot: session.handoffSnapshot,
-      });
-      if (session.projectId) saveLastStudioProjectId(session.projectId);
-      applyHandoffSnapshot(session.handoffSnapshot);
+      applyDispatchSession(session);
       setMessages((prev) => [
         ...prev,
         {
@@ -2578,7 +2616,7 @@ export default function Dreamy() {
     } finally {
       setDispatchSessionRunning(false);
     }
-  }, [applyHandoffSnapshot, dispatchSessionRunning, project?.projectId, studioContextSourceSegmentId]);
+  }, [applyDispatchSession, dispatchSessionRunning, project?.projectId, studioContextSourceSegmentId]);
 
   const completeDispatchSessionTarget = useCallback(
     async (target: StudioDispatchSessionTarget) => {
@@ -2832,23 +2870,47 @@ export default function Dreamy() {
 
   useEffect(() => {
     let cancelled = false;
+    const restoreParams = readDispatchSessionRestoreParams();
     const savedSession = readStudioDispatchSession();
     const projectId = project?.projectId || savedSession?.projectId || readLastStudioProjectId() || undefined;
     const restore = async () => {
+      if (restoreParams.sessionId) {
+        const session = await fetchStudioDispatchSession(restoreParams.sessionId, { targetId: restoreParams.targetId });
+        if (!cancelled) {
+          applyDispatchSession(session);
+          const restoreKey = `${session.sessionId}:${session.focusedTargetId || restoreParams.targetId || ''}`;
+          if (restoredDispatchUrlRef.current !== restoreKey) {
+            restoredDispatchUrlRef.current = restoreKey;
+            const focusedTarget = session.focusedTarget || session.targets.find((target) => target.id === session.focusedTargetId);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: makeId('assistant'),
+                role: 'assistant',
+                content: focusedTarget
+                  ? `Dispatch queue restored at ${focusedTarget.pageName} (${focusedTarget.status}).`
+                  : `Dispatch queue restored for ${session.sessionId}.`,
+                createdAt: nowIso(),
+              },
+            ]);
+          }
+        }
+        return;
+      }
       if (savedSession?.sessionId) {
-        const session = await fetchStudioDispatchSession(savedSession.sessionId);
-        if (!cancelled) setDispatchSession(session);
+        const session = await fetchStudioDispatchSession(savedSession.sessionId, { targetId: savedSession.targetId });
+        if (!cancelled) applyDispatchSession(session);
         return;
       }
       if (!projectId) return;
       const [latestSession] = await fetchStudioDispatchSessions({ projectId, limit: 1 });
-      if (!cancelled && latestSession) setDispatchSession(latestSession);
+      if (!cancelled && latestSession) applyDispatchSession(latestSession);
     };
     void restore().catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [project?.projectId]);
+  }, [applyDispatchSession, project?.projectId]);
 
   useEffect(() => {
     if (!project?.projectId) {
