@@ -15,6 +15,29 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const frontendRoot = path.resolve(scriptDir, '..');
 const currentFile = fileURLToPath(import.meta.url);
 
+export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
+  'studio-title',
+  'canvas-mode',
+  'layers-panel',
+  'inspector-panel',
+  'canvas-generate',
+  'footer-evidence',
+  'footer-plan-remaining',
+  'footer-start-queue',
+  'dispatch-batch-planned',
+  'dispatch-session-started',
+  'dispatch-next-target-ready',
+  'open-evidence-drawer',
+  'delivery-evidence',
+  'page-selector',
+  'agent-selector',
+  'page-registry',
+  'dispatch-matrix',
+  'dispatch-queue',
+  'audit-json',
+  'no-error-boundary',
+]);
+
 export function normalizeFrontendBaseUrl(value) {
   const trimmed = String(value || '').trim();
   if (!trimmed) throw new Error('Frontend URL is required');
@@ -52,8 +75,19 @@ export function createSmokeSummary({
   workspaceScreenshotPath = '',
   evidenceScreenshotPath = '',
   allowConsoleErrors = false,
+  requiredCheckIds = [],
 }) {
-  const failures = checks.filter((check) => !check.ok);
+  const recordedCheckIds = new Set(checks.map((check) => check.id));
+  const missingRequiredChecks = requiredCheckIds
+    .filter((id) => !recordedCheckIds.has(id))
+    .map((id) => ({
+      id,
+      label: `Required smoke check: ${id}`,
+      ok: false,
+      message: 'Required smoke check was not recorded',
+    }));
+  const allChecks = [...checks, ...missingRequiredChecks];
+  const failures = allChecks.filter((check) => !check.ok);
   const blockingConsoleErrors = allowConsoleErrors ? [] : consoleErrors;
   const evidenceScreenshot = evidenceScreenshotPath || screenshotPath;
   const workspaceScreenshot = workspaceScreenshotPath || '';
@@ -67,12 +101,12 @@ export function createSmokeSummary({
       evidence: evidenceScreenshot,
     },
     summary: {
-      total: checks.length,
-      passed: checks.filter((check) => check.ok).length,
+      total: allChecks.length,
+      passed: allChecks.filter((check) => check.ok).length,
       failed: failures.length,
       consoleErrors: consoleErrors.length,
     },
-    checks,
+    checks: allChecks,
     failures,
     consoleErrors,
   };
@@ -177,6 +211,46 @@ async function clickVisible(checks, page, id, label, locator, timeoutMs) {
   }
 }
 
+async function checkEnabled(checks, page, id, label, locator, timeoutMs) {
+  const target = locator.first();
+  const started = Date.now();
+  try {
+    await target.waitFor({ state: 'visible', timeout: timeoutMs });
+    while (Date.now() - started < timeoutMs) {
+      if (await target.isEnabled().catch(() => false)) {
+        checks.push({ id, label, ok: true });
+        return;
+      }
+      await page.waitForTimeout(100);
+    }
+    checks.push({ id, label, ok: false, message: 'Control did not become enabled' });
+  } catch (error) {
+    checks.push({
+      id,
+      label,
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function clickEnabled(checks, page, id, label, locator, timeoutMs) {
+  const target = locator.first();
+  try {
+    await checkEnabled(checks, page, id, label, target, timeoutMs);
+    const recorded = checks.find((check) => check.id === id);
+    if (!recorded?.ok) return;
+    await target.click();
+  } catch (error) {
+    checks.push({
+      id,
+      label,
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function captureScreenshot(page, screenshotPath) {
   if (!screenshotPath) return;
   await fs.mkdir(path.dirname(screenshotPath), { recursive: true });
@@ -229,10 +303,15 @@ export async function runStudioFrontendSmoke(options = {}) {
     await checkVisible(checks, page, 'footer-evidence', 'Evidence footer control', page.getByRole('button', { name: /evidence/i }), timeoutMs);
     await checkVisible(checks, page, 'footer-plan-remaining', 'Plan remaining footer control', page.getByRole('button', { name: /plan remaining/i }), timeoutMs);
     await checkVisible(checks, page, 'footer-start-queue', 'Start queue footer control', page.getByRole('button', { name: /start queue/i }), timeoutMs);
+    await clickEnabled(checks, page, 'dispatch-plan-remaining-click', 'Click Plan Remaining', page.getByRole('button', { name: /plan remaining/i }), timeoutMs);
+    await checkEnabled(checks, page, 'dispatch-batch-planned', 'Dispatch batch planned and queue start enabled', page.getByRole('button', { name: /start queue/i }), timeoutMs);
+    await clickEnabled(checks, page, 'dispatch-start-queue-click', 'Click Start Queue', page.getByRole('button', { name: /start queue/i }), timeoutMs);
     await captureScreenshot(page, screenshotPaths.workspaceScreenshotPath);
 
     await clickVisible(checks, page, 'open-evidence-drawer', 'Open evidence drawer', page.getByRole('button', { name: /evidence/i }), timeoutMs);
     await checkVisible(checks, page, 'delivery-evidence', 'Delivery Evidence drawer', page.getByText('Delivery Evidence'), timeoutMs);
+    await checkVisible(checks, page, 'dispatch-session-started', 'Dispatch session started', page.getByText(/Queue active/i), timeoutMs);
+    await checkEnabled(checks, page, 'dispatch-next-target-ready', 'Next dispatch target is ready', page.getByRole('button', { name: /open next|run next/i }), timeoutMs);
     await checkVisible(checks, page, 'page-selector', 'Page selector', page.getByLabel('Studio page adapter').last(), timeoutMs);
     await checkVisible(checks, page, 'agent-selector', 'Agent selector', page.getByLabel('Studio agent').last(), timeoutMs);
     await checkVisible(checks, page, 'page-registry', 'Page Registry section', page.getByText('Page Registry'), timeoutMs);
@@ -261,6 +340,7 @@ export async function runStudioFrontendSmoke(options = {}) {
     workspaceScreenshotPath: screenshotPaths.workspaceScreenshotPath,
     evidenceScreenshotPath: screenshotPaths.evidenceScreenshotPath,
     allowConsoleErrors: options.allowConsoleErrors,
+    requiredCheckIds: REQUIRED_STUDIO_CHECK_IDS,
   });
 }
 

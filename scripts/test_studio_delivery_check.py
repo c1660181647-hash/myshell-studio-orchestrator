@@ -116,6 +116,40 @@ class StudioDeliveryCheckTest(unittest.TestCase):
         self.assertEqual(summary["artifacts"]["evidenceScreenshot"], "/repo/.studio-delivery-check/dreamy-evidence.png")
         self.assertEqual(summary["artifacts"]["screenshot"], "/repo/.studio-delivery-check/dreamy-evidence.png")
 
+    def test_create_delivery_summary_embeds_frontend_smoke_report(self) -> None:
+        frontend_output = """
+> fantasia-miniapp@1.0.0 smoke:studio
+> node scripts/studio-frontend-smoke.mjs
+
+{
+  "status": "ok",
+  "summary": {
+    "total": 22,
+    "passed": 22,
+    "failed": 0,
+    "consoleErrors": 0
+  },
+  "checks": [
+    {"id": "dispatch-session-started", "ok": true}
+  ]
+}
+"""
+        summary = studio_delivery_check.create_delivery_summary(
+            repo_root=Path("/repo"),
+            backend_port=19090,
+            frontend_port=15174,
+            artifacts_dir=Path("/repo/.studio-delivery-check"),
+            workspace_screenshot_path=Path("/repo/.studio-delivery-check/dreamy-workspace.png"),
+            evidence_screenshot_path=Path("/repo/.studio-delivery-check/dreamy-evidence.png"),
+            report_path=Path("/repo/.studio-delivery-check/summary.json"),
+            steps=[
+                studio_delivery_check.StepResult(id="frontend-smoke", ok=True, output=frontend_output),
+            ],
+        )
+
+        self.assertEqual(summary["reports"]["frontendSmoke"]["summary"]["total"], 22)
+        self.assertEqual(summary["reports"]["frontendSmoke"]["checks"][0]["id"], "dispatch-session-started")
+
     def test_write_delivery_summary_creates_report_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             report_path = Path(temp_dir) / "nested" / "summary.json"

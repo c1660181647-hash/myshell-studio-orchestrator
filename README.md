@@ -161,7 +161,7 @@ One-command local handoff check:
 python scripts/studio_delivery_check.py
 ```
 
-This starts a temporary backend on a free local port, builds the frontend with that backend URL, serves the production build through `npm run preview`, runs the backend API smoke and frontend browser smoke, writes logs, a Canvas workspace screenshot, a Delivery Evidence drawer screenshot, and `.studio-delivery-check/summary.json`, prints the same JSON summary, and cleans up the processes it started. Use `--frontend-mode dev` for a faster development-server check, or `--artifacts-dir` / `--report` to place handoff evidence somewhere else.
+This starts a temporary backend on a free local port, builds the frontend with that backend URL, serves the production build through `npm run preview`, runs the backend API smoke and frontend browser smoke, writes logs, a Canvas workspace screenshot, a Delivery Evidence drawer screenshot, and `.studio-delivery-check/summary.json`, prints the same JSON summary, and cleans up the processes it started. The frontend smoke also exercises `Plan Remaining` → `Start Queue` and records the machine-readable `reports.frontendSmoke` check list, including queue-active and next-target readiness. Use `--frontend-mode dev` for a faster development-server check, or `--artifacts-dir` / `--report` to place handoff evidence somewhere else.
 
 Frontend:
 

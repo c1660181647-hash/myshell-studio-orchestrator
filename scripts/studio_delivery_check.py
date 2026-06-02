@@ -306,6 +306,36 @@ def stop_process(process: subprocess.Popen[str], handle: Any) -> None:
         handle.close()
 
 
+def extract_json_object_from_output(output: str) -> dict[str, Any] | None:
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(output or ""):
+        if character != "{":
+            continue
+        try:
+            candidate, end_index = decoder.raw_decode(output[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict) and not output[index + end_index :].strip():
+            return candidate
+        if isinstance(candidate, dict):
+            return candidate
+    return None
+
+
+def build_step_reports(steps: list[StepResult]) -> dict[str, Any]:
+    reports: dict[str, Any] = {}
+    for step in steps:
+        if step.id == "frontend-smoke":
+            frontend_smoke = extract_json_object_from_output(step.output)
+            if frontend_smoke:
+                reports["frontendSmoke"] = frontend_smoke
+        elif step.id == "backend-smoke":
+            backend_smoke = extract_json_object_from_output(step.output)
+            if backend_smoke:
+                reports["backendSmoke"] = backend_smoke
+    return reports
+
+
 def create_delivery_summary(
     repo_root: Path,
     backend_port: int,
@@ -318,6 +348,7 @@ def create_delivery_summary(
     frontend_mode: str = DEFAULT_FRONTEND_MODE,
 ) -> dict[str, Any]:
     failures = [step.to_json() for step in steps if not step.ok]
+    reports = build_step_reports(steps)
     return {
         "status": "failed" if failures else "ok",
         "checkedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -340,6 +371,7 @@ def create_delivery_summary(
             "failed": len(failures),
         },
         "steps": [step.to_json() for step in steps],
+        "reports": reports,
         "failures": failures,
     }
 

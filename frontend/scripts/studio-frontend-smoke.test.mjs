@@ -6,6 +6,7 @@ import {
   createStudioSmokeInitScript,
   createSmokeSummary,
   normalizeFrontendBaseUrl,
+  REQUIRED_STUDIO_CHECK_IDS,
 } from './studio-frontend-smoke.mjs';
 
 test('buildStudioSmokeUrl opens the Dreamy test route from a bare dev server URL', () => {
@@ -53,4 +54,23 @@ test('createStudioSmokeInitScript bypasses the production age gate for smoke run
   assert.match(script, /dp_age_gate_passed/);
   assert.match(script, /localStorage\.setItem/);
   assert.match(script, /'1'/);
+});
+
+test('createSmokeSummary fails when required dispatch queue interaction checks are missing', () => {
+  const summary = createSmokeSummary({
+    frontendUrl: 'http://127.0.0.1:5174',
+    checkedAt: '2026-06-02T00:00:00.000Z',
+    checks: [{ id: 'studio-title', label: 'Studio title', ok: true }],
+    requiredCheckIds: REQUIRED_STUDIO_CHECK_IDS.filter((id) => (
+      id === 'dispatch-batch-planned' ||
+      id === 'dispatch-session-started' ||
+      id === 'dispatch-next-target-ready'
+    )),
+  });
+
+  assert.equal(summary.status, 'failed');
+  assert.deepEqual(
+    summary.failures.map((failure) => failure.id),
+    ['dispatch-batch-planned', 'dispatch-session-started', 'dispatch-next-target-ready'],
+  );
 });
