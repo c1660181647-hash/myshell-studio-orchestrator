@@ -151,6 +151,8 @@ Important backend settings:
 - `MYSHELL_COOKIE_INJECTION_STATUS_PATH` - Optional path for the Chrome cookie injection result JSON. Defaults to backend `.studio/cookie-injection-status.json`.
 - `STUDIO_ROUTER_MODE=local|gemini` - local catalog matching by default; Gemini requires `GEMINI_API_KEY`.
 
+MyShell Art is marked ready only when cookies are configured, cookie injection succeeded, and the current Chrome CDP endpoint is reachable. A stale success file with an offline CDP is reported as `auth_missing` with CDP evidence instead of a successful adapter.
+
 ## Verification
 
 Frontend:

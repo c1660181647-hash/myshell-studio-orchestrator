@@ -508,6 +508,67 @@ class StudioApiTest(unittest.TestCase):
         self.assertFalse(art["dispatchReady"])
         self.assertEqual(art["dispatchStatus"], "auth_missing")
 
+    def test_myshell_art_auth_requires_live_chrome_cdp_after_cookie_injection_success(self) -> None:
+        import studio_runtime
+
+        requested_urls: list[str] = []
+
+        class FakeResponse:
+            status_code = 503
+
+        class FakeClient:
+            def __init__(self, timeout: float) -> None:
+                self.timeout = timeout
+
+            def __enter__(self) -> "FakeClient":
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            def get(self, url: str) -> FakeResponse:
+                requested_urls.append(url)
+                return FakeResponse()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            status_path = Path(tmp_dir) / "cookie-injection-status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "status": "success",
+                        "checkedAt": "2026-06-02T00:00:00Z",
+                        "cookieCount": 1,
+                        "message": "Cookie injection succeeded",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "MYSHELL_COOKIES": json.dumps(
+                            [{"name": "token", "value": "redacted", "domain": ".myshell.ai"}]
+                        ),
+                        "MYSHELL_COOKIE_INJECTION_STATUS_PATH": str(status_path),
+                        "MYSHELL_CDP_URL": "http://cdp.internal:9333/",
+                    },
+                ),
+                patch.object(studio_runtime.httpx, "Client", FakeClient),
+            ):
+                pages = self.client.get("/api/pages")
+
+        self.assertEqual(requested_urls, ["http://cdp.internal:9333/json"])
+        self.assertEqual(pages.status_code, 200)
+        page_by_id = {page["id"]: page for page in pages.json()["pages"]}
+        art = page_by_id["myshell-art"]
+        self.assertEqual(art["authStatus"]["status"], "auth_missing")
+        self.assertEqual(art["authStatus"]["injectionStatus"], "ready")
+        self.assertEqual(art["authStatus"]["cdpStatus"], "unavailable")
+        self.assertIn("Chrome CDP", art["authStatus"]["message"])
+        self.assertFalse(art["dispatchReady"])
+        self.assertEqual(art["dispatchStatus"], "auth_missing")
+
     def test_myshell_art_run_evidence_reports_cookie_injection_failure(self) -> None:
         failure_message = "Cookie injection did not reveal a logged-in energy display"
         with tempfile.TemporaryDirectory() as tmp_dir:

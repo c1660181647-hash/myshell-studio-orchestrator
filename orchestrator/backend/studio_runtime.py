@@ -100,6 +100,30 @@ async def chrome_cdp_ready() -> bool:
         return False
 
 
+def chrome_cdp_status(timeout: float = 0.75) -> dict[str, Any]:
+    url = cdp_url()
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            response = client.get(f"{url}/json")
+    except Exception as exc:
+        return {
+            "status": "unavailable",
+            "url": url,
+            "message": f"Chrome CDP is unavailable: {exc}",
+        }
+    if response.status_code != 200:
+        return {
+            "status": "unavailable",
+            "url": url,
+            "message": f"Chrome CDP returned HTTP {response.status_code}",
+        }
+    return {
+        "status": "ok",
+        "url": url,
+        "message": "Chrome CDP is reachable",
+    }
+
+
 def cookie_injection_status(has_cookies: bool, cookie_source: dict[str, Any] | None = None) -> dict[str, Any]:
     status_path = os.environ.get("MYSHELL_COOKIE_INJECTION_STATUS_PATH") or DEFAULT_COOKIE_INJECTION_STATUS_PATH
     cookie_source = cookie_source or cookie_source_status()
@@ -183,16 +207,29 @@ def adapter_auth_status(page_id: str) -> dict[str, Any]:
         has_cookies = cookie_source.get("status") == "ready"
         injection_status = cookie_injection_status(has_cookies, cookie_source)
         injection_state = str(injection_status.get("status") or "")
-        ready = has_cookies and injection_state == "ready"
+        cdp_status = (
+            chrome_cdp_status()
+            if has_cookies and injection_state == "ready"
+            else {
+                "status": "not_checked",
+                "url": cdp_url(),
+                "message": "Chrome CDP is checked after cookie injection succeeds",
+            }
+        )
+        cdp_state = str(cdp_status.get("status") or "unknown")
+        ready = has_cookies and injection_state == "ready" and cdp_state == "ok"
+        message = str(injection_status.get("message") or "Set MYSHELL_COOKIES or myshell-cookies.json")
+        if ready:
+            message = "MyShell cookies are injected into Chrome and CDP is reachable"
+        elif has_cookies and injection_state == "ready":
+            message = str(cdp_status.get("message") or "Chrome CDP is unavailable")
         return {
             "status": "ready" if ready else "auth_missing",
             "mode": "browser-cookies",
-            "message": (
-                "MyShell cookies are injected into Chrome"
-                if ready
-                else str(injection_status.get("message") or "Set MYSHELL_COOKIES or myshell-cookies.json")
-            ),
+            "message": message,
             "injectionStatus": injection_state,
+            "cdpStatus": cdp_state,
+            "cdpUrl": cdp_status.get("url", ""),
             "statusPath": injection_status.get("statusPath", ""),
         }
     return {

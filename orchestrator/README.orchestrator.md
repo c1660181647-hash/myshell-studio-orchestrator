@@ -49,7 +49,7 @@ google-chrome-stable --remote-debugging-port=9222 --user-data-dir=/tmp/myshell-c
 export MYSHELL_COOKIES='[{"name":"...","value":"...","domain":".myshell.ai"}]'
 ```
 
-The Cloud Run startup script writes the latest cookie injection result to `.studio/cookie-injection-status.json` by default; set `MYSHELL_COOKIE_INJECTION_STATUS_PATH` to use a different path. Without cookies, MyShell Art jobs are visible in Studio but stop as `auth_missing`. If cookies exist but injection fails, health/readiness report degraded cookie-injection evidence instead of marking the adapter ready.
+The Cloud Run startup script writes the latest cookie injection result to `.studio/cookie-injection-status.json` by default; set `MYSHELL_COOKIE_INJECTION_STATUS_PATH` to use a different path. Without cookies, MyShell Art jobs are visible in Studio but stop as `auth_missing`. If cookies exist but injection fails, health/readiness report degraded cookie-injection evidence instead of marking the adapter ready. If cookie injection succeeded but the current Chrome CDP endpoint is unavailable, the Art adapter still reports `auth_missing` with CDP evidence so stale status files cannot masquerade as a live browser session.
 
 ## Tests
 
