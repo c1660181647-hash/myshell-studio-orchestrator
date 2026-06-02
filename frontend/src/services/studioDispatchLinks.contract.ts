@@ -1,5 +1,7 @@
 import {
+  getStudioDispatchSelectionPageIds,
   getStudioDispatchTargetHref,
+  toggleStudioDispatchPageSelection,
   type KnownStudioApi,
   type StudioDispatchMatrixEntry,
 } from './dreamyUnified';
@@ -68,3 +70,15 @@ const dispatchTargetHrefContract = [
 ];
 
 void dispatchTargetHrefContract;
+
+const matrixEntries: StudioDispatchMatrixEntry[] = [
+  { ...navigationEntry, pageId: 'explore', pageName: 'Explore', navigationPath: '/' },
+  { ...navigationEntry, pageId: 'library-detail', pageName: 'Library Detail', navigationPath: '/library/studio-preview' },
+  { ...navigationEntry, pageId: 'profile', pageName: 'Profile', navigationPath: '/profile' },
+];
+
+const toggledSelectionContract = toggleStudioDispatchPageSelection(['profile'], 'library-detail');
+const selectedPageIdsContract = getStudioDispatchSelectionPageIds(matrixEntries, ['profile', 'missing-page', 'library-detail']);
+
+void toggledSelectionContract;
+void selectedPageIdsContract;

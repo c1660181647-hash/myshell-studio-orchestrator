@@ -249,6 +249,33 @@ export function getStudioDispatchTargetHref(target: StudioDispatchLinkTarget): s
   return path.startsWith('/') ? path : `/${path}`;
 }
 
+export function toggleStudioDispatchPageSelection(
+  selectedPageIds: readonly string[],
+  pageId: StudioApi | string,
+  force?: boolean,
+): string[] {
+  const id = String(pageId || '').trim();
+  const current = selectedPageIds.filter((item) => item.trim());
+  if (!id) return [...current];
+  const selected = new Set(current);
+  const shouldSelect = force ?? !selected.has(id);
+  if (shouldSelect) {
+    selected.add(id);
+    return current.includes(id) ? [...current] : [...current, id];
+  }
+  selected.delete(id);
+  return current.filter((item) => selected.has(item));
+}
+
+export function getStudioDispatchSelectionPageIds(
+  entries: readonly Pick<StudioDispatchMatrixEntry, 'pageId'>[],
+  selectedPageIds: readonly string[],
+): string[] {
+  const selected = new Set(selectedPageIds.map((pageId) => pageId.trim()).filter(Boolean));
+  if (!selected.size) return [];
+  return entries.map((entry) => String(entry.pageId)).filter((pageId) => selected.has(pageId));
+}
+
 export interface StudioPageAdapter {
   id: StudioApi;
   name: string;

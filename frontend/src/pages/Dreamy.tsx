@@ -60,6 +60,7 @@ import {
   fetchStudioReadiness,
   fetchStudioDispatchSession,
   fetchStudioDispatchSessions,
+  getStudioDispatchSelectionPageIds,
   getStudioDispatchTargetHref,
   getStudioRootEndpoint,
   planStudioDispatchBatch,
@@ -71,6 +72,7 @@ import {
   resolveStudioAssetUrl,
   streamStudioRun,
   submitDreamyMiniappJob,
+  toggleStudioDispatchPageSelection,
   updateStudioDispatchSessionTarget,
   verifyStudioCoverage,
 } from '../services/dreamyUnified';
@@ -1040,9 +1042,12 @@ function StudioDispatchBatchStrip({
   session,
   planning,
   sessionRunning,
+  selectedPageCount,
   onPlan,
   onPlanRemaining,
+  onPlanSelected,
   onStartSession,
+  onStartSelectedSession,
   onOpenTarget,
   onCompleteTarget,
   onErrorTarget,
@@ -1052,9 +1057,12 @@ function StudioDispatchBatchStrip({
   session: StudioDispatchSession | null;
   planning: boolean;
   sessionRunning: boolean;
+  selectedPageCount: number;
   onPlan: () => void;
   onPlanRemaining: () => void;
+  onPlanSelected: () => void;
   onStartSession: () => void;
+  onStartSelectedSession: () => void;
   onOpenTarget: (target: StudioDispatchBatchTarget | StudioDispatchSessionTarget) => void;
   onCompleteTarget: (target: StudioDispatchSessionTarget) => void;
   onErrorTarget: (target: StudioDispatchSessionTarget) => void;
@@ -1072,6 +1080,7 @@ function StudioDispatchBatchStrip({
   const skipped = plan?.skippedTargets || [];
   const visibleTargets = (session?.targets || plan?.targets || []).slice(0, 5);
   const focusedTargetVisible = focusedTarget && !visibleTargets.some((target) => target.id === focusedTarget.id);
+  const hasSelectedPages = selectedPageCount > 0;
 
   return (
     <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
@@ -1101,12 +1110,30 @@ function StudioDispatchBatchStrip({
       </button>
       <button
         type="button"
+        disabled={!hasSelectedPages || planning}
+        onClick={onPlanSelected}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <CheckCircle2 size={12} className={planning ? 'animate-pulse' : ''} />
+        Plan Selected
+      </button>
+      <button
+        type="button"
         disabled={sessionRunning}
         onClick={onStartSession}
         className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
       >
         <GitBranch size={12} className={sessionRunning ? 'animate-pulse' : ''} />
         Start Queue
+      </button>
+      <button
+        type="button"
+        disabled={!hasSelectedPages || sessionRunning}
+        onClick={onStartSelectedSession}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <GitBranch size={12} className={sessionRunning ? 'animate-pulse' : ''} />
+        Start Selected
       </button>
       <button
         type="button"
@@ -1153,8 +1180,10 @@ function StudioDispatchBatchStrip({
           <Pill tone={summary.skipped ? 'hot' : 'default'}>{`${summary.skipped} skipped`}</Pill>
           <Pill tone={summary.missingParams ? 'hot' : 'default'}>{`${summary.missingParams} missing params`}</Pill>
           {!!summary.coveredSkipped && <Pill tone="success">{`${summary.coveredSkipped} covered skipped`}</Pill>}
+          {hasSelectedPages && <Pill tone="hot">{`${selectedPageCount} selected`}</Pill>}
         </>
       )}
+      {!summary && hasSelectedPages && <Pill tone="hot">{`${selectedPageCount} selected`}</Pill>}
       {sessionSummary && (
         <>
           {focusedTarget && (
@@ -1209,21 +1238,31 @@ function StudioDispatchBatchStrip({
 function StudioDispatchMatrixPanel({
   matrix,
   selectedPageId,
+  selectedBatchPageIds,
   submitting,
   onSelectPage,
+  onToggleBatchPage,
+  onSelectReadyBatchPages,
+  onClearBatchPageSelection,
   onRunEntry,
   onCopyEntryLink,
 }: {
   matrix: StudioDispatchMatrix | null;
   selectedPageId: string;
+  selectedBatchPageIds: string[];
   submitting: boolean;
   onSelectPage: (pageId: string) => void;
+  onToggleBatchPage: (pageId: string) => void;
+  onSelectReadyBatchPages: (pageIds: string[]) => void;
+  onClearBatchPageSelection: () => void;
   onRunEntry: (entry: StudioDispatchMatrixEntry) => void;
   onCopyEntryLink: (entry: StudioDispatchMatrixEntry) => void;
 }) {
   const entries = matrix?.entries || [];
   if (!entries.length) return null;
   const summary = matrix?.summary;
+  const selectedBatchSet = new Set(selectedBatchPageIds);
+  const readyPageIds = entries.filter((entry) => entry.dispatchReady).map((entry) => String(entry.pageId));
 
   return (
     <div className="shrink-0 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">
@@ -1238,15 +1277,35 @@ function StudioDispatchMatrixPanel({
               <Pill tone={summary.ready === summary.total ? 'success' : 'hot'}>{`${summary.ready}/${summary.total} ready`}</Pill>
               <Pill tone={summary.missingParams ? 'hot' : 'default'}>{`${summary.missingParams} missing params`}</Pill>
               <Pill>{`${summary.navigation} nav`}</Pill>
+              <Pill tone={selectedBatchPageIds.length ? 'hot' : 'default'}>{`${selectedBatchPageIds.length} selected`}</Pill>
               {matrix?.sourceSegmentId && <Pill tone="success">source segment</Pill>}
             </>
           )}
+          <button
+            type="button"
+            disabled={!readyPageIds.length}
+            onClick={() => onSelectReadyBatchPages(readyPageIds)}
+            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+          >
+            <CheckCircle2 size={12} />
+            Select Ready
+          </button>
+          <button
+            type="button"
+            disabled={!selectedBatchPageIds.length}
+            onClick={onClearBatchPageSelection}
+            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+          >
+            <X size={12} />
+            Clear
+          </button>
         </div>
       </div>
       <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
         {entries.map((entry) => {
           const active = entry.pageId === selectedPageId;
           const entryHref = getStudioDispatchTargetHref(entry);
+          const selectedForBatch = selectedBatchSet.has(String(entry.pageId));
           const missingLabel = entry.missingRouteParams.length
             ? `Needs ${entry.missingRouteParams.join(', ')}`
             : '';
@@ -1260,14 +1319,18 @@ function StudioDispatchMatrixPanel({
                   : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 active:bg-Cr-beta-white-8-v2'
               }`}
             >
-              <button
-                type="button"
-                onClick={() => onSelectPage(entry.pageId)}
-                className="grid min-w-0 gap-2 text-left"
-                aria-label={`Select ${entry.pageName} dispatch target`}
-              >
+              <div className="grid min-w-0 gap-2 text-left">
                 <div className="flex min-w-0 items-center justify-between gap-2">
-                  <div className="min-w-0 truncate font-semibold text-Cr-text-default-v2">{entry.pageName}</div>
+                  <label className="flex min-w-0 items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedForBatch}
+                      onChange={() => onToggleBatchPage(String(entry.pageId))}
+                      aria-label={`Include ${entry.pageName} in selected dispatch batch`}
+                      className="h-3.5 w-3.5 shrink-0 accent-dreamy-brand-hot-v2"
+                    />
+                    <span className="min-w-0 truncate font-semibold text-Cr-text-default-v2">{entry.pageName}</span>
+                  </label>
                   <Pill tone={healthPillTone(entry.dispatchStatus)}>{entry.dispatchStatus}</Pill>
                 </div>
                 <div className="flex min-w-0 items-center justify-between gap-2 text-[11px] text-Cr-text-subtler-v2">
@@ -1282,8 +1345,16 @@ function StudioDispatchMatrixPanel({
                     </span>
                   )}
                 </div>
-              </button>
-              <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-1.5">
+              </div>
+              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onSelectPage(entry.pageId)}
+                  aria-label={`Focus ${entry.pageName} dispatch target`}
+                  className="inline-flex h-8 items-center justify-center rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-default-v2"
+                >
+                  Focus
+                </button>
                 <button
                   type="button"
                   disabled={!entry.dispatchReady || submitting}
@@ -2408,6 +2479,7 @@ export default function Dreamy() {
   const [deliveryAudit, setDeliveryAudit] = useState<StudioDeliveryAudit | null>(null);
   const [deliveryReport, setDeliveryReport] = useState<StudioProjectDeliveryReport | null>(null);
   const [dispatchMatrix, setDispatchMatrix] = useState<StudioDispatchMatrix | null>(null);
+  const [selectedDispatchPageIds, setSelectedDispatchPageIds] = useState<string[]>([]);
   const [coverageReport, setCoverageReport] = useState<StudioCoverageReport | null>(null);
   const [handoffSnapshot, setHandoffSnapshot] = useState<StudioHandoffSnapshot | null>(null);
   const [deliveryBundle, setDeliveryBundle] = useState<StudioDeliveryBundle | null>(null);
@@ -2453,6 +2525,10 @@ export default function Dreamy() {
   const previewDispatchMessage = dispatchPreview?.dispatchMessage || previewPage?.dispatchMessage || previewPage?.authStatus?.message;
   const previewMissingParams = dispatchPreview?.missingRouteParams || [];
   const previewNavigationPath = dispatchPreview?.navigationPath || previewPage?.appRoute || '';
+  const selectedDispatchBatchPageIds = useMemo(
+    () => getStudioDispatchSelectionPageIds(dispatchMatrix?.entries || [], selectedDispatchPageIds),
+    [dispatchMatrix?.entries, selectedDispatchPageIds],
+  );
   const pageOptions = useMemo(
     () => (pages.length ? pages : [{ id: 'dreamy-miniapp', name: 'Dreamy Miniapp' } as StudioPageAdapter]),
     [pages],
@@ -2681,14 +2757,16 @@ export default function Dreamy() {
     }
   }, [applyHandoffSnapshot, deliveryBundleLoading, project?.projectId, studioContextSourceSegmentId]);
 
-  const planDispatchBatch = useCallback(async (options: { excludeCovered?: boolean } = {}) => {
+  const planDispatchBatch = useCallback(async (options: { excludeCovered?: boolean; pageIds?: string[] } = {}) => {
     if (dispatchBatchPlanning) return;
+    const pageIds = options.pageIds?.length ? options.pageIds : undefined;
     setDispatchBatchPlanning(true);
     try {
       const projectId = project?.projectId || readLastStudioProjectId() || undefined;
       const plan = await planStudioDispatchBatch({
         projectId,
         sourceSegmentId: studioContextSourceSegmentId,
+        pageIds,
         limit: 50,
         excludeCovered: options.excludeCovered,
       });
@@ -2699,7 +2777,7 @@ export default function Dreamy() {
         {
           id: makeId('assistant'),
           role: 'assistant',
-          content: `${options.excludeCovered ? 'Remaining batch' : 'Batch dispatch'} planned ${plan.summary.planned} target${plan.summary.planned === 1 ? '' : 's'}; skipped ${plan.summary.skipped}.`,
+          content: `${pageIds ? 'Selected batch' : options.excludeCovered ? 'Remaining batch' : 'Batch dispatch'} planned ${plan.summary.planned} target${plan.summary.planned === 1 ? '' : 's'}; skipped ${plan.summary.skipped}.`,
           createdAt: nowIso(),
         },
       ]);
@@ -2719,14 +2797,16 @@ export default function Dreamy() {
     }
   }, [applyHandoffSnapshot, dispatchBatchPlanning, project?.projectId, studioContextSourceSegmentId]);
 
-  const startDispatchSession = useCallback(async () => {
+  const startDispatchSession = useCallback(async (options: { pageIds?: string[] } = {}) => {
     if (dispatchSessionRunning) return;
+    const pageIds = options.pageIds?.length ? options.pageIds : undefined;
     setDispatchSessionRunning(true);
     try {
       const projectId = project?.projectId || readLastStudioProjectId() || undefined;
       const session = await createStudioDispatchSession({
         projectId,
         sourceSegmentId: studioContextSourceSegmentId,
+        pageIds,
         limit: 50,
         excludeCovered: Boolean(dispatchBatchPlan?.excludeCovered),
       });
@@ -2736,7 +2816,7 @@ export default function Dreamy() {
         {
           id: makeId('assistant'),
           role: 'assistant',
-          content: `Dispatch queue started with ${session.summary.pending} pending target${session.summary.pending === 1 ? '' : 's'}.`,
+          content: `${pageIds ? 'Selected dispatch queue' : 'Dispatch queue'} started with ${session.summary.pending} pending target${session.summary.pending === 1 ? '' : 's'}.`,
           createdAt: nowIso(),
         },
       ]);
@@ -3630,6 +3710,18 @@ export default function Dreamy() {
     });
   }, [changePage, runStudio, selectedSegment]);
 
+  const toggleDispatchBatchPage = useCallback((pageId: string) => {
+    setSelectedDispatchPageIds((current) => toggleStudioDispatchPageSelection(current, pageId));
+  }, []);
+
+  const selectDispatchBatchPages = useCallback((pageIds: string[]) => {
+    setSelectedDispatchPageIds(Array.from(new Set(pageIds.filter(Boolean))));
+  }, []);
+
+  const clearDispatchBatchPages = useCallback(() => {
+    setSelectedDispatchPageIds([]);
+  }, []);
+
   const copyMatrixEntryLink = useCallback((entry: StudioDispatchMatrixEntry) => {
     const href = getStudioDispatchTargetHref(entry);
     if (!href) return;
@@ -3934,9 +4026,12 @@ export default function Dreamy() {
         session={dispatchSession}
         planning={dispatchBatchPlanning}
         sessionRunning={dispatchSessionRunning}
+        selectedPageCount={selectedDispatchBatchPageIds.length}
         onPlan={() => void planDispatchBatch()}
         onPlanRemaining={() => void planDispatchBatch({ excludeCovered: true })}
+        onPlanSelected={() => void planDispatchBatch({ pageIds: selectedDispatchBatchPageIds })}
         onStartSession={() => void startDispatchSession()}
+        onStartSelectedSession={() => void startDispatchSession({ pageIds: selectedDispatchBatchPageIds })}
         onOpenTarget={(target) => void openDispatchBatchTarget(target)}
         onCompleteTarget={(target) => void completeDispatchSessionTarget(target)}
         onErrorTarget={(target) => void reviewDispatchSessionTarget(target, 'error')}
@@ -4056,8 +4151,12 @@ export default function Dreamy() {
       <StudioDispatchMatrixPanel
         matrix={dispatchMatrix}
         selectedPageId={selectedPageId}
+        selectedBatchPageIds={selectedDispatchBatchPageIds}
         submitting={submitting}
         onSelectPage={selectOverviewPage}
+        onToggleBatchPage={toggleDispatchBatchPage}
+        onSelectReadyBatchPages={selectDispatchBatchPages}
+        onClearBatchPageSelection={clearDispatchBatchPages}
         onRunEntry={runMatrixEntry}
         onCopyEntryLink={copyMatrixEntryLink}
       />
