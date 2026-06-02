@@ -2248,6 +2248,7 @@ async def _resolve_studio_actions_batch(payload: dict[str, Any] | None) -> dict[
         normalized_actions.append({"action": action, "targetId": target_id, "sessionId": session_id, "raw": item})
 
     verify_page_ids = []
+    run_target_actions: list[dict[str, str]] = []
     manual_actions: list[dict[str, Any]] = []
     skipped_actions: list[dict[str, Any]] = []
     for item in normalized_actions:
@@ -2256,6 +2257,20 @@ async def _resolve_studio_actions_batch(payload: dict[str, Any] | None) -> dict[
         session_id = item.get("sessionId") or ""
         if action == "verify-ready":
             verify_page_ids.append(target_id)
+        elif action == "run-target":
+            if session_id:
+                run_target_actions.append({"targetId": target_id, "sessionId": session_id})
+            else:
+                skipped_actions.append(
+                    {
+                        "status": "skipped",
+                        "action": action,
+                        "targetId": target_id,
+                        "resultType": "dispatch-target-run",
+                        "reason": "missing_session_id",
+                        "message": "run-target requires session_id.",
+                    }
+                )
         elif action in MANUAL_STUDIO_ACTIONS:
             manual_actions.append(
                 {
@@ -2319,6 +2334,43 @@ async def _resolve_studio_actions_batch(payload: dict[str, Any] | None) -> dict[
 
     resolved_project_id = (coverage_result or {}).get("projectId") or project_id
     resolved_source_segment_id = (coverage_result or {}).get("sourceSegmentId") or source_segment_id
+    run_target_job_count = 0
+    for item in run_target_actions:
+        target_id = item["targetId"]
+        session_id = item["sessionId"]
+        try:
+            result = _run_dispatch_session_target(session_id, target_id)
+        except HTTPException as exc:
+            skipped_actions.append(
+                {
+                    "status": "skipped",
+                    "action": "run-target",
+                    "targetId": target_id,
+                    "sessionId": session_id,
+                    "resultType": "dispatch-target-run",
+                    "reason": f"http_{exc.status_code}",
+                    "message": str(exc.detail),
+                }
+            )
+            continue
+        result_session = result.get("session") if isinstance(result.get("session"), dict) else {}
+        resolved_project_id = result_session.get("projectId") or resolved_project_id
+        resolved_source_segment_id = result_session.get("sourceSegmentId") or resolved_source_segment_id
+        if result.get("job"):
+            run_target_job_count += 1
+        executed_actions.append(
+            {
+                "status": "executed",
+                "action": "run-target",
+                "targetId": target_id,
+                "sessionId": session_id,
+                "resultType": "dispatch-target-run",
+                "jobId": (result.get("job") or {}).get("jobId"),
+                "message": f"Ran dispatch target {target_id}.",
+                "result": result,
+            }
+        )
+
     audit = await _studio_delivery_audit(project_id=resolved_project_id, source_segment_id=resolved_source_segment_id)
     status = "executed"
     if manual_actions and executed_actions:
@@ -2340,7 +2392,7 @@ async def _resolve_studio_actions_batch(payload: dict[str, Any] | None) -> dict[
             "executed": len(executed_actions),
             "manualRequired": len(manual_actions),
             "skipped": len(skipped_actions),
-            "createdJobs": int((coverage_result or {}).get("createdCount") or 0),
+            "createdJobs": int((coverage_result or {}).get("createdCount") or 0) + run_target_job_count,
         },
         "executedActions": executed_actions,
         "manualActions": manual_actions,

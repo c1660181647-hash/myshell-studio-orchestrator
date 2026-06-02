@@ -5,8 +5,10 @@ import {
   planStudioDispatchBatch,
   retryStudioDispatchSession,
   resolveStudioAction,
+  resolveStudioActionsBatch,
   runStudioDispatchSessionTarget,
   type StudioActionResolveResult,
+  type StudioActionResolveBatchResult,
   type StudioDispatchBatchPlan,
   type StudioDispatchSession,
   type StudioDispatchSessionTargetRunResult,
@@ -118,3 +120,23 @@ async function resolveDispatchSessionTargetActionContract(): Promise<StudioDispa
 }
 
 void resolveDispatchSessionTargetActionContract;
+
+async function resolveDispatchSessionTargetBatchContract(): Promise<StudioActionResolveBatchResult> {
+  const result = await resolveStudioActionsBatch({
+    actions: [
+      {
+        action: 'run-target',
+        sessionId: 'dispatch_session_contract',
+        targetId: 'dispatch:dreamy-miniapp',
+      },
+    ],
+  });
+  const runResult = result.executedActions[0]?.result;
+  if (hasDispatchTargetRunResult(runResult)) {
+    const sessionId: string = runResult.session.sessionId;
+    void sessionId;
+  }
+  return result;
+}
+
+void resolveDispatchSessionTargetBatchContract;

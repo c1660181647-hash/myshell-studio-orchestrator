@@ -732,7 +732,7 @@ function StudioDeliveryAuditStrip({
   const gaps = (audit?.requirements || []).filter((item) => item.status !== 'ready');
   const actions = audit?.actions || [];
   const visibleActions = [...actions].sort((first, second) => handoffItemPriority(first) - handoffItemPriority(second)).slice(0, 3);
-  const safeActionCount = actions.filter((action) => action.action === 'verify-ready').length;
+  const safeActionCount = actions.filter((action) => action.action === 'verify-ready' || action.action === 'run-target').length;
 
   return (
     <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
@@ -3646,7 +3646,7 @@ export default function Dreamy() {
   const resolveSafeAuditActions = useCallback(async () => {
     if (resolvingAuditBatch || resolvingAuditActionId || !deliveryAudit) return;
     const safeActions = deliveryAudit.actions
-      .filter((action) => action.action === 'verify-ready')
+      .filter((action) => action.action === 'verify-ready' || action.action === 'run-target')
       .map((action) => ({
         action: action.action,
         targetId: action.targetId || action.pageId || action.segmentId || action.jobId || action.id,
@@ -3664,12 +3664,64 @@ export default function Dreamy() {
       if (result.result?.project) mergeProject(result.result.project);
       result.result?.jobs?.forEach((job) => mergeJob(job));
       applyDeliveryAudit(result.audit);
+      let dispatchedTargets = 0;
+      for (const executedAction of result.executedActions) {
+        if (!isDispatchTargetRunResult(executedAction.result)) continue;
+        const targetRun = executedAction.result;
+        dispatchedTargets += 1;
+        applyDispatchSession(targetRun.session);
+        if (targetRun.project) mergeProject(targetRun.project);
+        if (targetRun.job) mergeJob(targetRun.job);
+
+        const assistantId = makeId('assistant');
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: assistantId,
+            role: 'assistant',
+            content: `Running batch audit target ${targetRun.target.pageName || targetRun.target.pageId || targetRun.target.id}...`,
+            pending: true,
+            createdAt: nowIso(),
+            steps: [{ step: 'dispatch-target', message: 'Batch audit action materialized queued target', progress: 35 }],
+          },
+        ]);
+
+        const request = targetRun.executionRequest;
+        if (request?.executor === 'client') {
+          await registerClientExecution(
+            request,
+            targetRun.project?.projectId || targetRun.job?.projectId || targetRun.session.projectId || project?.projectId || '',
+            null,
+            assistantId,
+          );
+          const restored = await fetchStudioDispatchSession(targetRun.session.sessionId, { targetId: targetRun.target.id }).catch(() => null);
+          if (restored) applyDispatchSession(restored);
+        } else if (request?.executor === 'server') {
+          updateAssistant(assistantId, {
+            pending: false,
+            content: `Batch audit target queued for ${targetRun.target.pageName || targetRun.target.pageId}.`,
+            segmentId: request.segmentId,
+          });
+        } else {
+          updateAssistant(assistantId, {
+            pending: false,
+            content: `Batch audit target ${targetRun.target.pageName || targetRun.target.pageId || targetRun.target.id} is ready for operator review.`,
+          });
+        }
+      }
+      if (dispatchedTargets) {
+        const refreshedAudit = await fetchStudioDeliveryAudit({
+          projectId: project?.projectId || result.projectId || deliveryAudit.projectId || undefined,
+          sourceSegmentId: studioContextSourceSegmentId || result.sourceSegmentId || deliveryAudit.sourceSegmentId || undefined,
+        }).catch(() => null);
+        if (refreshedAudit) applyDeliveryAudit(refreshedAudit);
+      }
       setMessages((prev) => [
         ...prev,
         {
           id: makeId('assistant'),
           role: 'assistant',
-          content: `Resolved ${result.summary.executed} safe audit action${result.summary.executed === 1 ? '' : 's'}; ${result.audit.summary.actions} audit action${result.audit.summary.actions === 1 ? '' : 's'} remain.`,
+          content: `Resolved ${result.summary.executed} safe audit action${result.summary.executed === 1 ? '' : 's'}; ${dispatchedTargets} dispatch target${dispatchedTargets === 1 ? '' : 's'} ran.`,
           createdAt: nowIso(),
         },
       ]);
@@ -3689,13 +3741,18 @@ export default function Dreamy() {
     }
   }, [
     applyDeliveryAudit,
+    applyDispatchSession,
     deliveryAudit,
+    fetchStudioDeliveryAudit,
+    fetchStudioDispatchSession,
     mergeJob,
     mergeProject,
     project?.projectId,
+    registerClientExecution,
     resolvingAuditActionId,
     resolvingAuditBatch,
     studioContextSourceSegmentId,
+    updateAssistant,
   ]);
 
   const clearFile = useCallback(() => {

@@ -740,6 +740,78 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(restored_target["status"], "visited")
         self.assertNotIn(action_id, {action["id"] for action in resolved_body["audit"]["actions"]})
 
+    def test_studio_action_resolve_batch_runs_dispatch_target_actions(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "create batch dispatch action source image"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        meta = next(payload for name, payload in events if name == "meta")
+        execution = next(payload for name, payload in events if name == "execution_request")
+        session_response = self.client.post(
+            "/api/studio/dispatch-sessions",
+            json={
+                "project_id": meta["projectId"],
+                "source_segment_id": execution["segmentId"],
+                "page_ids": ["dreamy-miniapp"],
+                "limit": 1,
+            },
+        )
+        self.assertEqual(session_response.status_code, 200)
+        session = session_response.json()
+        target = session["nextTarget"]
+
+        batch = self.client.post(
+            "/api/studio/actions/resolve-batch",
+            json={
+                "project_id": meta["projectId"],
+                "source_segment_id": execution["segmentId"],
+                "actions": [
+                    {
+                        "action": "run-target",
+                        "target_id": target["id"],
+                        "session_id": session["sessionId"],
+                    },
+                    {"action": "verify-ready", "target_id": "explore"},
+                ],
+            },
+        )
+
+        self.assertEqual(batch.status_code, 200)
+        body = batch.json()
+        self.assertEqual(body["status"], "executed")
+        self.assertEqual(body["summary"]["requested"], 2)
+        self.assertEqual(body["summary"]["executed"], 2)
+        self.assertEqual(body["summary"]["manualRequired"], 0)
+        self.assertEqual(body["summary"]["skipped"], 0)
+        self.assertEqual(body["summary"]["createdJobs"], 2)
+
+        run_action = next(item for item in body["executedActions"] if item["action"] == "run-target")
+        self.assertEqual(run_action["targetId"], target["id"])
+        self.assertEqual(run_action["sessionId"], session["sessionId"])
+        self.assertEqual(run_action["resultType"], "dispatch-target-run")
+        self.assertEqual(run_action["result"]["status"], "execution_required")
+        self.assertEqual(run_action["result"]["executionRequest"]["executor"], "client")
+        self.assertEqual(run_action["result"]["executionRequest"]["dispatchSessionId"], session["sessionId"])
+        self.assertEqual(run_action["result"]["executionRequest"]["dispatchTargetId"], target["id"])
+        restored_target = next(
+            item
+            for item in run_action["result"]["session"]["targets"]
+            if item["id"] == target["id"]
+        )
+        self.assertEqual(restored_target["status"], "visited")
+
+        verify_action = next(item for item in body["executedActions"] if item["action"] == "verify-ready")
+        self.assertEqual(verify_action["targetId"], "explore")
+        self.assertEqual(verify_action["resultType"], "coverage-verify")
+        self.assertEqual(body["result"]["createdCount"], 1)
+        action_ids = {action["id"] for action in body["audit"]["actions"]}
+        self.assertNotIn(f"dispatch-target:run-target:{session['sessionId']}:{target['id']}", action_ids)
+        self.assertNotIn("verify-ready:explore", action_ids)
+
     def test_studio_action_resolve_explains_all_operator_action_types(self) -> None:
         action_targets = [
             ("provide-route-params", "tag-generator"),

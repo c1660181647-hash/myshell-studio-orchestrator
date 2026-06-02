@@ -595,9 +595,11 @@ export interface StudioActionResolveBatchResult {
     status: string;
     action: string;
     targetId: string;
+    sessionId?: string | null;
     resultType: string;
     jobId?: string;
     message?: string;
+    result?: StudioCoverageVerifyResult | StudioDispatchSessionTargetRunResult;
   }>;
   manualActions: Array<{
     status: string;
