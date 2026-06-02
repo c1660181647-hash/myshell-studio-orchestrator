@@ -516,9 +516,16 @@ class StudioApiTest(unittest.TestCase):
             "cookieInjection",
             "dreamyApiAuth",
             "ffmpeg",
+            "credentialSetup",
         ):
             self.assertIn(component_id, components)
             self.assertIn("status", components[component_id])
+        credentials = components["credentialSetup"]
+        self.assertEqual(credentials["status"], "needs_configuration")
+        binding_by_env = {binding["env"]: binding for binding in credentials["bindings"]}
+        self.assertEqual(binding_by_env["DREAMY_TELEGRAM_INIT_DATA"]["secret"], "myshell-dreamy-init-data")
+        self.assertEqual(binding_by_env["MYSHELL_COOKIES"]["secret"], "myshell-cookies")
+        self.assertFalse(binding_by_env["DREAMY_TELEGRAM_INIT_DATA"]["configured"])
 
     def test_dreamy_server_auth_status_uses_configured_init_data(self) -> None:
         with patch.dict(os.environ, {"DREAMY_TELEGRAM_INIT_DATA": "query_id=server-auth"}, clear=False):
@@ -1412,10 +1419,24 @@ class StudioApiTest(unittest.TestCase):
 
     def test_cloud_build_limits_cloud_run_to_single_instance_for_sqlite_store(self) -> None:
         cloudbuild = BACKEND_DIR.parent / "cloudbuild.yaml"
-        content = cloudbuild.read_text(encoding="utf-8")
+        deploy_script = BACKEND_DIR.parent / "deploy-cloud-run.sh"
+        content = cloudbuild.read_text(encoding="utf-8") + "\n" + deploy_script.read_text(encoding="utf-8")
 
         self.assertIn("--max-instances", content)
-        self.assertIn("'1'", content)
+        self.assertIn("  --max-instances 1", content)
+
+    def test_cloud_build_binds_generation_secrets_when_available(self) -> None:
+        cloudbuild = BACKEND_DIR.parent / "cloudbuild.yaml"
+        deploy_script = BACKEND_DIR.parent / "deploy-cloud-run.sh"
+        cloudbuild_content = cloudbuild.read_text(encoding="utf-8")
+        script_content = deploy_script.read_text(encoding="utf-8")
+
+        self.assertIn("orchestrator/deploy-cloud-run.sh", cloudbuild_content)
+        self.assertIn("gcloud secrets describe", script_content)
+        self.assertIn("DREAMY_TELEGRAM_INIT_DATA=myshell-dreamy-init-data", script_content)
+        self.assertIn("MYSHELL_COOKIES=myshell-cookies", script_content)
+        self.assertIn("--set-secrets=", script_content)
+        self.assertNotIn("query_id=", script_content)
 
     def test_cloud_start_script_uses_configured_cdp_url_consistently(self) -> None:
         start_script = BACKEND_DIR.parent / "start-cloud.sh"

@@ -64,6 +64,24 @@ export DREAMY_SERVER_POLL_INTERVAL_SECONDS=0.75
 
 With this configured, `dreamy-miniapp` auth reports `ready` and `/api/studio/run` emits `executor: "server"` for Dreamy jobs. The backend accepts only fresh `generate/result` media as `done`; unfinished tasks remain `running` with the Dreamy task id so the operator can poll through `POST /api/studio/jobs/{job_id}/poll`, retry, or cancel from the Studio job queue.
 
+## Cloud Run Secret Binding
+
+Cloud Build deploys through `orchestrator/deploy-cloud-run.sh`. The script keeps the public service single-instance for the SQLite store and automatically binds generation credentials when these Secret Manager secrets exist:
+
+```bash
+printf '%s' "$DREAMY_TELEGRAM_INIT_DATA" | gcloud secrets create myshell-dreamy-init-data --data-file=-
+printf '%s' "$MYSHELL_COOKIES" | gcloud secrets create myshell-cookies --data-file=-
+```
+
+If a secret already exists, add a new version instead:
+
+```bash
+printf '%s' "$DREAMY_TELEGRAM_INIT_DATA" | gcloud secrets versions add myshell-dreamy-init-data --data-file=-
+printf '%s' "$MYSHELL_COOKIES" | gcloud secrets versions add myshell-cookies --data-file=-
+```
+
+After the next Cloud Build deploy, `/api/health` exposes `credentialSetup`. It reports `ready` only when `DREAMY_TELEGRAM_INIT_DATA` and `MYSHELL_COOKIES` are injected into the Cloud Run runtime. Without those secrets, Dreamy remains client-delegated and MyShell Art remains `auth_missing`.
+
 ## Tests
 
 ```bash

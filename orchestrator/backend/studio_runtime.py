@@ -14,6 +14,18 @@ DEFAULT_COOKIE_INJECTION_STATUS_PATH = os.path.join(os.path.dirname(__file__), "
 COOKIE_FILE_NAMES = ("myshell-cookies.json", "myshell_cookies_embedded.json")
 DREAMY_INIT_DATA_ENV_NAMES = ("DREAMY_TELEGRAM_INIT_DATA", "MYSHELL_DREAMY_INIT_DATA")
 DREAMY_DEFAULT_API_BASE_URL = "https://api.myshell.fun"
+SECRET_BINDINGS = (
+    {
+        "env": "DREAMY_TELEGRAM_INIT_DATA",
+        "secret": "myshell-dreamy-init-data",
+        "purpose": "server-side Dreamy miniapp generation",
+    },
+    {
+        "env": "MYSHELL_COOKIES",
+        "secret": "myshell-cookies",
+        "purpose": "MyShell Art browser cookie injection",
+    },
+)
 
 
 def cdp_url() -> str:
@@ -138,6 +150,37 @@ def ffmpeg_status() -> dict[str, Any]:
     }
 
 
+def credential_setup_status() -> dict[str, Any]:
+    bindings: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for binding in SECRET_BINDINGS:
+        env_name = str(binding["env"])
+        configured = bool(os.environ.get(env_name))
+        bindings.append(
+            {
+                **binding,
+                "configured": configured,
+                "status": "ready" if configured else "missing",
+            }
+        )
+        if not configured:
+            missing.append(env_name)
+    if not missing:
+        return {
+            "status": "ready",
+            "mode": "cloud-run-secrets",
+            "bindings": bindings,
+            "message": "Dreamy and MyShell Art credentials are injected into the runtime.",
+        }
+    return {
+        "status": "needs_configuration",
+        "mode": "cloud-run-secrets",
+        "bindings": bindings,
+        "message": "Create Secret Manager secrets myshell-dreamy-init-data and myshell-cookies; Cloud Build binds them automatically when present.",
+        "missingEnv": missing,
+    }
+
+
 async def chrome_cdp_ready() -> bool:
     try:
         async with httpx.AsyncClient(timeout=1.5) as client:
@@ -227,10 +270,12 @@ async def runtime_health(store_path: str) -> dict[str, Any]:
     art_auth = "ready" if has_cookies else "auth_missing"
     injection_status = cookie_injection_status(has_cookies, cookie_source)
     media_export_status = ffmpeg_status()
+    credential_setup = credential_setup_status()
     degraded_component = (
         not storage_ready
         or not cdp_ready
         or str(injection_status.get("status") or "") in {"auth_missing", "error", "pending"}
+        or credential_setup.get("status") == "needs_configuration"
     )
     overall = "degraded" if degraded_component else "ok"
     return {
@@ -245,6 +290,7 @@ async def runtime_health(store_path: str) -> dict[str, Any]:
             "cookieInjection": injection_status,
             "dreamyApiAuth": dreamy_api_auth_status(),
             "ffmpeg": media_export_status,
+            "credentialSetup": credential_setup,
         },
     }
 

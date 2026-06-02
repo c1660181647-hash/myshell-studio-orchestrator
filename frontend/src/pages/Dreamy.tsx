@@ -476,7 +476,7 @@ function statusPillTone(status?: string): 'default' | 'hot' | 'success' | 'dange
 
 function healthPillTone(status?: string): 'default' | 'hot' | 'success' | 'danger' {
   if (status === 'ok' || status === 'ready' || status === 'client_delegated') return 'success';
-  if (status === 'auth_missing' || status === 'unavailable' || status === 'degraded') return 'hot';
+  if (status === 'auth_missing' || status === 'unavailable' || status === 'degraded' || status === 'needs_configuration') return 'hot';
   if (status === 'error' || status === 'blocked') return 'danger';
   return 'default';
 }
@@ -776,6 +776,7 @@ function StudioHealthStrip({ health }: { health: StudioHealth | null }) {
     ['myshellCookies', 'Cookies'],
     ['cookieInjection', 'Injection'],
     ['dreamyApiAuth', 'Dreamy'],
+    ['credentialSetup', 'Secrets'],
   ] as const;
 
   return (

@@ -125,6 +125,14 @@ export interface StudioHealthComponent {
   mode?: string;
   path?: string;
   url?: string;
+  bindings?: Array<{
+    env: string;
+    secret: string;
+    purpose?: string;
+    configured?: boolean;
+    status?: string;
+  }>;
+  missingEnv?: string[];
 }
 
 export interface StudioHealth {
