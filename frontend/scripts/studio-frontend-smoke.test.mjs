@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   buildStudioSmokeUrl,
+  createStudioSmokeInitScript,
   createSmokeSummary,
   normalizeFrontendBaseUrl,
 } from './studio-frontend-smoke.mjs';
@@ -37,4 +38,12 @@ test('createSmokeSummary records checked UI surfaces and console errors', () => 
   assert.equal(summary.summary.failed, 1);
   assert.equal(summary.failures[0].id, 'evidence');
   assert.equal(summary.consoleErrors.length, 1);
+});
+
+test('createStudioSmokeInitScript bypasses the production age gate for smoke runs', () => {
+  const script = createStudioSmokeInitScript();
+
+  assert.match(script, /dp_age_gate_passed/);
+  assert.match(script, /localStorage\.setItem/);
+  assert.match(script, /'1'/);
 });

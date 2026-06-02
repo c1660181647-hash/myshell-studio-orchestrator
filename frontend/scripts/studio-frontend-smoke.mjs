@@ -9,6 +9,7 @@ import { chromium } from 'playwright';
 
 const DEFAULT_FRONTEND_URL = 'http://127.0.0.1:5174';
 const DEFAULT_TIMEOUT_MS = 15_000;
+const AGE_GATE_STORAGE_KEY = 'dp_age_gate_passed';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const frontendRoot = path.resolve(scriptDir, '..');
@@ -32,6 +33,14 @@ export function buildStudioSmokeUrl(frontendUrl) {
   if (!url.pathname || url.pathname === '/') url.pathname = '/';
   url.searchParams.set('test_route', 'dreamy');
   return url.toString();
+}
+
+export function createStudioSmokeInitScript() {
+  return `
+    try {
+      window.localStorage.setItem('${AGE_GATE_STORAGE_KEY}', '1');
+    } catch {}
+  `;
 }
 
 export function createSmokeSummary({
@@ -154,6 +163,7 @@ export async function runStudioFrontendSmoke(options = {}) {
 
   try {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    await page.addInitScript(createStudioSmokeInitScript());
     page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push(message.text());
     });

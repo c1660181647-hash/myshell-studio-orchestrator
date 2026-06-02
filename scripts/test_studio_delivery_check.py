@@ -60,12 +60,31 @@ class StudioDeliveryCheckTest(unittest.TestCase):
         self.assertEqual(plan.backend.cwd, repo_root / "orchestrator" / "backend")
         self.assertIn("main.py", plan.backend.command)
         self.assertEqual(plan.backend.env["PORT"], "19090")
+        self.assertIsNotNone(plan.frontend_build)
+        self.assertEqual(plan.frontend_build.command, ["npm", "run", "build"])
+        self.assertEqual(plan.frontend_build.env["VITE_DREAMY_ORCHESTRATOR_BASE_URL"], "http://127.0.0.1:19090")
         self.assertEqual(plan.frontend.env["VITE_DREAMY_ORCHESTRATOR_BASE_URL"], "http://127.0.0.1:19090")
         self.assertEqual(plan.frontend.env["STUDIO_FRONTEND_URL"], "http://127.0.0.1:15174")
+        self.assertIn("preview", plan.frontend.command)
+        self.assertNotIn("dev", plan.frontend.command)
         self.assertIn("--port", plan.frontend.command)
         self.assertIn("15174", plan.frontend.command)
         self.assertIn("studio_smoke", " ".join(plan.backend_smoke.command))
         self.assertIn("smoke:studio", plan.frontend_smoke.command)
+
+    def test_dev_frontend_mode_skips_build_and_uses_vite_dev_server(self) -> None:
+        repo_root = Path("/repo")
+        plan = studio_delivery_check.build_delivery_plan(
+            repo_root=repo_root,
+            backend_port=19090,
+            frontend_port=15174,
+            screenshot_path=repo_root / "tmp" / "dreamy.png",
+            frontend_mode="dev",
+        )
+
+        self.assertIsNone(plan.frontend_build)
+        self.assertIn("dev", plan.frontend.command)
+        self.assertNotIn("preview", plan.frontend.command)
 
     def test_create_delivery_summary_fails_when_any_step_fails(self) -> None:
         summary = studio_delivery_check.create_delivery_summary(
