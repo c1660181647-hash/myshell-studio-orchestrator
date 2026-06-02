@@ -23,7 +23,7 @@ import sys
 from datetime import UTC, datetime
 
 path, status, message, cookie_count = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
-os.makedirs(os.path.dirname(path), exist_ok=True)
+os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
 with open(path, "w", encoding="utf-8") as status_file:
     json.dump(
         {

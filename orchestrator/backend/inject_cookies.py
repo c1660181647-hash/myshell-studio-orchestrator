@@ -19,7 +19,7 @@ class CookieSourceError(ValueError):
 
 
 def _write_status(status, message, cookie_count=0, energy_display=""):
-    os.makedirs(os.path.dirname(STATUS_PATH), exist_ok=True)
+    os.makedirs(os.path.dirname(STATUS_PATH) or ".", exist_ok=True)
     with open(STATUS_PATH, "w", encoding="utf-8") as status_file:
         json.dump(
             {

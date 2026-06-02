@@ -579,6 +579,22 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("valid JSON", payload["message"])
         self.assertIn("MYSHELL_COOKIES", payload["message"])
 
+    def test_cookie_injection_status_writer_accepts_bare_filename(self) -> None:
+        import inject_cookies
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            previous_cwd = os.getcwd()
+            os.chdir(tmp_dir)
+            try:
+                with patch.object(inject_cookies, "STATUS_PATH", "cookie-injection-status.json"):
+                    inject_cookies._write_status("failed", "CDP unavailable", 0)
+                payload = json.loads(Path("cookie-injection-status.json").read_text(encoding="utf-8"))
+            finally:
+                os.chdir(previous_cwd)
+
+        self.assertEqual(payload["status"], "failed")
+        self.assertEqual(payload["message"], "CDP unavailable")
+
     def test_cookie_injection_cli_returns_nonzero_on_failure(self) -> None:
         import inject_cookies
 
@@ -947,6 +963,7 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("cookie-injection-status.json", content)
         self.assertIn("Chrome CDP was not ready after 30s", content)
         self.assertIn("checkedAt", content)
+        self.assertIn('os.path.dirname(path) or "."', content)
         self.assertIn('curl -s "$MYSHELL_CDP_URL/json"', content)
         self.assertNotIn("curl -s http://127.0.0.1:9222/json", content)
 
