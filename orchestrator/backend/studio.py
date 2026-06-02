@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 import base64
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
@@ -91,6 +93,106 @@ PLACEHOLDER_POSTERS = {
     "restyle": "/gallery/style-cyber-tokyo.jpg",
     "retry-agent": "/gallery/anime-cyber.jpg",
 }
+
+IGNORED_FRONTEND_ROUTE_PREFIXES = ("/__",)
+DEFAULT_FRONTEND_APP_ROUTES_FILE = Path(__file__).resolve().parents[2] / "frontend" / "src" / "App.tsx"
+
+
+def _frontend_route_source_path() -> Path:
+    configured = os.environ.get("STUDIO_FRONTEND_APP_ROUTES_FILE")
+    return Path(configured) if configured else DEFAULT_FRONTEND_APP_ROUTES_FILE
+
+
+def _normalize_app_route(route: str) -> str:
+    route = (route or "").strip()
+    if not route:
+        return ""
+    parsed = urlsplit(route)
+    return parsed.path or route
+
+
+def _extract_frontend_app_routes(source: str) -> list[str]:
+    routes = re.findall(r"<Route\b[^>]*\bpath=[\"']([^\"']+)[\"']", source)
+    normalized_routes = [_normalize_app_route(route) for route in routes]
+    return sorted({route for route in normalized_routes if route})
+
+
+def _frontend_route_coverage(pages: list[dict[str, Any]]) -> dict[str, Any]:
+    source_path = _frontend_route_source_path()
+    if not source_path.exists():
+        return {
+            "status": "source_unavailable",
+            "sourcePath": str(source_path),
+            "message": "Frontend App route source is not available in this runtime.",
+            "appRoutes": [],
+            "registeredRoutes": sorted(
+                {
+                    _normalize_app_route(str(page.get("appRoute") or ""))
+                    for page in pages
+                    if _normalize_app_route(str(page.get("appRoute") or ""))
+                }
+            ),
+            "coveredRoutes": [],
+            "missingAppRoutes": [],
+            "extraRegistryRoutes": [],
+            "ignoredAppRoutes": [],
+        }
+
+    try:
+        source = source_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        registered_routes = sorted(
+            {
+                _normalize_app_route(str(page.get("appRoute") or ""))
+                for page in pages
+                if _normalize_app_route(str(page.get("appRoute") or ""))
+            }
+        )
+        return {
+            "status": "error",
+            "sourcePath": str(source_path),
+            "message": f"Frontend App route source could not be read: {exc}",
+            "appRoutes": [],
+            "registeredRoutes": registered_routes,
+            "coveredRoutes": [],
+            "missingAppRoutes": [],
+            "extraRegistryRoutes": registered_routes,
+            "ignoredAppRoutes": [],
+        }
+
+    app_routes = _extract_frontend_app_routes(source)
+    ignored_routes = sorted(
+        route for route in app_routes if any(route.startswith(prefix) for prefix in IGNORED_FRONTEND_ROUTE_PREFIXES)
+    )
+    routable_app_routes = sorted(route for route in app_routes if route not in set(ignored_routes))
+    registered_routes = sorted(
+        {
+            _normalize_app_route(str(page.get("appRoute") or ""))
+            for page in pages
+            if _normalize_app_route(str(page.get("appRoute") or ""))
+        }
+    )
+    app_route_set = set(routable_app_routes)
+    registered_route_set = set(registered_routes)
+    missing_routes = sorted(app_route_set - registered_route_set)
+    extra_routes = sorted(registered_route_set - app_route_set)
+    covered_routes = sorted(app_route_set & registered_route_set)
+    status = "covered" if not missing_routes and not extra_routes else "mismatch"
+    return {
+        "status": status,
+        "sourcePath": str(source_path),
+        "appRoutes": routable_app_routes,
+        "registeredRoutes": registered_routes,
+        "coveredRoutes": covered_routes,
+        "missingAppRoutes": missing_routes,
+        "extraRegistryRoutes": extra_routes,
+        "ignoredAppRoutes": ignored_routes,
+        "message": (
+            f"{len(covered_routes)} frontend routes covered"
+            if status == "covered"
+            else f"{len(missing_routes)} missing app routes, {len(extra_routes)} extra registry routes"
+        ),
+    }
 
 
 def _agent_id_for_page(page: dict[str, Any]) -> str:
@@ -1690,6 +1792,9 @@ async def _studio_readiness() -> dict[str, Any]:
     agent_ids = {agent["id"] for agent in agents}
     missing_page_ids = sorted(CORE_DELIVERY_PAGE_IDS - page_ids)
     missing_agent_ids = sorted(CORE_DELIVERY_AGENT_IDS - agent_ids)
+    route_coverage = _frontend_route_coverage(pages)
+    route_coverage_ready = route_coverage.get("status") in {"covered", "source_unavailable"}
+    page_registry_ready = not missing_page_ids and route_coverage_ready
 
     gates = [
         _delivery_gate(
@@ -1725,9 +1830,13 @@ async def _studio_readiness() -> dict[str, Any]:
         _delivery_gate(
             "page-registry",
             "Page Registry",
-            "ready" if not missing_page_ids else "blocked",
-            message=f"{len(pages)} registered MyShell pages",
-            evidence={"pageCount": len(pages), "missingPageIds": missing_page_ids},
+            "ready" if page_registry_ready else "blocked",
+            message=f"{len(pages)} registered MyShell pages; {route_coverage.get('message')}",
+            evidence={
+                "pageCount": len(pages),
+                "missingPageIds": missing_page_ids,
+                "routeCoverage": route_coverage,
+            },
         ),
         _delivery_gate(
             "agent-registry",

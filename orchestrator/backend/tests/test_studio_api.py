@@ -359,6 +359,13 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(gates["storage"]["status"], "ready")
         self.assertGreaterEqual(gates["page-registry"]["evidence"]["pageCount"], 13)
         self.assertEqual(gates["page-registry"]["evidence"]["missingPageIds"], [])
+        route_coverage = gates["page-registry"]["evidence"]["routeCoverage"]
+        self.assertEqual(route_coverage["status"], "covered")
+        self.assertEqual(route_coverage["missingAppRoutes"], [])
+        self.assertEqual(route_coverage["extraRegistryRoutes"], [])
+        self.assertIn("/dreamy", route_coverage["coveredRoutes"])
+        self.assertIn("/library/:id", route_coverage["coveredRoutes"])
+        self.assertIn("/__test-customize-scene", route_coverage["ignoredAppRoutes"])
         self.assertGreaterEqual(gates["agent-registry"]["evidence"]["agentCount"], 7)
         self.assertEqual(gates["agent-registry"]["evidence"]["missingAgentIds"], [])
         self.assertEqual(gates["dispatch-preview"]["status"], "ready")
@@ -367,6 +374,18 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn(gates["myshell-art-auth"]["status"], {"ready", "auth_missing"})
         self.assertFalse(gates["myshell-art-auth"]["required"])
         self.assertEqual(gates["job-store"]["status"], "ready")
+
+    def test_studio_readiness_keeps_page_registry_ready_without_frontend_source(self) -> None:
+        with patch.dict(os.environ, {"STUDIO_FRONTEND_APP_ROUTES_FILE": "/tmp/missing-myshell-app-routes.tsx"}):
+            readiness = self.client.get("/api/studio/readiness")
+
+        self.assertEqual(readiness.status_code, 200)
+        gates = {gate["id"]: gate for gate in readiness.json()["gates"]}
+        self.assertEqual(gates["page-registry"]["status"], "ready")
+        route_coverage = gates["page-registry"]["evidence"]["routeCoverage"]
+        self.assertEqual(route_coverage["status"], "source_unavailable")
+        self.assertEqual(route_coverage["missingAppRoutes"], [])
+        self.assertEqual(route_coverage["extraRegistryRoutes"], [])
 
     def test_delivery_audit_packages_machine_readable_acceptance_evidence(self) -> None:
         with self.client.stream(
