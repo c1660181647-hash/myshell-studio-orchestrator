@@ -281,6 +281,9 @@ def create_delivery_summary(
     repo_root: Path,
     backend_port: int,
     frontend_port: int,
+    artifacts_dir: Path,
+    screenshot_path: Path,
+    report_path: Path,
     steps: list[StepResult],
 ) -> dict[str, Any]:
     failures = [step.to_json() for step in steps if not step.ok]
@@ -290,6 +293,13 @@ def create_delivery_summary(
         "repoRoot": str(repo_root),
         "backendUrl": f"http://127.0.0.1:{backend_port}",
         "frontendUrl": f"http://127.0.0.1:{frontend_port}",
+        "artifacts": {
+            "directory": str(artifacts_dir),
+            "report": str(report_path),
+            "screenshot": str(screenshot_path),
+            "backendLog": str(artifacts_dir / "backend.log"),
+            "frontendLog": str(artifacts_dir / "frontend.log"),
+        },
         "summary": {
             "total": len(steps),
             "passed": len([step for step in steps if step.ok]),
@@ -300,35 +310,54 @@ def create_delivery_summary(
     }
 
 
+def write_delivery_summary(summary: dict[str, Any], report_path: Path) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+
+
 def run_delivery_check(args: argparse.Namespace) -> dict[str, Any]:
     repo_root = Path(args.repo_root).resolve()
     backend_port = args.backend_port or find_free_port(DEFAULT_BACKEND_PORT)
     frontend_port = args.frontend_port or find_free_port(DEFAULT_FRONTEND_PORT)
-    artifacts_dir = repo_root / ".studio-delivery-check"
+    artifacts_dir = Path(args.artifacts_dir).resolve() if args.artifacts_dir else repo_root / ".studio-delivery-check"
     screenshot_path = Path(args.screenshot).resolve() if args.screenshot else artifacts_dir / "dreamy.png"
+    report_path = Path(args.report).resolve() if args.report else artifacts_dir / "summary.json"
     plan = build_delivery_plan(repo_root, backend_port, frontend_port, screenshot_path)
 
     steps: list[StepResult] = []
     started: list[tuple[subprocess.Popen[str], Any]] = []
+    def finish() -> dict[str, Any]:
+        summary = create_delivery_summary(
+            repo_root=repo_root,
+            backend_port=backend_port,
+            frontend_port=frontend_port,
+            artifacts_dir=artifacts_dir,
+            screenshot_path=screenshot_path,
+            report_path=report_path,
+            steps=steps,
+        )
+        write_delivery_summary(summary, report_path)
+        return summary
+
     try:
         backend_process, backend_log = start_process(plan.backend, artifacts_dir / "backend.log")
         started.append((backend_process, backend_log))
         steps.append(wait_for_process_url(backend_process, plan.backend_health_url, args.timeout_seconds))
         if not steps[-1].ok:
-            return create_delivery_summary(repo_root, backend_port, frontend_port, steps)
+            return finish()
 
         frontend_process, frontend_log = start_process(plan.frontend, artifacts_dir / "frontend.log")
         started.append((frontend_process, frontend_log))
         steps.append(wait_for_process_url(frontend_process, plan.frontend_url, args.timeout_seconds))
         if not steps[-1].ok:
-            return create_delivery_summary(repo_root, backend_port, frontend_port, steps)
+            return finish()
 
         steps.append(run_command(plan.backend_smoke, args.timeout_seconds))
         if args.stop_on_failure and not steps[-1].ok:
-            return create_delivery_summary(repo_root, backend_port, frontend_port, steps)
+            return finish()
 
         steps.append(run_command(plan.frontend_smoke, args.timeout_seconds))
-        return create_delivery_summary(repo_root, backend_port, frontend_port, steps)
+        return finish()
     finally:
         for process, handle in reversed(started):
             stop_process(process, handle)
@@ -340,6 +369,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--backend-port", type=int, default=0, help="Backend port. Defaults to 8090 or a free port.")
     parser.add_argument("--frontend-port", type=int, default=0, help="Frontend port. Defaults to 5174 or a free port.")
     parser.add_argument("--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument("--artifacts-dir", default="", help="Directory for logs, screenshots, and summary JSON.")
+    parser.add_argument("--report", default="", help="Path for the delivery summary JSON.")
     parser.add_argument("--screenshot", default="")
     parser.add_argument("--stop-on-failure", action="store_true")
     return parser.parse_args(argv)

@@ -73,7 +73,7 @@ From the repository root, the full local handoff can also be checked with one co
 python scripts/studio_delivery_check.py
 ```
 
-It starts temporary backend and frontend services on free ports, runs backend and frontend smoke checks, emits a JSON summary, and cleans up its own processes.
+It starts temporary backend and frontend services on free ports, runs backend and frontend smoke checks, writes `.studio-delivery-check/summary.json` with log/screenshot paths, emits the same JSON summary, and cleans up its own processes.
 
 For the full operator handoff surface, also start the frontend against this backend and run:
 

@@ -161,7 +161,7 @@ One-command local handoff check:
 python scripts/studio_delivery_check.py
 ```
 
-This starts a temporary backend and frontend on free local ports, waits for both services, runs the backend API smoke and frontend browser smoke, writes logs/screenshots under `.studio-delivery-check/`, prints a JSON summary, and cleans up the processes it started.
+This starts a temporary backend and frontend on free local ports, waits for both services, runs the backend API smoke and frontend browser smoke, writes logs/screenshots plus `.studio-delivery-check/summary.json`, prints the same JSON summary, and cleans up the processes it started. Use `--artifacts-dir` or `--report` to place handoff evidence somewhere else.
 
 Frontend:
 

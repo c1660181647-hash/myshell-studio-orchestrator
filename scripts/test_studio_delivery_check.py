@@ -1,5 +1,6 @@
 import importlib.util
 import socket
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -71,6 +72,9 @@ class StudioDeliveryCheckTest(unittest.TestCase):
             repo_root=Path("/repo"),
             backend_port=19090,
             frontend_port=15174,
+            artifacts_dir=Path("/repo/.studio-delivery-check"),
+            screenshot_path=Path("/repo/.studio-delivery-check/dreamy.png"),
+            report_path=Path("/repo/.studio-delivery-check/summary.json"),
             steps=[
                 studio_delivery_check.StepResult(id="backend-smoke", ok=True, duration_seconds=1.2),
                 studio_delivery_check.StepResult(id="frontend-smoke", ok=False, duration_seconds=0.4, message="missing Inspector"),
@@ -81,6 +85,18 @@ class StudioDeliveryCheckTest(unittest.TestCase):
         self.assertEqual(summary["summary"]["passed"], 1)
         self.assertEqual(summary["summary"]["failed"], 1)
         self.assertEqual(summary["failures"][0]["id"], "frontend-smoke")
+        self.assertEqual(summary["artifacts"]["report"], "/repo/.studio-delivery-check/summary.json")
+        self.assertEqual(summary["artifacts"]["screenshot"], "/repo/.studio-delivery-check/dreamy.png")
+
+    def test_write_delivery_summary_creates_report_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "nested" / "summary.json"
+            summary = {"status": "ok", "summary": {"passed": 1, "failed": 0}}
+
+            studio_delivery_check.write_delivery_summary(summary, report_path)
+
+            self.assertTrue(report_path.exists())
+            self.assertEqual(studio_delivery_check.json.loads(report_path.read_text())["status"], "ok")
 
 
 if __name__ == "__main__":
