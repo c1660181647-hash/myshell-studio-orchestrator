@@ -388,8 +388,8 @@ export async function fetchTaskRunning(): Promise<{ running: boolean }> {
   return apiRequest(`${API_PREFIX}/task/running`, {});
 }
 
-export async function fetchTaskDetail(taskId: string) {
-  return apiRequest(`${API_PREFIX}/task/detail`, { task_id: taskId });
+export async function fetchTaskDetail(taskId: string): Promise<unknown> {
+  return apiRequest<unknown>(`${API_PREFIX}/task/detail`, { task_id: taskId });
 }
 
 export async function retryTask(taskId: string): Promise<void> {
