@@ -5849,6 +5849,11 @@ export default function Dreamy() {
           {previewDispatchReady ? 'Ready' : 'Needs attention'}
         </span>
         <Pill tone={healthPillTone(studioHealth?.status)}>{studioHealth ? `Health ${studioHealth.status}` : 'Health checking'}</Pill>
+        <Pill tone={healthPillTone(studioHealth?.components?.liveGeneration?.status)}>
+          {studioHealth?.components?.liveGeneration
+            ? `Live ${studioHealth.components.liveGeneration.status}`
+            : 'Live checking'}
+        </Pill>
         <Pill tone={healthPillTone(studioReadiness?.status)}>{studioReadiness ? `Delivery ${studioReadiness.status}` : 'Delivery checking'}</Pill>
         <Pill tone={deliveryAudit?.summary?.actions ? 'hot' : 'default'}>{`${deliveryAudit?.summary?.actions || 0} actions`}</Pill>
         <Pill>{`${studioOverview?.totals?.pages || overviewPages.length} pages`}</Pill>
