@@ -2006,6 +2006,14 @@ class StudioApiTest(unittest.TestCase):
                 f"/api/studio/projects/{meta['projectId']}/delivery-bundle",
                 params={"source_segment_id": execution["segmentId"]},
             )
+            handoff = self.client.get(
+                "/api/studio/handoff-snapshot",
+                params={"project_id": meta["projectId"], "source_segment_id": execution["segmentId"]},
+            )
+            audit = self.client.get(
+                "/api/studio/delivery-audit",
+                params={"project_id": meta["projectId"], "source_segment_id": execution["segmentId"]},
+            )
 
         self.assertEqual(bundle.status_code, 200)
         body = bundle.json()
@@ -2016,6 +2024,24 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn(error_target["id"], error_by_id)
         self.assertEqual(error_by_id[error_target["id"]]["status"], "error")
         self.assertEqual(error_by_id[error_target["id"]]["message"], "operator saw broken target")
+
+        self.assertEqual(handoff.status_code, 200)
+        handoff_body = handoff.json()
+        self.assertFalse(handoff_body["readyForDelivery"])
+        handoff_gap_by_id = {gap["id"]: gap for gap in handoff_body["gaps"]}
+        expected_gap_id = f"dispatch-session:{session['sessionId']}:{error_target['id']}"
+        self.assertIn(expected_gap_id, handoff_gap_by_id)
+        self.assertEqual(handoff_gap_by_id[expected_gap_id]["kind"], "dispatch_target")
+        self.assertEqual(handoff_gap_by_id[expected_gap_id]["reason"], "error")
+        self.assertEqual(handoff_gap_by_id[expected_gap_id]["message"], "operator saw broken target")
+        handoff_action_by_id = {action["id"]: action for action in handoff_body["actions"]}
+        expected_action_id = f"dispatch-target:inspect-gap:{session['sessionId']}:{error_target['id']}"
+        self.assertIn(expected_action_id, handoff_action_by_id)
+        self.assertEqual(handoff_action_by_id[expected_action_id]["action"], "inspect-gap")
+
+        self.assertEqual(audit.status_code, 200)
+        audit_action_ids = {action["id"] for action in audit.json()["actions"]}
+        self.assertIn(expected_action_id, audit_action_ids)
 
     def test_job_queue_can_filter_by_page_and_agent(self) -> None:
         with self.client.stream(

@@ -1039,6 +1039,7 @@ def _coverage_gap_action(page: dict[str, Any]) -> tuple[str, str]:
 def _handoff_gaps_and_actions(
     coverage: dict[str, Any],
     delivery_report: dict[str, Any] | None,
+    project_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     gaps: list[dict[str, Any]] = []
     actions: list[dict[str, Any]] = []
@@ -1086,6 +1087,48 @@ def _handoff_gaps_and_actions(
                 "jobId": unresolved.get("jobId"),
             }
         )
+
+    if project_id:
+        for session in STUDIO_STORE.list_dispatch_sessions(project_id=project_id, limit=50):
+            session_view = _dispatch_session_view(session)
+            session_id = str(session_view.get("sessionId") or "")
+            for target in session_view.get("targets") or []:
+                target_status = str(target.get("status") or "pending")
+                if target_status != "error":
+                    continue
+                target_id = str(target.get("id") or "")
+                evidence = target.get("evidence") if isinstance(target.get("evidence"), dict) else {}
+                reason = "error"
+                action = "inspect-gap"
+                message = str(target.get("message") or evidence.get("message") or "Dispatch target needs operator review.")
+
+                gap = {
+                    "id": f"dispatch-session:{session_id}:{target_id}",
+                    "kind": "dispatch_target",
+                    "pageId": target.get("pageId"),
+                    "pageName": target.get("pageName"),
+                    "status": target_status,
+                    "reason": reason,
+                    "message": message,
+                    "missingRouteParams": target.get("missingRouteParams") or [],
+                    "sessionId": session_id,
+                    "targetId": target_id,
+                }
+                gaps.append(gap)
+                actions.append(
+                    {
+                        "id": f"dispatch-target:{action}:{session_id}:{target_id}",
+                        "action": action,
+                        "kind": "dispatch_target",
+                        "targetId": target_id,
+                        "targetName": target.get("pageName") or target.get("pageId"),
+                        "status": target_status,
+                        "reason": reason,
+                        "message": message,
+                        "pageId": target.get("pageId"),
+                        "sessionId": session_id,
+                    }
+                )
     return gaps, actions
 
 
@@ -1123,7 +1166,7 @@ async def _studio_handoff_snapshot(
     dispatch_matrix = _dispatch_matrix(project_id=project_id, source_segment_id=source_segment_id)
     coverage = _studio_coverage(project_id=project_id, source_segment_id=source_segment_id)
     delivery_report = _project_delivery_report(project) if project else None
-    gaps, actions = _handoff_gaps_and_actions(coverage, delivery_report)
+    gaps, actions = _handoff_gaps_and_actions(coverage, delivery_report, project_id=project_id)
     status = _handoff_status(
         readiness=readiness,
         coverage=coverage,

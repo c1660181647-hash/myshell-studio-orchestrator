@@ -269,6 +269,13 @@ function handoffPillTone(status?: string): 'default' | 'hot' | 'success' | 'dang
   return 'default';
 }
 
+function handoffItemPriority(item: { kind?: string; status?: string; reason?: string; action?: string }): number {
+  if (item.kind === 'dispatch_target') return 0;
+  if (item.status === 'error' || item.reason === 'error' || item.action === 'inspect-gap') return 1;
+  if (item.status === 'blocked' || item.reason === 'auth_missing') return 2;
+  return 3;
+}
+
 function actionLabel(action: StudioAction): string {
   return {
     generate: 'Generate',
@@ -849,6 +856,8 @@ function StudioHandoffSnapshotStrip({
   const summary = snapshot?.summary;
   const gaps = snapshot?.gaps || [];
   const actions = snapshot?.actions || [];
+  const visibleGaps = [...gaps].sort((first, second) => handoffItemPriority(first) - handoffItemPriority(second)).slice(0, 4);
+  const visibleActions = [...actions].sort((first, second) => handoffItemPriority(first) - handoffItemPriority(second)).slice(0, 4);
 
   return (
     <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
@@ -897,7 +906,7 @@ function StudioHandoffSnapshotStrip({
           <Pill>{`${bundle.summary.artifacts} bundle artifacts`}</Pill>
         </>
       )}
-      {gaps.slice(0, 4).map((gap) => (
+      {visibleGaps.map((gap) => (
         <span
           key={gap.id}
           title={gap.message || gap.reason}
@@ -908,7 +917,7 @@ function StudioHandoffSnapshotStrip({
           <span className="text-Cr-text-subtlest-v2">{gap.reason}</span>
         </span>
       ))}
-      {actions.slice(0, 4).map((action) => (
+      {visibleActions.map((action) => (
         <span
           key={action.id}
           title={action.message || action.reason || action.action}

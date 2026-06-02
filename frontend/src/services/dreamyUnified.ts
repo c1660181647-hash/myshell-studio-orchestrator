@@ -350,6 +350,8 @@ export interface StudioHandoffGap {
   kind: 'page' | 'job' | string;
   pageId?: StudioApi | string;
   pageName?: string;
+  sessionId?: string;
+  targetId?: string;
   status: StudioCoverageStatus | StudioStatus | string;
   reason: string;
   message?: string;
@@ -368,6 +370,7 @@ export interface StudioHandoffAction {
   pageId?: StudioApi | string;
   segmentId?: string;
   jobId?: string;
+  sessionId?: string;
 }
 
 export interface StudioHandoffArtifact {
