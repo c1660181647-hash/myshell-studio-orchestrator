@@ -1357,7 +1357,7 @@ def _handoff_gaps_and_actions(
             session_id = str(session_view.get("sessionId") or "")
             for target in session_view.get("targets") or []:
                 target_status = str(target.get("status") or "pending")
-                if target_status not in {"pending", "error"}:
+                if target_status not in {"pending", "visited", "error"}:
                     continue
                 target_id = str(target.get("id") or "")
                 evidence = target.get("evidence") if isinstance(target.get("evidence"), dict) else {}
@@ -1365,6 +1365,14 @@ def _handoff_gaps_and_actions(
                     reason = "pending"
                     action = "run-target"
                     message = str(target.get("message") or evidence.get("message") or "Dispatch target is pending; run it from the Studio queue.")
+                elif target_status == "visited":
+                    reason = "visited"
+                    action = "inspect-gap"
+                    message = str(
+                        target.get("message")
+                        or evidence.get("message")
+                        or "Dispatch target was opened but has not been marked done, skipped, or error."
+                    )
                 else:
                     reason = "error"
                     action = "inspect-gap"

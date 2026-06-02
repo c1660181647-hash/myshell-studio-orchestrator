@@ -2415,6 +2415,103 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn(visited_target["id"], remaining_by_id)
         self.assertEqual(remaining_by_id[visited_target["id"]]["status"], "visited")
 
+    def test_handoff_actions_keep_visited_dispatch_targets_visible(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            with self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={"message": "create visited handoff action source image"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                events = _sse_events("".join(response.iter_text()))
+
+            meta = next(payload for name, payload in events if name == "meta")
+            execution = next(payload for name, payload in events if name == "execution_request")
+            update = self.client.post(
+                f"/api/studio/projects/{meta['projectId']}/client-result",
+                json={
+                    "segmentId": execution["segmentId"],
+                    "jobId": execution["jobId"],
+                    "status": "done",
+                    "taskId": "task_visited_handoff_action_source",
+                    "url": "https://example.com/visited-handoff-action-source.png",
+                    "posterUrl": "https://example.com/visited-handoff-action-source.png",
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            session_response = self.client.post(
+                "/api/studio/dispatch-sessions",
+                json={
+                    "project_id": meta["projectId"],
+                    "source_segment_id": execution["segmentId"],
+                    "page_ids": ["explore"],
+                    "limit": 1,
+                },
+            )
+            self.assertEqual(session_response.status_code, 200)
+            session = session_response.json()
+            visited_target = session["nextTarget"]
+            visited = self.client.post(
+                f"/api/studio/dispatch-sessions/{session['sessionId']}/targets/{visited_target['id']}",
+                json={"status": "visited", "evidence": {"openedFrom": "handoff-visited-action-test"}},
+            )
+            self.assertEqual(visited.status_code, 200)
+
+            handoff = self.client.get(
+                "/api/studio/handoff-snapshot",
+                params={"project_id": meta["projectId"], "source_segment_id": execution["segmentId"]},
+            )
+            audit = self.client.get(
+                "/api/studio/delivery-audit",
+                params={"project_id": meta["projectId"], "source_segment_id": execution["segmentId"]},
+            )
+            resolved_action = self.client.post(
+                "/api/studio/actions/resolve",
+                json={
+                    "action": "inspect-gap",
+                    "target_id": visited_target["id"],
+                    "session_id": session["sessionId"],
+                    "project_id": meta["projectId"],
+                    "source_segment_id": execution["segmentId"],
+                },
+            )
+
+        expected_gap_id = f"dispatch-session:{session['sessionId']}:{visited_target['id']}"
+        expected_action_id = f"dispatch-target:inspect-gap:{session['sessionId']}:{visited_target['id']}"
+        expected_ui_url = f"/dreamy?dispatch_session_id={session['sessionId']}&target_id=dispatch%3Aexplore"
+
+        self.assertEqual(handoff.status_code, 200)
+        handoff_body = handoff.json()
+        handoff_gap_by_id = {gap["id"]: gap for gap in handoff_body["gaps"]}
+        self.assertIn(expected_gap_id, handoff_gap_by_id)
+        self.assertEqual(handoff_gap_by_id[expected_gap_id]["kind"], "dispatch_target")
+        self.assertEqual(handoff_gap_by_id[expected_gap_id]["status"], "visited")
+        self.assertEqual(handoff_gap_by_id[expected_gap_id]["reason"], "visited")
+        self.assertIn("not been marked", handoff_gap_by_id[expected_gap_id]["message"])
+        handoff_action_by_id = {action["id"]: action for action in handoff_body["actions"]}
+        self.assertIn(expected_action_id, handoff_action_by_id)
+        self.assertEqual(handoff_action_by_id[expected_action_id]["action"], "inspect-gap")
+        self.assertEqual(handoff_action_by_id[expected_action_id]["status"], "visited")
+        self.assertEqual(handoff_action_by_id[expected_action_id]["uiUrl"], expected_ui_url)
+
+        self.assertEqual(audit.status_code, 200)
+        audit_action_by_id = {action["id"]: action for action in audit.json()["actions"]}
+        self.assertIn(expected_action_id, audit_action_by_id)
+        self.assertEqual(audit_action_by_id[expected_action_id]["uiUrl"], expected_ui_url)
+
+        self.assertEqual(resolved_action.status_code, 200)
+        resolved_body = resolved_action.json()
+        self.assertEqual(resolved_body["status"], "manual_required")
+        self.assertEqual(resolved_body["next"]["uiUrl"], expected_ui_url)
+        self.assertEqual(resolved_body["next"]["targetId"], visited_target["id"])
+        self.assertEqual(resolved_body["next"]["sessionId"], session["sessionId"])
+
     def test_project_delivery_bundle_keeps_operator_skipped_targets(self) -> None:
         def fake_auth_status(page_id: str) -> dict:
             if page_id == "myshell-art":
