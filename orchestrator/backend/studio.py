@@ -1357,7 +1357,7 @@ def _handoff_gaps_and_actions(
             session_id = str(session_view.get("sessionId") or "")
             for target in session_view.get("targets") or []:
                 target_status = str(target.get("status") or "pending")
-                if target_status not in {"pending", "visited", "error"}:
+                if target_status not in {"pending", "visited", "error", "cancelled"}:
                     continue
                 target_id = str(target.get("id") or "")
                 evidence = target.get("evidence") if isinstance(target.get("evidence"), dict) else {}
@@ -1372,6 +1372,14 @@ def _handoff_gaps_and_actions(
                         target.get("message")
                         or evidence.get("message")
                         or "Dispatch target was opened but has not been marked done, skipped, or error."
+                    )
+                elif target_status == "cancelled":
+                    reason = "cancelled"
+                    action = "retry-queue"
+                    message = str(
+                        target.get("message")
+                        or evidence.get("message")
+                        or "Dispatch target was cancelled before completion; retry the queue to reopen it."
                     )
                 else:
                     reason = "error"
@@ -2106,6 +2114,24 @@ def _manual_action_instruction(action: str, target_id: str, *, session_id: str |
             "endpoint": "/api/studio/handoff-snapshot",
             "targetId": target_id,
         }
+    if action == "retry-queue":
+        if session_id:
+            return {
+                "label": "Retry dispatch queue",
+                "message": "Retry this dispatch session to reopen cancelled or errored targets, then continue from the next pending target.",
+                "endpoint": "/api/studio/dispatch-sessions/{session_id}",
+                "retryEndpoint": "/api/studio/dispatch-sessions/{session_id}/retry",
+                "uiUrl": _dispatch_session_ui_url(session_id, target_id),
+                "query": {"target_id": target_id},
+                "targetId": target_id,
+                "sessionId": session_id,
+            }
+        return {
+            "label": "Retry dispatch queue",
+            "message": "Open the related dispatch session and retry cancelled or errored targets.",
+            "endpoint": "/api/studio/dispatch-sessions/{session_id}",
+            "targetId": target_id,
+        }
     if action == "wait-for-adapter":
         return {
             "label": "Wait for adapter",
@@ -2212,6 +2238,31 @@ async def _resolve_studio_action(payload: dict[str, Any] | None) -> dict[str, An
             "audit": audit,
         }
 
+    if action == "retry-queue":
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required for retry-queue")
+        session = _retry_dispatch_session(session_id)
+        resolved_project_id = session.get("projectId") or project_id
+        resolved_source_segment_id = session.get("sourceSegmentId") or source_segment_id
+        audit = await _studio_delivery_audit(
+            project_id=resolved_project_id,
+            source_segment_id=resolved_source_segment_id,
+        )
+        pending = int((session.get("summary") or {}).get("pending") or 0)
+        return {
+            "status": "executed",
+            "checkedAt": now_iso(),
+            "action": action,
+            "targetId": target_id,
+            "sessionId": session_id,
+            "projectId": resolved_project_id,
+            "sourceSegmentId": resolved_source_segment_id,
+            "resultType": "dispatch-session-retry",
+            "message": f"Retried dispatch session {session_id}; {pending} target(s) pending.",
+            "result": {"session": session},
+            "audit": audit,
+        }
+
     if action in MANUAL_STUDIO_ACTIONS:
         audit = await _studio_delivery_audit(project_id=project_id, source_segment_id=source_segment_id)
         return {
@@ -2257,6 +2308,7 @@ async def _resolve_studio_actions_batch(payload: dict[str, Any] | None) -> dict[
 
     verify_page_ids = []
     run_target_actions: list[dict[str, str]] = []
+    retry_queue_actions: list[dict[str, str]] = []
     manual_actions: list[dict[str, Any]] = []
     skipped_actions: list[dict[str, Any]] = []
     for item in normalized_actions:
@@ -2277,6 +2329,20 @@ async def _resolve_studio_actions_batch(payload: dict[str, Any] | None) -> dict[
                         "resultType": "dispatch-target-run",
                         "reason": "missing_session_id",
                         "message": "run-target requires session_id.",
+                    }
+                )
+        elif action == "retry-queue":
+            if session_id:
+                retry_queue_actions.append({"targetId": target_id, "sessionId": session_id})
+            else:
+                skipped_actions.append(
+                    {
+                        "status": "skipped",
+                        "action": action,
+                        "targetId": target_id,
+                        "resultType": "dispatch-session-retry",
+                        "reason": "missing_session_id",
+                        "message": "retry-queue requires session_id.",
                     }
                 )
         elif action in MANUAL_STUDIO_ACTIONS:
@@ -2376,6 +2442,39 @@ async def _resolve_studio_actions_batch(payload: dict[str, Any] | None) -> dict[
                 "jobId": (result.get("job") or {}).get("jobId"),
                 "message": f"Ran dispatch target {target_id}.",
                 "result": result,
+            }
+        )
+
+    for item in retry_queue_actions:
+        target_id = item["targetId"]
+        session_id = item["sessionId"]
+        try:
+            session = _retry_dispatch_session(session_id)
+        except HTTPException as exc:
+            skipped_actions.append(
+                {
+                    "status": "skipped",
+                    "action": "retry-queue",
+                    "targetId": target_id,
+                    "sessionId": session_id,
+                    "resultType": "dispatch-session-retry",
+                    "reason": f"http_{exc.status_code}",
+                    "message": str(exc.detail),
+                }
+            )
+            continue
+        resolved_project_id = session.get("projectId") or resolved_project_id
+        resolved_source_segment_id = session.get("sourceSegmentId") or resolved_source_segment_id
+        pending = int((session.get("summary") or {}).get("pending") or 0)
+        executed_actions.append(
+            {
+                "status": "executed",
+                "action": "retry-queue",
+                "targetId": target_id,
+                "sessionId": session_id,
+                "resultType": "dispatch-session-retry",
+                "message": f"Retried dispatch session {session_id}; {pending} target(s) pending.",
+                "result": {"session": session},
             }
         )
 

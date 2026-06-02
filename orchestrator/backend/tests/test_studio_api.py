@@ -1868,6 +1868,141 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(len(bundle_body["cancelledTargets"]), body["summary"]["targetCancelled"])
         self.assertTrue(all(target["status"] == "cancelled" for target in bundle_body["cancelledTargets"]))
 
+    def test_audit_actions_can_retry_cancelled_dispatch_targets(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            with self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={"message": "create cancelled dispatch retry source image"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                events = _sse_events("".join(response.iter_text()))
+
+            meta = next(payload for name, payload in events if name == "meta")
+            execution = next(payload for name, payload in events if name == "execution_request")
+            source_url = "https://example.com/cancelled-dispatch-retry-source.png"
+            update = self.client.post(
+                f"/api/studio/projects/{meta['projectId']}/client-result",
+                json={
+                    "segmentId": execution["segmentId"],
+                    "jobId": execution["jobId"],
+                    "status": "done",
+                    "taskId": "task_cancelled_dispatch_retry_source",
+                    "url": source_url,
+                    "posterUrl": source_url,
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            session_response = self.client.post(
+                "/api/studio/dispatch-sessions",
+                json={
+                    "project_id": meta["projectId"],
+                    "source_segment_id": execution["segmentId"],
+                    "page_ids": ["explore"],
+                    "limit": 1,
+                },
+            )
+            self.assertEqual(session_response.status_code, 200)
+            session = session_response.json()
+            target = session["nextTarget"]
+            cancelled = self.client.post(f"/api/studio/dispatch-sessions/{session['sessionId']}/cancel")
+            self.assertEqual(cancelled.status_code, 200)
+
+            handoff = self.client.get(
+                "/api/studio/handoff-snapshot",
+                params={"project_id": meta["projectId"], "source_segment_id": execution["segmentId"]},
+            )
+            audit = self.client.get(
+                "/api/studio/delivery-audit",
+                params={"project_id": meta["projectId"], "source_segment_id": execution["segmentId"]},
+            )
+            batch_retry = self.client.post(
+                "/api/studio/actions/resolve-batch",
+                json={
+                    "project_id": meta["projectId"],
+                    "source_segment_id": execution["segmentId"],
+                    "actions": [
+                        {
+                            "action": "retry-queue",
+                            "target_id": target["id"],
+                            "session_id": session["sessionId"],
+                        }
+                    ],
+                },
+            )
+            self.assertEqual(batch_retry.status_code, 200)
+
+            second_session_response = self.client.post(
+                "/api/studio/dispatch-sessions",
+                json={
+                    "project_id": meta["projectId"],
+                    "source_segment_id": execution["segmentId"],
+                    "page_ids": ["library"],
+                    "limit": 1,
+                },
+            )
+            self.assertEqual(second_session_response.status_code, 200)
+            second_session = second_session_response.json()
+            second_target = second_session["nextTarget"]
+            second_cancelled = self.client.post(f"/api/studio/dispatch-sessions/{second_session['sessionId']}/cancel")
+            self.assertEqual(second_cancelled.status_code, 200)
+            single_retry = self.client.post(
+                "/api/studio/actions/resolve",
+                json={
+                    "action": "retry-queue",
+                    "target_id": second_target["id"],
+                    "session_id": second_session["sessionId"],
+                    "project_id": meta["projectId"],
+                    "source_segment_id": execution["segmentId"],
+                },
+            )
+
+        expected_gap_id = f"dispatch-session:{session['sessionId']}:{target['id']}"
+        expected_retry_action_id = f"dispatch-target:retry-queue:{session['sessionId']}:{target['id']}"
+        expected_run_action_id = f"dispatch-target:run-target:{session['sessionId']}:{target['id']}"
+        expected_ui_url = f"/dreamy?dispatch_session_id={session['sessionId']}&target_id=dispatch%3Aexplore"
+
+        self.assertEqual(handoff.status_code, 200)
+        handoff_body = handoff.json()
+        handoff_gap_by_id = {gap["id"]: gap for gap in handoff_body["gaps"]}
+        self.assertIn(expected_gap_id, handoff_gap_by_id)
+        self.assertEqual(handoff_gap_by_id[expected_gap_id]["status"], "cancelled")
+        self.assertEqual(handoff_gap_by_id[expected_gap_id]["reason"], "cancelled")
+        self.assertIn("retry", handoff_gap_by_id[expected_gap_id]["message"].lower())
+        handoff_action_by_id = {action["id"]: action for action in handoff_body["actions"]}
+        self.assertIn(expected_retry_action_id, handoff_action_by_id)
+        self.assertEqual(handoff_action_by_id[expected_retry_action_id]["action"], "retry-queue")
+        self.assertEqual(handoff_action_by_id[expected_retry_action_id]["uiUrl"], expected_ui_url)
+
+        self.assertEqual(audit.status_code, 200)
+        audit_action_by_id = {action["id"]: action for action in audit.json()["actions"]}
+        self.assertIn(expected_retry_action_id, audit_action_by_id)
+        self.assertEqual(audit_action_by_id[expected_retry_action_id]["action"], "retry-queue")
+
+        batch_body = batch_retry.json()
+        self.assertEqual(batch_body["status"], "executed")
+        self.assertEqual(batch_body["summary"]["executed"], 1)
+        self.assertEqual(batch_body["executedActions"][0]["action"], "retry-queue")
+        self.assertEqual(batch_body["executedActions"][0]["resultType"], "dispatch-session-retry")
+        retried_session = batch_body["executedActions"][0]["result"]["session"]
+        self.assertEqual(retried_session["summary"]["pending"], 1)
+        self.assertEqual(retried_session["nextTarget"]["id"], target["id"])
+        post_retry_action_by_id = {action["id"]: action for action in batch_body["audit"]["actions"]}
+        self.assertIn(expected_run_action_id, post_retry_action_by_id)
+
+        self.assertEqual(single_retry.status_code, 200)
+        single_body = single_retry.json()
+        self.assertEqual(single_body["status"], "executed")
+        self.assertEqual(single_body["resultType"], "dispatch-session-retry")
+        self.assertEqual(single_body["result"]["session"]["summary"]["pending"], 1)
+        self.assertEqual(single_body["result"]["session"]["nextTarget"]["id"], second_target["id"])
+
     def test_dispatch_session_retry_reopens_cancelled_and_error_targets(self) -> None:
         def fake_auth_status(page_id: str) -> dict:
             if page_id == "myshell-art":

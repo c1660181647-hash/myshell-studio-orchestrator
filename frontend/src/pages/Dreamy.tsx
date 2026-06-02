@@ -103,6 +103,7 @@ import type {
   StudioDispatchBatchPlan,
   StudioDispatchBatchTarget,
   StudioDispatchSession,
+  StudioDispatchSessionRetryResult,
   StudioDispatchSessionTarget,
   StudioDispatchSessionTargetRunResult,
   StudioDispatchPreview,
@@ -678,6 +679,12 @@ function isDispatchTargetRunResult(
   return Boolean(result && typeof result === 'object' && 'session' in result && 'target' in result);
 }
 
+function isDispatchSessionRetryResult(
+  result: StudioActionResolveResult['result'],
+): result is StudioDispatchSessionRetryResult {
+  return Boolean(result && typeof result === 'object' && 'session' in result && !('target' in result));
+}
+
 function StudioArtifactLinks({
   artifacts,
   limit = 4,
@@ -732,7 +739,9 @@ function StudioDeliveryAuditStrip({
   const gaps = (audit?.requirements || []).filter((item) => item.status !== 'ready');
   const actions = audit?.actions || [];
   const visibleActions = [...actions].sort((first, second) => handoffItemPriority(first) - handoffItemPriority(second)).slice(0, 3);
-  const safeActionCount = actions.filter((action) => action.action === 'verify-ready' || action.action === 'run-target').length;
+  const safeActionCount = actions.filter(
+    (action) => action.action === 'verify-ready' || action.action === 'run-target' || action.action === 'retry-queue',
+  ).length;
 
   return (
     <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
@@ -3596,6 +3605,22 @@ export default function Dreamy() {
         return;
       }
 
+      if (isDispatchSessionRetryResult(result.result)) {
+        const retrySession = result.result.session;
+        applyDispatchSession(retrySession);
+        applyDeliveryAudit(result.audit);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: makeId('assistant'),
+            role: 'assistant',
+            content: `Dispatch queue retried; ${retrySession.summary.pending} target${retrySession.summary.pending === 1 ? '' : 's'} pending.`,
+            createdAt: nowIso(),
+          },
+        ]);
+        return;
+      }
+
       if (result.result && 'project' in result.result && result.result.project) mergeProject(result.result.project);
       if (result.result && 'jobs' in result.result) result.result.jobs?.forEach((job) => mergeJob(job));
       applyDeliveryAudit(result.audit);
@@ -3646,7 +3671,7 @@ export default function Dreamy() {
   const resolveSafeAuditActions = useCallback(async () => {
     if (resolvingAuditBatch || resolvingAuditActionId || !deliveryAudit) return;
     const safeActions = deliveryAudit.actions
-      .filter((action) => action.action === 'verify-ready' || action.action === 'run-target')
+      .filter((action) => action.action === 'verify-ready' || action.action === 'run-target' || action.action === 'retry-queue')
       .map((action) => ({
         action: action.action,
         targetId: action.targetId || action.pageId || action.segmentId || action.jobId || action.id,
@@ -3708,6 +3733,10 @@ export default function Dreamy() {
             content: `Batch audit target ${targetRun.target.pageName || targetRun.target.pageId || targetRun.target.id} is ready for operator review.`,
           });
         }
+      }
+      for (const executedAction of result.executedActions) {
+        if (!isDispatchSessionRetryResult(executedAction.result)) continue;
+        applyDispatchSession(executedAction.result.session);
       }
       if (dispatchedTargets) {
         const refreshedAudit = await fetchStudioDeliveryAudit({

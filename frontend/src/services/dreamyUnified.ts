@@ -575,7 +575,7 @@ export interface StudioActionResolveResult {
     targetId?: string;
     sessionId?: string;
   };
-  result?: StudioCoverageVerifyResult | StudioDispatchSessionTargetRunResult;
+  result?: StudioCoverageVerifyResult | StudioDispatchSessionTargetRunResult | StudioDispatchSessionRetryResult;
   audit: StudioDeliveryAudit;
 }
 
@@ -599,7 +599,7 @@ export interface StudioActionResolveBatchResult {
     resultType: string;
     jobId?: string;
     message?: string;
-    result?: StudioCoverageVerifyResult | StudioDispatchSessionTargetRunResult;
+    result?: StudioCoverageVerifyResult | StudioDispatchSessionTargetRunResult | StudioDispatchSessionRetryResult;
   }>;
   manualActions: Array<{
     status: string;
@@ -642,6 +642,10 @@ export interface StudioDispatchBatchTarget {
   projectId?: string | null;
   sourceSegmentId?: string | null;
   sourceMediaUrl?: string;
+}
+
+export interface StudioDispatchSessionRetryResult {
+  session: StudioDispatchSession;
 }
 
 export interface StudioDispatchBatchSkip {
