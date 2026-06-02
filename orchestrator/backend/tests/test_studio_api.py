@@ -386,6 +386,23 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(art_auth["status"], "auth_missing")
         self.assertEqual(art_auth["injectionStatus"], "error")
 
+    def test_health_reports_invalid_cookie_shape_as_error(self) -> None:
+        with patch.dict(os.environ, {"MYSHELL_COOKIES": json.dumps([{"value": "redacted"}])}):
+            health = self.client.get("/api/health")
+            pages = self.client.get("/api/pages")
+
+        self.assertEqual(health.status_code, 200)
+        components = health.json()["components"]
+        self.assertEqual(components["myshellCookies"]["status"], "error")
+        self.assertIn("name and value", components["myshellCookies"]["message"])
+        self.assertEqual(components["cookieInjection"]["status"], "error")
+        self.assertIn("name and value", components["cookieInjection"]["message"])
+
+        page_by_id = {page["id"]: page for page in pages.json()["pages"]}
+        art_auth = page_by_id["myshell-art"]["authStatus"]
+        self.assertEqual(art_auth["status"], "auth_missing")
+        self.assertEqual(art_auth["injectionStatus"], "error")
+
     def test_health_degrades_when_myshell_cookie_auth_is_missing(self) -> None:
         import studio_runtime
 

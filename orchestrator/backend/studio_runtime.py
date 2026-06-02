@@ -33,6 +33,15 @@ def _cookie_payload_status(payload: Any, *, mode: str, source: str) -> dict[str,
             "cookieCount": 0,
             "message": f"{source} contains no cookies",
         }
+    for index, cookie in enumerate(payload):
+        if not isinstance(cookie, dict) or not cookie.get("name") or cookie.get("value") is None:
+            return {
+                "status": "error",
+                "mode": mode,
+                "source": source,
+                "cookieCount": len(payload),
+                "message": f"{source}[{index}] must include cookie name and value",
+            }
     return {
         "status": "ready",
         "mode": mode,
