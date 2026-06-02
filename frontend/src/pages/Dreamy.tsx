@@ -941,6 +941,8 @@ function StudioDispatchBatchStrip({
   onStartSession,
   onOpenTarget,
   onCompleteTarget,
+  onErrorTarget,
+  onSkipTarget,
 }: {
   plan: StudioDispatchBatchPlan | null;
   session: StudioDispatchSession | null;
@@ -950,6 +952,8 @@ function StudioDispatchBatchStrip({
   onStartSession: () => void;
   onOpenTarget: (target: StudioDispatchBatchTarget | StudioDispatchSessionTarget) => void;
   onCompleteTarget: (target: StudioDispatchSessionTarget) => void;
+  onErrorTarget: (target: StudioDispatchSessionTarget) => void;
+  onSkipTarget: (target: StudioDispatchSessionTarget) => void;
 }) {
   const summary = plan?.summary;
   const sessionSummary = session?.summary;
@@ -1003,6 +1007,24 @@ function StudioDispatchBatchStrip({
       >
         <CheckCircle2 size={12} />
         Mark Done
+      </button>
+      <button
+        type="button"
+        disabled={!visitedTarget || sessionRunning}
+        onClick={() => visitedTarget && onErrorTarget(visitedTarget)}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <AlertTriangle size={12} />
+        Mark Error
+      </button>
+      <button
+        type="button"
+        disabled={!visitedTarget || sessionRunning}
+        onClick={() => visitedTarget && onSkipTarget(visitedTarget)}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <X size={12} />
+        Skip
       </button>
       {summary && (
         <>
@@ -2609,6 +2631,64 @@ export default function Dreamy() {
     [dispatchSession?.sessionId, dispatchSessionRunning, project?.projectId, refreshHandoffSnapshot, studioContextSourceSegmentId],
   );
 
+  const reviewDispatchSessionTarget = useCallback(
+    async (target: StudioDispatchSessionTarget, status: 'skipped' | 'error') => {
+      if (!dispatchSession?.sessionId || dispatchSessionRunning) return;
+      setDispatchSessionRunning(true);
+      try {
+        const isError = status === 'error';
+        const session = await updateStudioDispatchSessionTarget({
+          sessionId: dispatchSession.sessionId,
+          targetId: target.id,
+          status,
+          evidence: isError
+            ? {
+                message: 'Operator marked this dispatch target as broken from Studio.',
+                pageId: target.pageId,
+                navigationPath: target.navigationPath || '',
+              }
+            : {
+                reason: 'operator skipped from Studio dispatch queue',
+                pageId: target.pageId,
+                navigationPath: target.navigationPath || '',
+              },
+        });
+        setDispatchSession(session);
+        const snapshot = await refreshHandoffSnapshot({
+          projectId: session.projectId || project?.projectId,
+          sourceSegmentId: session.sourceSegmentId || studioContextSourceSegmentId,
+          interactive: false,
+        });
+        if (snapshot) {
+          setDispatchBatchPlan((current) => current ? { ...current, handoffSnapshot: snapshot } : current);
+        }
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: makeId('assistant'),
+            role: 'assistant',
+            content: `${target.pageName} marked ${isError ? 'error' : 'skipped'}; ${session.summary.pending} target${session.summary.pending === 1 ? '' : 's'} pending.`,
+            createdAt: nowIso(),
+          },
+        ]);
+      } catch (error) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: makeId('assistant'),
+            role: 'assistant',
+            content: 'Dispatch queue review update failed.',
+            error: error instanceof Error ? error.message : String(error),
+            createdAt: nowIso(),
+          },
+        ]);
+      } finally {
+        setDispatchSessionRunning(false);
+      }
+    },
+    [dispatchSession?.sessionId, dispatchSessionRunning, project?.projectId, refreshHandoffSnapshot, studioContextSourceSegmentId],
+  );
+
   const openDispatchBatchTarget = useCallback(
     async (target: StudioDispatchBatchTarget | StudioDispatchSessionTarget) => {
       const targetPath = normalizeStudioNavigationPath(target.navigationPath);
@@ -3649,6 +3729,8 @@ export default function Dreamy() {
         onStartSession={() => void startDispatchSession()}
         onOpenTarget={(target) => void openDispatchBatchTarget(target)}
         onCompleteTarget={(target) => void completeDispatchSessionTarget(target)}
+        onErrorTarget={(target) => void reviewDispatchSessionTarget(target, 'error')}
+        onSkipTarget={(target) => void reviewDispatchSessionTarget(target, 'skipped')}
       />
 
       <div className="grid shrink-0 gap-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
