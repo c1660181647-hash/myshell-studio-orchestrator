@@ -57,3 +57,12 @@ The Cloud Run startup script writes the latest cookie injection result to `.stud
 cd orchestrator
 python -m unittest discover -s backend/tests -v
 ```
+
+After the backend is running, verify the operator delivery surface:
+
+```bash
+cd orchestrator/backend
+python -m studio_smoke --base-url http://127.0.0.1:8090
+```
+
+The smoke validates health, page registry, agent registry, required readiness gates, dispatch matrix coverage, coverage summary, and delivery audit artifacts.

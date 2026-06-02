@@ -169,6 +169,15 @@ cd orchestrator
 python -m unittest discover -s backend/tests -v
 ```
 
+Running backend smoke after the service starts:
+
+```bash
+cd orchestrator/backend
+python -m studio_smoke --base-url http://127.0.0.1:8090
+```
+
+The smoke checks `/api/health`, `/api/pages`, `/api/agents`, readiness, dispatch matrix, coverage, and delivery audit. It fails if required MyShell pages or agents are missing, required readiness gates are blocked, or delivery artifacts are not exposed.
+
 Cloud Run build from repository root:
 
 ```bash
