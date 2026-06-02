@@ -2,7 +2,7 @@
 MyShell Art Bridge — calls bridge_worker.py as subprocess.
 Passes args via temp file. Streams progress lines from worker stdout.
 """
-import json, asyncio, os, tempfile
+import json, asyncio, os, sys, tempfile
 
 WORKER_PATH = os.path.join(os.path.dirname(__file__), "bridge_worker.py")
 
@@ -25,7 +25,7 @@ async def generate_via_bot(bot_slug: str, prompt: str = "", gen_button: str = ""
     
     try:
         proc = await asyncio.create_subprocess_exec(
-            "python3", WORKER_PATH, args_file,
+            sys.executable, WORKER_PATH, args_file,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=os.path.dirname(__file__)

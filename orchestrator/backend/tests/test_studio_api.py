@@ -501,6 +501,7 @@ class StudioApiTest(unittest.TestCase):
         import myshell_bridge
 
         captured_payload: dict = {}
+        captured_command: list[str] = []
 
         class FakeStdout:
             def __init__(self) -> None:
@@ -528,6 +529,7 @@ class StudioApiTest(unittest.TestCase):
                 return 0
 
         async def fake_create_subprocess_exec(*args, **kwargs) -> FakeProcess:
+            captured_command.extend(str(arg) for arg in args)
             captured_payload.update(json.loads(Path(args[2]).read_text(encoding="utf-8")))
             return FakeProcess()
 
@@ -542,6 +544,7 @@ class StudioApiTest(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "done")
+        self.assertEqual(captured_command[0], sys.executable)
         self.assertEqual(captured_payload["prompt"], "cinematic red lantern city")
 
     def test_bridge_worker_fills_prompt_textarea_before_generate(self) -> None:
