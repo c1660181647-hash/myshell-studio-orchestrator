@@ -13,7 +13,7 @@ DEFAULT_COOKIE_INJECTION_STATUS_PATH = os.path.join(os.path.dirname(__file__), "
 
 
 def cdp_url() -> str:
-    return os.environ.get("MYSHELL_CDP_URL", DEFAULT_CDP_URL).rstrip("/")
+    return (os.environ.get("MYSHELL_CDP_URL") or DEFAULT_CDP_URL).rstrip("/")
 
 
 def cookies_available() -> bool:

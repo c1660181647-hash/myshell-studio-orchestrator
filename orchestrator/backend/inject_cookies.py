@@ -11,7 +11,7 @@ STATUS_PATH = os.environ.get(
 )
 
 def _cdp_url():
-    return os.environ.get("MYSHELL_CDP_URL", DEFAULT_CDP_URL)
+    return (os.environ.get("MYSHELL_CDP_URL") or DEFAULT_CDP_URL).rstrip("/")
 
 def _write_status(status, message, cookie_count=0, energy_display=""):
     os.makedirs(os.path.dirname(STATUS_PATH), exist_ok=True)

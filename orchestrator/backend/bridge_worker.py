@@ -11,7 +11,7 @@ import websockets, httpx
 DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 
 def _cdp_url():
-    return os.environ.get("MYSHELL_CDP_URL", DEFAULT_CDP_URL)
+    return (os.environ.get("MYSHELL_CDP_URL") or DEFAULT_CDP_URL).rstrip("/")
 
 async def generate(bot_slug, gen_button, image_b64, prompt=""):
     cdp_url = _cdp_url()

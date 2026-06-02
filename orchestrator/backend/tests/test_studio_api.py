@@ -400,6 +400,21 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(captured_urls, ["http://127.0.0.1:9333/json"])
         self.assertEqual(health["components"]["chromeCdp"]["url"], "http://127.0.0.1:9333")
 
+    def test_cdp_url_helpers_fallback_and_strip_trailing_slash(self) -> None:
+        import bridge_worker
+        import inject_cookies
+        import studio_runtime
+
+        with patch.dict(os.environ, {"MYSHELL_CDP_URL": ""}):
+            self.assertEqual(studio_runtime.cdp_url(), "http://127.0.0.1:9222")
+            self.assertEqual(inject_cookies._cdp_url(), "http://127.0.0.1:9222")
+            self.assertEqual(bridge_worker._cdp_url(), "http://127.0.0.1:9222")
+
+        with patch.dict(os.environ, {"MYSHELL_CDP_URL": "http://cdp.internal:9333/"}):
+            self.assertEqual(studio_runtime.cdp_url(), "http://cdp.internal:9333")
+            self.assertEqual(inject_cookies._cdp_url(), "http://cdp.internal:9333")
+            self.assertEqual(bridge_worker._cdp_url(), "http://cdp.internal:9333")
+
     def test_myshell_art_auth_requires_successful_cookie_injection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             status_path = Path(tmp_dir) / "cookie-injection-status.json"
