@@ -801,6 +801,16 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("/app/frontend/src/App.tsx", content)
         self.assertIn("COPY --from=frontend-build /app/frontend/src/App.tsx", content)
 
+    def test_cloud_start_script_uses_configured_cdp_url_consistently(self) -> None:
+        start_script = BACKEND_DIR.parent / "start-cloud.sh"
+        content = start_script.read_text(encoding="utf-8")
+
+        self.assertIn("MYSHELL_CDP_URL", content)
+        self.assertIn("--remote-debugging-port=${MYSHELL_CDP_PORT}", content)
+        self.assertIn("--remote-debugging-address=${MYSHELL_CDP_HOST}", content)
+        self.assertIn('curl -s "$MYSHELL_CDP_URL/json"', content)
+        self.assertNotIn("curl -s http://127.0.0.1:9222/json", content)
+
     def test_delivery_audit_packages_machine_readable_acceptance_evidence(self) -> None:
         with self.client.stream(
             "POST",
