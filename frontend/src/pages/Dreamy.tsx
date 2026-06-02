@@ -616,9 +616,15 @@ function artifactHref(artifact: StudioHandoffArtifact): string {
 }
 
 function actionUiHref(action: StudioHandoffAction): string {
-  if (!action.uiUrl) return '';
-  if (/^https?:\/\//i.test(action.uiUrl)) return action.uiUrl;
-  return action.uiUrl.startsWith('/') ? action.uiUrl : `/${action.uiUrl}`;
+  const appHref = action.uiUrl || action.next?.uiUrl || '';
+  if (appHref) {
+    if (/^https?:\/\//i.test(appHref)) return appHref;
+    return appHref.startsWith('/') ? appHref : `/${appHref}`;
+  }
+  const apiHref = action.url || action.next?.url || action.retryUrl || action.next?.retryUrl || action.cancelUrl || action.next?.cancelUrl || '';
+  if (!apiHref) return '';
+  if (/^https?:\/\//i.test(apiHref)) return apiHref;
+  return getStudioRootEndpoint(apiHref);
 }
 
 function absoluteAppHref(href: string): string {
@@ -815,7 +821,7 @@ function StudioDeliveryAuditStrip({
                 href={uiHref}
                 target="_blank"
                 rel="noreferrer"
-                title={action.uiUrl}
+                title={uiHref}
                 className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-1.5 text-[11px] font-semibold text-Cr-text-subtler-v2 hover:bg-Cr-beta-white-8-v2"
               >
                 <ExternalLink size={12} className="text-Cr-text-subtlest-v2" />
@@ -1047,7 +1053,7 @@ function StudioHandoffSnapshotStrip({
                 href={uiHref}
                 target="_blank"
                 rel="noreferrer"
-                title={action.uiUrl}
+                title={uiHref}
                 className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-1.5 text-[11px] font-semibold text-Cr-text-subtler-v2 hover:bg-Cr-beta-white-8-v2"
               >
                 <ExternalLink size={12} className="text-Cr-text-subtlest-v2" />

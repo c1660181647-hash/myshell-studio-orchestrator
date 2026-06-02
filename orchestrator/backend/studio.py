@@ -1414,7 +1414,7 @@ def _handoff_gaps_and_actions(
                         "uiUrl": _dispatch_session_ui_url(session_id, target_id),
                     }
                 )
-    return gaps, actions
+    return gaps, [_action_with_operator_instruction(action) for action in actions]
 
 
 def _handoff_status(
@@ -1677,7 +1677,7 @@ def _delivery_audit_actions(
             continue
         if action_id:
             seen_ids.add(action_id)
-        deduped.append(action)
+        deduped.append(_action_with_operator_instruction(action))
     return deduped
 
 
@@ -2174,6 +2174,32 @@ def _manual_action_instruction(action: str, target_id: str, *, session_id: str |
         "message": "Inspect the related requirement, dispatch target, or job evidence before retrying.",
         "targetId": target_id,
     }
+
+
+def _action_with_operator_instruction(action: dict[str, Any]) -> dict[str, Any]:
+    action_name = str(action.get("action") or "")
+    if action_name not in MANUAL_STUDIO_ACTIONS and action_name != "retry-queue":
+        return action
+
+    target_id = str(
+        action.get("targetId")
+        or action.get("jobId")
+        or action.get("segmentId")
+        or action.get("pageId")
+        or ""
+    )
+    if not target_id:
+        return action
+
+    session_id = str(action.get("sessionId") or "") or None
+    next_instruction = _materialize_operator_instruction(
+        _manual_action_instruction(action_name, target_id, session_id=session_id)
+    )
+    enriched = {**action, "next": next_instruction}
+    for key in ("url", "retryUrl", "cancelUrl", "uiUrl"):
+        if next_instruction.get(key) and not enriched.get(key):
+            enriched[key] = next_instruction[key]
+    return enriched
 
 
 async def _resolve_studio_action(payload: dict[str, Any] | None) -> dict[str, Any]:

@@ -448,6 +448,8 @@ class StudioApiTest(unittest.TestCase):
         action_by_target = {action.get("targetId"): action for action in body["actions"] if action.get("targetId")}
         self.assertIn("myshell-art", action_by_target)
         self.assertEqual(action_by_target["myshell-art"]["action"], "restore-auth")
+        self.assertEqual(action_by_target["myshell-art"]["next"]["env"], "MYSHELL_COOKIES")
+        self.assertIn("Restore MyShell auth", action_by_target["myshell-art"]["next"]["label"])
         handoff_action_ids = {action["id"] for action in body["reports"]["handoffSnapshot"]["actions"]}
         audit_action_ids = {action["id"] for action in body["actions"]}
         self.assertTrue(handoff_action_ids.issubset(audit_action_ids))
@@ -1511,6 +1513,8 @@ class StudioApiTest(unittest.TestCase):
         action_by_target = {action.get("targetId"): action for action in body["actions"] if action.get("targetId")}
         self.assertIn("myshell-art", action_by_target)
         self.assertEqual(action_by_target["myshell-art"]["action"], "restore-auth")
+        self.assertEqual(action_by_target["myshell-art"]["next"]["env"], "MYSHELL_COOKIES")
+        self.assertIn("Restore MyShell auth", action_by_target["myshell-art"]["next"]["label"])
 
     def test_dispatch_batch_plans_ready_targets_and_skips_blocked_pages(self) -> None:
         def fake_auth_status(page_id: str) -> dict:

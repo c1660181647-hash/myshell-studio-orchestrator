@@ -399,6 +399,23 @@ export interface StudioHandoffGap {
   missingRouteParams?: string[];
 }
 
+export interface StudioOperatorActionNext {
+  label?: string;
+  message?: string;
+  env?: string;
+  command?: string;
+  endpoint?: string;
+  url?: string;
+  retryEndpoint?: string;
+  retryUrl?: string;
+  cancelEndpoint?: string;
+  cancelUrl?: string;
+  uiUrl?: string;
+  query?: Record<string, unknown>;
+  targetId?: string;
+  sessionId?: string;
+}
+
 export interface StudioHandoffAction {
   id: string;
   action: string;
@@ -413,6 +430,10 @@ export interface StudioHandoffAction {
   jobId?: string;
   sessionId?: string;
   uiUrl?: string;
+  url?: string;
+  retryUrl?: string;
+  cancelUrl?: string;
+  next?: StudioOperatorActionNext;
 }
 
 export interface StudioHandoffArtifact {
@@ -559,22 +580,7 @@ export interface StudioActionResolveResult {
   sourceSegmentId?: string | null;
   resultType: 'coverage-verify' | 'operator-instruction' | string;
   message?: string;
-  next?: {
-    label?: string;
-    message?: string;
-    env?: string;
-    command?: string;
-    endpoint?: string;
-    url?: string;
-    retryEndpoint?: string;
-    retryUrl?: string;
-    cancelEndpoint?: string;
-    cancelUrl?: string;
-    uiUrl?: string;
-    query?: Record<string, unknown>;
-    targetId?: string;
-    sessionId?: string;
-  };
+  next?: StudioOperatorActionNext;
   result?: StudioCoverageVerifyResult | StudioDispatchSessionTargetRunResult | StudioDispatchSessionRetryResult;
   audit: StudioDeliveryAudit;
 }
