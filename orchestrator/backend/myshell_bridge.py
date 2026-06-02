@@ -16,6 +16,7 @@ async def generate_via_bot(bot_slug: str, prompt: str = "", gen_button: str = ""
     args = {
         "slug": bot_slug,
         "button": gen_button,
+        "prompt": prompt or "",
         "image": image_data or ""
     }
     args_file = tempfile.mktemp(suffix=".json")

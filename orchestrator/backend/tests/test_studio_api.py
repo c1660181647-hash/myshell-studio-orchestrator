@@ -497,6 +497,119 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("no inspectable pages", result["message"])
         self.assertIn("http://cdp.internal:9333", result["message"])
 
+    def test_myshell_bridge_passes_prompt_to_worker_args(self) -> None:
+        import myshell_bridge
+
+        captured_payload: dict = {}
+
+        class FakeStdout:
+            def __init__(self) -> None:
+                self.lines = [
+                    b'{"status":"done","output_url":"https://example.com/fresh.png"}\n',
+                    b"",
+                ]
+
+            async def readline(self) -> bytes:
+                return self.lines.pop(0)
+
+        class FakeStderr:
+            async def read(self) -> bytes:
+                return b""
+
+        class FakeProcess:
+            def __init__(self) -> None:
+                self.stdout = FakeStdout()
+                self.stderr = FakeStderr()
+
+            def kill(self) -> None:
+                return None
+
+            async def wait(self) -> int:
+                return 0
+
+        async def fake_create_subprocess_exec(*args, **kwargs) -> FakeProcess:
+            captured_payload.update(json.loads(Path(args[2]).read_text(encoding="utf-8")))
+            return FakeProcess()
+
+        with patch.object(myshell_bridge.asyncio, "create_subprocess_exec", fake_create_subprocess_exec):
+            result = asyncio.run(
+                myshell_bridge.generate_via_bot(
+                    "seedream-multi-chart",
+                    prompt="cinematic red lantern city",
+                    gen_button="Generate",
+                    image_data="",
+                )
+            )
+
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(captured_payload["prompt"], "cinematic red lantern city")
+
+    def test_bridge_worker_fills_prompt_textarea_before_generate(self) -> None:
+        import bridge_worker
+
+        eval_expressions: list[str] = []
+
+        class FakeResponse:
+            def json(self) -> list[dict]:
+                return [{"url": "https://art.myshell.ai", "webSocketDebuggerUrl": "ws://fake"}]
+
+        class FakeAsyncClient:
+            async def get(self, url: str) -> FakeResponse:
+                return FakeResponse()
+
+        class FakeWebSocket:
+            def __init__(self) -> None:
+                self.last_message: dict = {}
+
+            async def send(self, message: str) -> None:
+                self.last_message = json.loads(message)
+
+            async def recv(self) -> str:
+                message_id = self.last_message["id"]
+                method = self.last_message["method"]
+                if method == "Runtime.evaluate":
+                    expression = self.last_message.get("params", {}).get("expression", "")
+                    eval_expressions.append(expression)
+                    if "btns.find" in expression:
+                        value = "no"
+                    elif "querySelectorAll('img')" in expression:
+                        value = "[]"
+                    elif "textarea" in expression and "cinematic red lantern city" in expression:
+                        value = "filled"
+                    else:
+                        value = ""
+                    return json.dumps({"id": message_id, "result": {"result": {"value": value}}})
+                return json.dumps({"id": message_id, "result": {}})
+
+        class FakeConnect:
+            async def __aenter__(self) -> FakeWebSocket:
+                return FakeWebSocket()
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                return None
+
+        async def fake_sleep(_seconds: float) -> None:
+            return None
+
+        with (
+            patch.object(bridge_worker.httpx, "AsyncClient", return_value=FakeAsyncClient()),
+            patch.object(bridge_worker.websockets, "connect", lambda *args, **kwargs: FakeConnect()),
+            patch.object(bridge_worker.asyncio, "sleep", fake_sleep),
+        ):
+            result = asyncio.run(
+                bridge_worker.generate(
+                    "seedream-multi-chart",
+                    "Generate",
+                    "",
+                    "cinematic red lantern city",
+                )
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertTrue(
+            any("cinematic red lantern city" in expression and "textarea" in expression for expression in eval_expressions)
+        )
+
     def test_studio_readiness_reports_delivery_gates(self) -> None:
         readiness = self.client.get("/api/studio/readiness")
 

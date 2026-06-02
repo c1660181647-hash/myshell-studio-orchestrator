@@ -13,7 +13,7 @@ DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 def _cdp_url():
     return os.environ.get("MYSHELL_CDP_URL", DEFAULT_CDP_URL)
 
-async def generate(bot_slug, gen_button, image_b64):
+async def generate(bot_slug, gen_button, image_b64, prompt=""):
     cdp_url = _cdp_url()
     pages = (await httpx.AsyncClient().get(f"{cdp_url}/json")).json()
     if not pages:
@@ -74,9 +74,30 @@ async def generate(bot_slug, gen_button, image_b64):
             try: os.unlink(tmp)
             except: pass
         
-        # Fill textarea if present
-        if gen_button:  # Use gen_button presence as proxy for having inputs
-            pass  # Textarea filling handled below
+        if prompt:
+            prompt_value = json.dumps(prompt)
+            filled_prompt = await ev(f"""
+                (() => {{
+                    const value = {prompt_value};
+                    const candidates = Array.from(
+                        document.querySelectorAll('textarea,[contenteditable="true"],input[type="text"],input:not([type])')
+                    ).filter(el => !el.disabled && !el.readOnly);
+                    const input = candidates.find(el => el.offsetParent !== null) || candidates[0];
+                    if (!input) return 'missing';
+                    input.focus();
+                    if (input.isContentEditable) {{
+                        input.textContent = value;
+                        input.dispatchEvent(new InputEvent('input', {{ bubbles: true, inputType: 'insertText', data: value }}));
+                    }} else {{
+                        input.value = value;
+                        input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    }}
+                    return 'filled';
+                }})()
+            """)
+            if filled_prompt == "missing":
+                return {"status": "error", "message": "Prompt input not found or unavailable"}
         
         # Click I Agree (appears after upload)
         await ev("(()=>{const b=Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='I Agree');if(b)b.click()})()")
@@ -180,5 +201,5 @@ if __name__ == "__main__":
     else:
         args = json.loads(arg)
     
-    result = asyncio.run(generate(args["slug"], args["button"], args.get("image", "")))
+    result = asyncio.run(generate(args["slug"], args["button"], args.get("image", ""), args.get("prompt", "")))
     print(json.dumps(result))
