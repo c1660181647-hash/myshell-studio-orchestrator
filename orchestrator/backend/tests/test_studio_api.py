@@ -1563,7 +1563,7 @@ class StudioApiTest(unittest.TestCase):
 
         visited = self.client.post(
             f"/api/studio/dispatch-sessions/{session['sessionId']}/targets/{first_target_id}",
-            json={"status": "visited", "evidence": {"openedFrom": "studio-test"}},
+            json={"status": "visited", "evidence": {"openedFrom": "studio-test", "browserUrl": "/library"}},
         )
         self.assertEqual(visited.status_code, 200)
         visited_body = visited.json()
@@ -1581,6 +1581,8 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(completed_body["summary"]["completed"], 1)
         completed_target = next(target for target in completed_body["targets"] if target["id"] == first_target_id)
         self.assertEqual(completed_target["evidence"]["accepted"], True)
+        self.assertEqual(completed_target["evidence"]["openedFrom"], "studio-test")
+        self.assertEqual(completed_target["evidence"]["browserUrl"], "/library")
         self.assertTrue(completed_target["evidenceJobId"].startswith("job_"))
 
         covered_jobs = self.client.get(
@@ -1595,6 +1597,8 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(completed_page_jobs[0]["status"], "done")
         self.assertEqual(completed_page_jobs[0]["evidence"]["dispatchSessionId"], session["sessionId"])
         self.assertEqual(completed_page_jobs[0]["evidence"]["dispatchTargetId"], first_target_id)
+        self.assertEqual(completed_page_jobs[0]["evidence"]["operatorEvidence"]["openedFrom"], "studio-test")
+        self.assertEqual(completed_page_jobs[0]["evidence"]["operatorEvidence"]["browserUrl"], "/library")
 
         coverage = self.client.get(
             "/api/studio/coverage",

@@ -920,10 +920,12 @@ def _update_dispatch_session_target(
         target["skippedAt"] = now
     if status == "error":
         target["erroredAt"] = now
+    current_evidence = target.get("evidence") if isinstance(target.get("evidence"), dict) else {}
     if evidence:
-        target["evidence"] = evidence
+        target["evidence"] = {**current_evidence, **evidence}
     if status == "completed":
-        _record_dispatch_session_target_completion(session, target, evidence or {})
+        operator_evidence = target.get("evidence") if isinstance(target.get("evidence"), dict) else {}
+        _record_dispatch_session_target_completion(session, target, operator_evidence)
 
     session["updatedAt"] = now
     view = _dispatch_session_view(session)
