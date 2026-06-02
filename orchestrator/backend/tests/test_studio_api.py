@@ -369,6 +369,37 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(cookie_injection["statusPath"], str(status_path))
         self.assertIn("Network.setCookie", cookie_injection["message"])
 
+    def test_runtime_health_reads_configured_cdp_url_at_call_time(self) -> None:
+        import studio_runtime
+
+        captured_urls: list[str] = []
+
+        class FakeResponse:
+            status_code = 200
+
+        class FakeAsyncClient:
+            def __init__(self, timeout: float) -> None:
+                self.timeout = timeout
+
+            async def __aenter__(self) -> "FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            async def get(self, url: str) -> FakeResponse:
+                captured_urls.append(url)
+                return FakeResponse()
+
+        with (
+            patch.object(studio_runtime.httpx, "AsyncClient", FakeAsyncClient),
+            patch.dict(os.environ, {"MYSHELL_CDP_URL": "http://127.0.0.1:9333/"}),
+        ):
+            health = asyncio.run(studio_runtime.runtime_health("/tmp/myshell-studio-runtime/store.sqlite3"))
+
+        self.assertEqual(captured_urls, ["http://127.0.0.1:9333/json"])
+        self.assertEqual(health["components"]["chromeCdp"]["url"], "http://127.0.0.1:9333")
+
     def test_myshell_art_auth_requires_successful_cookie_injection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             status_path = Path(tmp_dir) / "cookie-injection-status.json"

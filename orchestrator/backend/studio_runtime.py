@@ -8,8 +8,12 @@ from typing import Any
 import httpx
 
 
-CDP_URL = os.environ.get("MYSHELL_CDP_URL", "http://127.0.0.1:9222")
+DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 DEFAULT_COOKIE_INJECTION_STATUS_PATH = os.path.join(os.path.dirname(__file__), ".studio", "cookie-injection-status.json")
+
+
+def cdp_url() -> str:
+    return os.environ.get("MYSHELL_CDP_URL", DEFAULT_CDP_URL).rstrip("/")
 
 
 def cookies_available() -> bool:
@@ -25,7 +29,7 @@ def cookies_available() -> bool:
 async def chrome_cdp_ready() -> bool:
     try:
         async with httpx.AsyncClient(timeout=1.5) as client:
-            response = await client.get(f"{CDP_URL}/json")
+            response = await client.get(f"{cdp_url()}/json")
         return response.status_code == 200
     except Exception:
         return False
@@ -91,7 +95,7 @@ async def runtime_health(store_path: str) -> dict[str, Any]:
         "components": {
             "backend": {"status": "ok", "message": "FastAPI runtime is serving requests"},
             "storage": {"status": "ok" if storage_ready else "error", "path": store_path},
-            "chromeCdp": {"status": "ok" if cdp_ready else "unavailable", "url": CDP_URL},
+            "chromeCdp": {"status": "ok" if cdp_ready else "unavailable", "url": cdp_url()},
             "myshellCookies": {"status": art_auth, "message": "Cookies configured" if has_cookies else "No MyShell cookies configured"},
             "cookieInjection": injection_status,
             "dreamyApiAuth": {"status": dreamy_auth, "mode": "telegram-init-data"},
