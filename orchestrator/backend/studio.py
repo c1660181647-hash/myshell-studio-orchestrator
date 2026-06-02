@@ -3,12 +3,16 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import uuid
 import base64
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
+from urllib.request import urlretrieve
 
 from fastapi import Body, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
@@ -3253,6 +3257,182 @@ async def _project_delivery_bundle(
     }
 
 
+def _generated_media_root() -> Path:
+    configured = os.environ.get("STUDIO_GENERATED_DIR")
+    candidates = [
+        Path(configured) if configured else None,
+        Path(__file__).resolve().parents[2] / "frontend" / "dist" / "generated",
+        Path(__file__).resolve().parent / "frontend" / "dist" / "generated",
+        Path("/app/frontend/dist/generated"),
+    ]
+    for candidate in candidates:
+        if candidate:
+            candidate.mkdir(parents=True, exist_ok=True)
+            return candidate
+    raise RuntimeError("No generated media directory configured")
+
+
+def _timeline_segment_manifest(segment: StudioSegment, index: int) -> dict[str, Any]:
+    duration_seconds = int(segment.get("durationSeconds") or segment.get("duration") or 5)
+    return {
+        "index": index,
+        "segmentId": segment.get("id") or "",
+        "type": segment.get("type") or "image",
+        "status": segment.get("status") or "",
+        "prompt": segment.get("prompt") or "",
+        "action": segment.get("action") or "",
+        "botName": segment.get("botName") or "",
+        "botSlug": segment.get("botSlug") or "",
+        "taskId": segment.get("taskId") or "",
+        "mediaUrl": segment.get("url") or "",
+        "posterUrl": segment.get("posterUrl") or "",
+        "durationSeconds": duration_seconds,
+        "evidence": segment.get("evidence") or {},
+    }
+
+
+def _timeline_export_manifest(project: StudioProject, segment_ids: list[str] | None = None) -> dict[str, Any]:
+    allowed_ids = set(segment_ids or [])
+    source_segments = [
+        segment
+        for segment in project.get("segments", [])
+        if not allowed_ids or str(segment.get("id") or "") in allowed_ids
+    ]
+    segments = [_timeline_segment_manifest(segment, index + 1) for index, segment in enumerate(source_segments)]
+    video_segments = [segment for segment in segments if segment.get("type") == "video" and segment.get("mediaUrl")]
+    ready_segments = [segment for segment in segments if segment.get("mediaUrl") or segment.get("posterUrl")]
+    return {
+        "kind": "dreamy-long-video-sequence",
+        "projectId": project.get("projectId") or "",
+        "conversationId": project.get("conversationId") or "",
+        "createdAt": now_iso(),
+        "segments": segments,
+        "summary": {
+            "totalSegments": len(segments),
+            "readySegments": len(ready_segments),
+            "videoSegments": len(video_segments),
+            "estimatedDurationSeconds": sum(int(segment.get("durationSeconds") or 5) for segment in segments),
+        },
+    }
+
+
+def _resolve_generated_media_path(url: str) -> Path | None:
+    if not url.startswith("/generated/"):
+        return None
+    root = _generated_media_root()
+    relative = url.removeprefix("/generated/").lstrip("/")
+    candidate = (root / relative).resolve()
+    try:
+        candidate.relative_to(root.resolve())
+    except ValueError:
+        return None
+    return candidate if candidate.exists() else None
+
+
+def _prepare_timeline_video_input(media_url: str, target_dir: Path, index: int) -> Path:
+    generated_path = _resolve_generated_media_path(media_url)
+    suffix = Path(urlsplit(media_url).path).suffix or ".mp4"
+    output_path = target_dir / f"segment-{index:03d}{suffix}"
+    if generated_path:
+        shutil.copyfile(generated_path, output_path)
+        return output_path
+    if media_url.startswith("http://") or media_url.startswith("https://"):
+        urlretrieve(media_url, output_path)
+        return output_path
+    raise ValueError(f"Unsupported timeline media URL: {media_url}")
+
+
+def _compose_timeline_video(export_id: str, video_segments: list[dict[str, Any]]) -> dict[str, Any]:
+    if not video_segments:
+        return {"status": "needs_media", "message": "No video segments are ready to compose."}
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return {"status": "manifest_ready", "message": "FFmpeg is not available; timeline manifest is ready."}
+
+    output_root = _generated_media_root() / "studio-exports"
+    output_root.mkdir(parents=True, exist_ok=True)
+    output_path = output_root / f"{export_id}.mp4"
+    with tempfile.TemporaryDirectory(prefix=f"{export_id}-") as temp_name:
+        temp_dir = Path(temp_name)
+        input_paths: list[Path] = []
+        for index, segment in enumerate(video_segments, start=1):
+            input_paths.append(_prepare_timeline_video_input(str(segment.get("mediaUrl") or ""), temp_dir, index))
+        concat_path = temp_dir / "concat.txt"
+        concat_path.write_text(
+            "\n".join(f"file '{path.as_posix()}'" for path in input_paths) + "\n",
+            encoding="utf-8",
+        )
+        copy_command = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_path), "-c", "copy", str(output_path)]
+        copy_result = subprocess.run(copy_command, capture_output=True, text=True, timeout=180)
+        if copy_result.returncode != 0:
+            encode_command = [
+                ffmpeg,
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(concat_path),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                str(output_path),
+            ]
+            encode_result = subprocess.run(encode_command, capture_output=True, text=True, timeout=240)
+            if encode_result.returncode != 0:
+                raise RuntimeError((encode_result.stderr or copy_result.stderr or "FFmpeg compose failed").strip()[-1200:])
+
+    return {
+        "status": "ready",
+        "mediaUrl": f"/generated/studio-exports/{output_path.name}",
+        "message": f"Composed {len(video_segments)} video segment{'' if len(video_segments) == 1 else 's'}.",
+    }
+
+
+def _create_timeline_export(project: StudioProject, segment_ids: list[str] | None = None) -> dict[str, Any]:
+    export_id = make_id("timeline_export")
+    manifest = _timeline_export_manifest(project, segment_ids)
+    video_segments = [segment for segment in manifest["segments"] if segment.get("type") == "video" and segment.get("mediaUrl")]
+    try:
+        compose_result = _compose_timeline_video(export_id, video_segments)
+    except Exception as error:
+        compose_result = {"status": "manifest_ready", "message": f"Video compose skipped: {error}"}
+
+    status = compose_result.get("status") or ("needs_media" if not video_segments else "manifest_ready")
+    media_url = compose_result.get("mediaUrl") or ""
+    evidence = _evidence(
+        status,
+        "timeline-export",
+        accepted=status == "ready" and bool(media_url),
+        media_url=media_url,
+        task_id=export_id,
+        message=compose_result.get("message") or "Timeline manifest is ready.",
+    )
+    export = {
+        "exportId": export_id,
+        "projectId": project["projectId"],
+        "conversationId": project.get("conversationId") or "",
+        "status": status,
+        "checkedAt": evidence["checkedAt"],
+        "mediaUrl": media_url,
+        "manifest": manifest,
+        "summary": manifest["summary"],
+        "evidence": evidence,
+    }
+    exports = project.setdefault("timelineExports", [])
+    exports.insert(0, export)
+    del exports[20:]
+    project["updatedAt"] = now_iso()
+    _save_project(project)
+    return export
+
+
 def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dict[str, Any]:
     page = get_page(job.get("pageId"))
     segment = _find_segment(project, job.get("segmentId")) or {
@@ -3923,6 +4103,24 @@ def register_studio_routes(app) -> None:
                 },
             )
         return bundle
+
+    @app.get("/api/studio/projects/{project_id}/timeline-exports")
+    async def list_studio_timeline_exports(project_id: str):
+        project = _get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        exports = project.get("timelineExports") or []
+        return {"projectId": project_id, "exports": exports, "count": len(exports)}
+
+    @app.post("/api/studio/projects/{project_id}/timeline-export")
+    async def create_studio_timeline_export(project_id: str, payload: dict[str, Any] = Body(default_factory=dict)):
+        project = _get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        segment_ids = payload.get("segmentIds") if isinstance(payload, dict) else None
+        if segment_ids is not None and not isinstance(segment_ids, list):
+            raise HTTPException(status_code=400, detail="segmentIds must be a list")
+        return _create_timeline_export(project, segment_ids=[str(item) for item in segment_ids] if segment_ids else None)
 
     @app.post("/api/studio/projects/{project_id}/client-result")
     async def post_studio_client_result(project_id: str, payload: dict[str, Any] = Body(...)):

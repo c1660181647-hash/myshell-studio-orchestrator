@@ -45,6 +45,7 @@ import {
   cancelStudioDispatchSession,
   cancelStudioJob,
   createStudioDispatchSession,
+  createStudioTimelineExport,
   extractGenerateTaskMedia,
   fetchStudioCoverage,
   fetchStudioDeliveryAudit,
@@ -2063,6 +2064,7 @@ function PreviewPanel({
   onRetryJob,
   onAction,
   onExportAllSegments,
+  timelineExporting,
   submitting,
 }: {
   project: StudioProject | null;
@@ -2076,6 +2078,7 @@ function PreviewPanel({
   onRetryJob: (jobId: string) => void;
   onAction: (action: StudioAction, prompt?: string, source?: StudioSegment | null) => void;
   onExportAllSegments: () => void;
+  timelineExporting: boolean;
   submitting: boolean;
 }) {
   const media = getSegmentMedia(selectedSegment);
@@ -2191,12 +2194,12 @@ function PreviewPanel({
           <button
             type="button"
             data-testid="preview-export-all-segments"
-            disabled={!segments.length}
+            disabled={!segments.length || timelineExporting}
             onClick={onExportAllSegments}
             className="inline-flex h-10 items-center justify-center gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-3 text-xs font-semibold text-Cr-text-default-v2 disabled:text-Cr-text-subtlest-v2"
           >
-            <Download size={14} />
-            Export all segments
+            {timelineExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            {timelineExporting ? 'Exporting' : 'Export all segments'}
           </button>
         </div>
 
@@ -3200,6 +3203,7 @@ export default function Dreamy() {
   const [deliveryBundleLoading, setDeliveryBundleLoading] = useState(false);
   const [dispatchBatchPlanning, setDispatchBatchPlanning] = useState(false);
   const [dispatchSessionRunning, setDispatchSessionRunning] = useState(false);
+  const [timelineExporting, setTimelineExporting] = useState(false);
   const [deliveryDrawerOpen, setDeliveryDrawerOpen] = useState(false);
 
   const selectedSegment = useMemo(() => {
@@ -4881,7 +4885,7 @@ export default function Dreamy() {
     });
   };
 
-  const exportAllSegments = useCallback(() => {
+  const exportAllSegments = useCallback(async () => {
     if (!project?.segments.length) return;
     const exportedAt = nowIso();
     const segments = project.segments.map((segment, index) => ({
@@ -4898,30 +4902,61 @@ export default function Dreamy() {
       posterUrl: resolveStudioDisplayAssetUrl(segment.posterUrl),
       evidence: segment.evidence,
     }));
-    const readySegments = segments.filter((segment) => Boolean(segment.mediaUrl || segment.posterUrl));
-    const payload = {
-      kind: 'dreamy-long-video-sequence',
-      projectId: project.projectId,
-      conversationId: project.conversationId,
-      exportedAt,
-      totalSegments: segments.length,
-      readySegments: readySegments.length,
-      estimatedDurationSeconds: segments.length * 5,
-      exportMode: 'concat-timeline',
-      segments,
-    };
-    const filename = `dreamy-long-video-${project.projectId || 'sequence'}.json`;
-    downloadJsonPayload(payload, filename);
-    setActiveTab('preview');
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: makeId('assistant'),
-        role: 'assistant',
-        content: `Exported ${segments.length} segment${segments.length === 1 ? '' : 's'} as a long-video sequence manifest.`,
-        createdAt: exportedAt,
-      },
-    ]);
+    setTimelineExporting(true);
+    try {
+      const exportResult = await createStudioTimelineExport({ projectId: project.projectId });
+      setProject((prev) => {
+        if (!prev || prev.projectId !== project.projectId) return prev;
+        const timelineExports = [
+          exportResult,
+          ...((prev.timelineExports || []).filter((item) => item.exportId !== exportResult.exportId)),
+        ];
+        return { ...prev, timelineExports, updatedAt: nowIso() };
+      });
+      const filename = `dreamy-timeline-export-${exportResult.exportId}.json`;
+      downloadJsonPayload(exportResult, filename);
+      setActiveTab('preview');
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: exportResult.mediaUrl
+            ? `Timeline export ready: ${exportResult.summary.videoSegments} video segment${exportResult.summary.videoSegments === 1 ? '' : 's'} composed at ${resolveStudioAssetUrl(exportResult.mediaUrl)}. Downloaded ${filename}.`
+            : `Timeline export ${exportResult.status}: ${exportResult.summary.totalSegments} segment${exportResult.summary.totalSegments === 1 ? '' : 's'} saved. ${exportResult.evidence?.message || 'Manifest is ready.'} Downloaded ${filename}.`,
+          createdAt: exportResult.checkedAt || exportedAt,
+        },
+      ]);
+    } catch (error) {
+      const readySegments = segments.filter((segment) => Boolean(segment.mediaUrl || segment.posterUrl));
+      const payload = {
+        kind: 'dreamy-long-video-sequence',
+        projectId: project.projectId,
+        conversationId: project.conversationId,
+        exportedAt,
+        totalSegments: segments.length,
+        readySegments: readySegments.length,
+        estimatedDurationSeconds: segments.length * 5,
+        exportMode: 'local-fallback',
+        segments,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      const filename = `dreamy-long-video-${project.projectId || 'sequence'}.json`;
+      downloadJsonPayload(payload, filename);
+      setActiveTab('preview');
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: `Timeline export fallback: backend export could not finish, so a local manifest was downloaded as ${filename}.`,
+          error: error instanceof Error ? error.message : String(error),
+          createdAt: exportedAt,
+        },
+      ]);
+    } finally {
+      setTimelineExporting(false);
+    }
   }, [project]);
 
   const resetProject = async () => {
@@ -5637,6 +5672,7 @@ export default function Dreamy() {
               onRetryJob={(jobId) => void retryJob(jobId)}
               onAction={runStudio}
               onExportAllSegments={exportAllSegments}
+              timelineExporting={timelineExporting}
               submitting={submitting}
             />
           )}

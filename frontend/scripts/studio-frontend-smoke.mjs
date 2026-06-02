@@ -27,6 +27,7 @@ export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'starter-preset-result-visible',
   'preview-segment-rerun',
   'preview-export-all-segments',
+  'timeline-export-created',
   'video-fast-status',
   'canvas-mode',
   'canvas-auto-flow-presets',
@@ -391,6 +392,22 @@ export async function runStudioFrontendSmoke(options = {}) {
       'preview-export-all-segments',
       'Export all segments control',
       page.getByTestId('preview-export-all-segments'),
+      timeoutMs,
+    );
+    await clickEnabled(
+      checks,
+      page,
+      'timeline-export-click',
+      'Create backend timeline export',
+      page.getByTestId('preview-export-all-segments'),
+      timeoutMs,
+    );
+    await checkVisible(
+      checks,
+      page,
+      'timeline-export-created',
+      'Timeline export result is visible',
+      chatLog.getByText(/Timeline export/i),
       timeoutMs,
     );
     await checkVisible(

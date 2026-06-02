@@ -116,6 +116,7 @@ test('runStudioFrontendSmoke records canvas flow and segment export controls', (
   const newWorkflowChecks = [
     'preview-segment-rerun',
     'preview-export-all-segments',
+    'timeline-export-created',
     'video-fast-status',
     'canvas-auto-flow-presets',
     'canvas-material-flow-ready',

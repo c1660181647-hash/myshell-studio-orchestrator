@@ -1,8 +1,10 @@
 import asyncio
 import json
 import os
+import shutil
 import sys
 import tempfile
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -107,6 +109,191 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(body["segment"]["url"], "https://example.com/result.mp4")
         self.assertEqual(body["project"]["selectedSegmentId"], execution["segmentId"])
         self.assertEqual(body["job"]["taskId"], "job_123")
+
+    def test_timeline_export_persists_manifest_for_project_segments(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "create a source image", "action": "generate"},
+        ) as response:
+            image_events = _sse_events("".join(response.iter_text()))
+        meta = next(payload for name, payload in image_events if name == "meta")
+        image_execution = next(payload for name, payload in image_events if name == "execution_request")
+
+        self.client.post(
+            f"/api/studio/projects/{meta['projectId']}/client-result",
+            json={
+                "segmentId": image_execution["segmentId"],
+                "status": "done",
+                "taskId": "task_source_image",
+                "url": "https://example.com/source.png",
+                "posterUrl": "https://example.com/source.png",
+                "type": "image",
+            },
+        )
+
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={
+                "message": "animate the source image",
+                "project_id": meta["projectId"],
+                "source_segment_id": image_execution["segmentId"],
+                "action": "extend",
+            },
+        ) as response:
+            video_events = _sse_events("".join(response.iter_text()))
+        video_execution = next(payload for name, payload in video_events if name == "execution_request")
+        self.client.post(
+            f"/api/studio/projects/{meta['projectId']}/client-result",
+            json={
+                "segmentId": video_execution["segmentId"],
+                "status": "done",
+                "taskId": "task_video_segment",
+                "url": "https://example.com/video.mp4",
+                "posterUrl": "https://example.com/video.jpg",
+                "type": "video",
+            },
+        )
+
+        export = self.client.post(f"/api/studio/projects/{meta['projectId']}/timeline-export")
+
+        self.assertEqual(export.status_code, 200)
+        body = export.json()
+        self.assertTrue(body["exportId"].startswith("timeline_export_"))
+        self.assertEqual(body["projectId"], meta["projectId"])
+        self.assertEqual(body["summary"]["totalSegments"], 2)
+        self.assertEqual(body["summary"]["videoSegments"], 1)
+        self.assertEqual(body["summary"]["estimatedDurationSeconds"], 10)
+        self.assertEqual(body["manifest"]["segments"][0]["segmentId"], image_execution["segmentId"])
+        self.assertEqual(body["manifest"]["segments"][1]["segmentId"], video_execution["segmentId"])
+        self.assertIn(body["status"], {"manifest_ready", "ready", "needs_media"})
+
+        restored = self.client.get(f"/api/studio/projects/{meta['projectId']}/timeline-exports")
+        self.assertEqual(restored.status_code, 200)
+        restored_body = restored.json()
+        self.assertEqual(restored_body["count"], 1)
+        self.assertEqual(restored_body["exports"][0]["exportId"], body["exportId"])
+
+    def test_timeline_export_returns_composed_media_when_video_builder_succeeds(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "create a video segment", "action": "extend"},
+        ) as response:
+            events = _sse_events("".join(response.iter_text()))
+        meta = next(payload for name, payload in events if name == "meta")
+        execution = next(payload for name, payload in events if name == "execution_request")
+        self.client.post(
+            f"/api/studio/projects/{meta['projectId']}/client-result",
+            json={
+                "segmentId": execution["segmentId"],
+                "status": "done",
+                "taskId": "task_video_for_export",
+                "url": "https://example.com/video.mp4",
+                "posterUrl": "https://example.com/video.jpg",
+                "type": "video",
+            },
+        )
+
+        with patch(
+            "studio._compose_timeline_video",
+            return_value={"status": "ready", "mediaUrl": "/generated/studio-exports/export.mp4", "message": "Composed 1 video segment."},
+        ) as compose:
+            export = self.client.post(f"/api/studio/projects/{meta['projectId']}/timeline-export")
+
+        self.assertEqual(export.status_code, 200)
+        compose.assert_called_once()
+        body = export.json()
+        self.assertEqual(body["status"], "ready")
+        self.assertEqual(body["mediaUrl"], "/generated/studio-exports/export.mp4")
+        self.assertTrue(body["evidence"]["accepted"])
+
+    def test_timeline_export_composes_generated_video_segments_with_ffmpeg(self) -> None:
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            self.skipTest("ffmpeg is not available locally")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            generated_dir = Path(tmp_dir)
+            clip_paths = [generated_dir / "clip-one.mp4", generated_dir / "clip-two.mp4"]
+            colors = ["red", "blue"]
+            for clip_path, color in zip(clip_paths, colors):
+                subprocess.run(
+                    [
+                        ffmpeg,
+                        "-y",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        f"color=c={color}:s=160x90:d=0.25",
+                        "-an",
+                        "-c:v",
+                        "libx264",
+                        "-pix_fmt",
+                        "yuv420p",
+                        str(clip_path),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+
+            with patch.dict(os.environ, {"STUDIO_GENERATED_DIR": str(generated_dir)}):
+                with self.client.stream(
+                    "POST",
+                    "/api/studio/run",
+                    data={"message": "create first clip", "action": "extend"},
+                ) as response:
+                    first_events = _sse_events("".join(response.iter_text()))
+                meta = next(payload for name, payload in first_events if name == "meta")
+                first_execution = next(payload for name, payload in first_events if name == "execution_request")
+                self.client.post(
+                    f"/api/studio/projects/{meta['projectId']}/client-result",
+                    json={
+                        "segmentId": first_execution["segmentId"],
+                        "status": "done",
+                        "taskId": "task_clip_one",
+                        "url": "/generated/clip-one.mp4",
+                        "posterUrl": "/generated/clip-one.mp4",
+                        "type": "video",
+                    },
+                )
+
+                with self.client.stream(
+                    "POST",
+                    "/api/studio/run",
+                    data={
+                        "message": "create second clip",
+                        "project_id": meta["projectId"],
+                        "source_segment_id": first_execution["segmentId"],
+                        "action": "extend",
+                    },
+                ) as response:
+                    second_events = _sse_events("".join(response.iter_text()))
+                second_execution = next(payload for name, payload in second_events if name == "execution_request")
+                self.client.post(
+                    f"/api/studio/projects/{meta['projectId']}/client-result",
+                    json={
+                        "segmentId": second_execution["segmentId"],
+                        "status": "done",
+                        "taskId": "task_clip_two",
+                        "url": "/generated/clip-two.mp4",
+                        "posterUrl": "/generated/clip-two.mp4",
+                        "type": "video",
+                    },
+                )
+
+                export = self.client.post(f"/api/studio/projects/{meta['projectId']}/timeline-export")
+
+            self.assertEqual(export.status_code, 200)
+            body = export.json()
+            self.assertEqual(body["status"], "ready")
+            self.assertEqual(body["summary"]["videoSegments"], 2)
+            self.assertTrue(body["mediaUrl"].startswith("/generated/studio-exports/"))
+            exported_file = generated_dir / body["mediaUrl"].removeprefix("/generated/")
+            self.assertTrue(exported_file.exists(), body["mediaUrl"])
+            self.assertGreater(exported_file.stat().st_size, 0)
 
     def test_pages_agents_and_job_lifecycle_endpoints(self) -> None:
         pages = self.client.get("/api/pages")
@@ -328,6 +515,7 @@ class StudioApiTest(unittest.TestCase):
             "myshellCookies",
             "cookieInjection",
             "dreamyApiAuth",
+            "ffmpeg",
         ):
             self.assertIn(component_id, components)
             self.assertIn("status", components[component_id])

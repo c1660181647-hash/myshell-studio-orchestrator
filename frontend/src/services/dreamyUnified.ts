@@ -799,6 +799,48 @@ export interface StudioSegment {
   updatedAt?: string;
 }
 
+export interface StudioTimelineExportSegment {
+  index: number;
+  segmentId: string;
+  type: 'image' | 'video' | string;
+  status: StudioStatus | string;
+  prompt?: string;
+  action?: StudioAction | string;
+  botName?: string;
+  botSlug?: string;
+  taskId?: string;
+  mediaUrl?: string;
+  posterUrl?: string;
+  durationSeconds?: number;
+  evidence?: StudioEvidence | Record<string, unknown>;
+}
+
+export interface StudioTimelineExportManifest {
+  kind: 'dreamy-long-video-sequence' | string;
+  projectId: string;
+  conversationId: string;
+  createdAt: string;
+  segments: StudioTimelineExportSegment[];
+  summary: {
+    totalSegments: number;
+    readySegments: number;
+    videoSegments: number;
+    estimatedDurationSeconds: number;
+  };
+}
+
+export interface StudioTimelineExport {
+  exportId: string;
+  projectId: string;
+  conversationId: string;
+  status: 'ready' | 'manifest_ready' | 'needs_media' | string;
+  checkedAt: string;
+  mediaUrl?: string;
+  manifest: StudioTimelineExportManifest;
+  summary: StudioTimelineExportManifest['summary'];
+  evidence: StudioEvidence;
+}
+
 export interface StudioMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -819,6 +861,7 @@ export interface StudioProject {
   selectedSegmentId?: string | null;
   agentGraph: StudioAgentNode[];
   jobs?: StudioJob[];
+  timelineExports?: StudioTimelineExport[];
   updatedAt: string;
 }
 
@@ -1156,6 +1199,30 @@ export async function fetchStudioProjectDeliveryBundle(options: {
     throw new Error(`Studio delivery bundle ${response.status}: ${response.statusText}`);
   }
   return response.json();
+}
+
+export async function createStudioTimelineExport(options: {
+  projectId: string;
+  segmentIds?: string[];
+}): Promise<StudioTimelineExport> {
+  const response = await fetch(`${getStudioProjectEndpoint(options.projectId)}/timeline-export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ segmentIds: options.segmentIds || undefined }),
+  });
+  if (!response.ok) {
+    throw new Error(`Studio timeline export ${response.status}: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+export async function fetchStudioTimelineExports(projectId: string): Promise<StudioTimelineExport[]> {
+  const response = await fetch(`${getStudioProjectEndpoint(projectId)}/timeline-exports`);
+  if (!response.ok) {
+    throw new Error(`Studio timeline exports ${response.status}: ${response.statusText}`);
+  }
+  const body = await response.json();
+  return body.exports || [];
 }
 
 export async function fetchStudioProjects(limit = 50): Promise<StudioProject[]> {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from datetime import UTC, datetime
 from typing import Any
 
@@ -89,6 +90,20 @@ def cookie_source_status() -> dict[str, Any]:
 
 def cookies_available() -> bool:
     return cookie_source_status().get("status") == "ready"
+
+
+def ffmpeg_status() -> dict[str, Any]:
+    path = shutil.which("ffmpeg")
+    if not path:
+        return {
+            "status": "unavailable",
+            "message": "FFmpeg is unavailable; long-video exports will return timeline manifests only.",
+        }
+    return {
+        "status": "ok",
+        "path": path,
+        "message": "FFmpeg is available for long-video timeline export.",
+    }
 
 
 async def chrome_cdp_ready() -> bool:
@@ -180,6 +195,7 @@ async def runtime_health(store_path: str) -> dict[str, Any]:
     dreamy_auth = "client_delegated"
     art_auth = "ready" if has_cookies else "auth_missing"
     injection_status = cookie_injection_status(has_cookies, cookie_source)
+    media_export_status = ffmpeg_status()
     degraded_component = (
         not storage_ready
         or not cdp_ready
@@ -197,6 +213,7 @@ async def runtime_health(store_path: str) -> dict[str, Any]:
             "myshellCookies": {**cookie_source, "status": "ready" if has_cookies else cookie_source.get("status", art_auth)},
             "cookieInjection": injection_status,
             "dreamyApiAuth": {"status": dreamy_auth, "mode": "telegram-init-data"},
+            "ffmpeg": media_export_status,
         },
     }
 
