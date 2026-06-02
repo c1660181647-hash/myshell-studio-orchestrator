@@ -4,11 +4,14 @@ Reads cookies from: 1) MYSHELL_COOKIES env var, 2) myshell-cookies.json, 3) embe
 import json, os, asyncio, httpx, websockets, time
 from datetime import UTC, datetime
 
-CDP_URL = "http://127.0.0.1:9222"
+DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 STATUS_PATH = os.environ.get(
     "MYSHELL_COOKIE_INJECTION_STATUS_PATH",
     os.path.join(os.path.dirname(__file__), ".studio", "cookie-injection-status.json"),
 )
+
+def _cdp_url():
+    return os.environ.get("MYSHELL_CDP_URL", DEFAULT_CDP_URL)
 
 def _write_status(status, message, cookie_count=0, energy_display=""):
     os.makedirs(os.path.dirname(STATUS_PATH), exist_ok=True)
@@ -58,7 +61,7 @@ async def inject_cookies():
     # Wait for Chrome
     for i in range(30):
         try:
-            pages = httpx.Client().get(f"{CDP_URL}/json", timeout=2).json()
+            pages = httpx.Client().get(f"{_cdp_url()}/json", timeout=2).json()
             break
         except:
             time.sleep(1)

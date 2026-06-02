@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import sys
@@ -442,6 +443,57 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(final_job["authStatus"]["injectionStatus"], "error")
         self.assertIn(failure_message, final_job["evidence"]["message"])
         self.assertNotIn("cookies are missing", final_job["evidence"]["message"].lower())
+
+    def test_cookie_injection_uses_configured_cdp_url(self) -> None:
+        import inject_cookies
+
+        requested_urls: list[str] = []
+
+        class FakeClient:
+            def get(self, url: str, timeout: int) -> object:
+                requested_urls.append(url)
+                raise RuntimeError("CDP unavailable")
+
+        with (
+            patch.dict(os.environ, {"MYSHELL_CDP_URL": "http://cdp.internal:9333"}),
+            patch.object(
+                inject_cookies,
+                "_load_cookies",
+                return_value=[{"name": "token", "value": "redacted", "domain": ".myshell.ai"}],
+            ),
+            patch.object(inject_cookies.httpx, "Client", return_value=FakeClient()),
+            patch.object(inject_cookies.time, "sleep"),
+            patch.object(inject_cookies, "_write_status"),
+        ):
+            result = asyncio.run(inject_cookies.inject_cookies())
+
+        self.assertFalse(result)
+        self.assertTrue(requested_urls)
+        self.assertEqual(requested_urls[0], "http://cdp.internal:9333/json")
+
+    def test_bridge_worker_uses_configured_cdp_url(self) -> None:
+        import bridge_worker
+
+        requested_urls: list[str] = []
+
+        class FakeResponse:
+            def json(self) -> list[dict]:
+                return []
+
+        class FakeAsyncClient:
+            async def get(self, url: str) -> FakeResponse:
+                requested_urls.append(url)
+                return FakeResponse()
+
+        with (
+            patch.dict(os.environ, {"MYSHELL_CDP_URL": "http://cdp.internal:9333"}),
+            patch.object(bridge_worker.httpx, "AsyncClient", return_value=FakeAsyncClient()),
+        ):
+            with self.assertRaises(IndexError):
+                asyncio.run(bridge_worker.generate("seedream-multi-chart", "Generate", ""))
+
+        self.assertTrue(requested_urls)
+        self.assertEqual(requested_urls[0], "http://cdp.internal:9333/json")
 
     def test_studio_readiness_reports_delivery_gates(self) -> None:
         readiness = self.client.get("/api/studio/readiness")

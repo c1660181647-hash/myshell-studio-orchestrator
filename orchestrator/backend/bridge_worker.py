@@ -8,10 +8,13 @@ Then extract result image with embed_obj in URL.
 import json, asyncio, base64, time, tempfile, os, sys, urllib.parse
 import websockets, httpx
 
-CDP_URL = "http://127.0.0.1:9222"
+DEFAULT_CDP_URL = "http://127.0.0.1:9222"
+
+def _cdp_url():
+    return os.environ.get("MYSHELL_CDP_URL", DEFAULT_CDP_URL)
 
 async def generate(bot_slug, gen_button, image_b64):
-    pages = (await httpx.AsyncClient().get(f"{CDP_URL}/json")).json()
+    pages = (await httpx.AsyncClient().get(f"{_cdp_url()}/json")).json()
     # Find art.myshell.ai tab or first page
     tab = next((p for p in pages if 'art.myshell.ai' in p.get('url', '')), pages[0])
     ws_url = tab["webSocketDebuggerUrl"]
