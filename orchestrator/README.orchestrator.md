@@ -67,6 +67,14 @@ python -m studio_smoke --base-url http://127.0.0.1:8090
 
 The smoke validates health, page registry, agent registry, required readiness gates, dispatch matrix coverage, coverage summary, and delivery audit artifacts.
 
+From the repository root, the full local handoff can also be checked with one command:
+
+```bash
+python scripts/studio_delivery_check.py
+```
+
+It starts temporary backend and frontend services on free ports, runs backend and frontend smoke checks, emits a JSON summary, and cleans up its own processes.
+
 For the full operator handoff surface, also start the frontend against this backend and run:
 
 ```bash

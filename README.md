@@ -155,6 +155,14 @@ MyShell Art is marked ready only when cookies are configured, cookie injection s
 
 ## Verification
 
+One-command local handoff check:
+
+```bash
+python scripts/studio_delivery_check.py
+```
+
+This starts a temporary backend and frontend on free local ports, waits for both services, runs the backend API smoke and frontend browser smoke, writes logs/screenshots under `.studio-delivery-check/`, prints a JSON summary, and cleans up the processes it started.
+
 Frontend:
 
 ```bash

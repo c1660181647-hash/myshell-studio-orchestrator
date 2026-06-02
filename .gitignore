@@ -18,3 +18,4 @@ orchestrator/backend/chrome-data/
 orchestrator/backend/.studio/
 frontend/.wrangler/
 frontend/.studio-smoke/
+.studio-delivery-check/
