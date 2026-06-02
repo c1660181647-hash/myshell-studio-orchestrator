@@ -401,6 +401,48 @@ class StudioApiTest(unittest.TestCase):
         self.assertFalse(art["dispatchReady"])
         self.assertEqual(art["dispatchStatus"], "auth_missing")
 
+    def test_myshell_art_run_evidence_reports_cookie_injection_failure(self) -> None:
+        failure_message = "Cookie injection did not reveal a logged-in energy display"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            status_path = Path(tmp_dir) / "cookie-injection-status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "status": "failed",
+                        "checkedAt": "2026-06-02T00:00:00Z",
+                        "cookieCount": 1,
+                        "message": failure_message,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "MYSHELL_COOKIES": json.dumps(
+                        [{"name": "token", "value": "redacted", "domain": ".myshell.ai"}]
+                    ),
+                    "MYSHELL_COOKIE_INJECTION_STATUS_PATH": str(status_path),
+                },
+            ):
+                with self.client.stream(
+                    "POST",
+                    "/api/studio/run",
+                    data={
+                        "message": "draw a cinematic neon city",
+                        "page_id": "myshell-art",
+                        "action": "generate",
+                    },
+                ) as response:
+                    self.assertEqual(response.status_code, 200)
+                    events = _sse_events("".join(response.iter_text()))
+
+        final_job = [payload["job"] for name, payload in events if name == "job"][-1]
+        self.assertEqual(final_job["status"], "auth_missing")
+        self.assertEqual(final_job["authStatus"]["injectionStatus"], "error")
+        self.assertIn(failure_message, final_job["evidence"]["message"])
+        self.assertNotIn("cookies are missing", final_job["evidence"]["message"].lower())
+
     def test_studio_readiness_reports_delivery_gates(self) -> None:
         readiness = self.client.get("/api/studio/readiness")
 

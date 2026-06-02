@@ -3773,10 +3773,14 @@ def register_studio_routes(app) -> None:
                 if auth_status["status"] == "auth_missing":
                     segment["status"] = "auth_missing"
                     segment["authStatus"] = auth_status
+                    auth_message = str(
+                        auth_status.get("message")
+                        or "MyShell Art authentication is missing; no generation was attempted."
+                    )
                     segment["evidence"] = _evidence(
                         "auth_missing",
                         "myshell-art",
-                        message="MyShell Art cookies are missing; no generation was attempted.",
+                        message=f"{auth_message}; no generation was attempted.",
                     )
                     segment["updatedAt"] = now_iso()
                     _update_job(
