@@ -98,6 +98,30 @@ python -m generation_smoke \
 
 The smoke creates a persisted Studio project/job, calls Dreamy `get-by-slug` -> `generate` -> `generate/result`, and only passes `--require-live` when the latest evidence contains accepted media. The result is also exposed in `/api/studio/delivery-audit` as `live-generation-smoke`, so delivery evidence survives backend restarts through the SQLite store.
 
+### Local Credential Handoff
+
+When the operator is logged into MyShell in local Chrome, export cookies without printing their values:
+
+```bash
+python3 scripts/export_myshell_chrome_cookies.py \
+  --profile Default \
+  --output /tmp/myshell-cookies.json \
+  --summary-json
+```
+
+Get `DREAMY_TELEGRAM_INIT_DATA` from a real Telegram Miniapp session. It must look like Telegram WebApp `initData` and include `auth_date` plus `hash`.
+
+Then configure Secret Manager, deploy, and require a real media result:
+
+```bash
+scripts/configure_generation_secrets.sh \
+  --init-data-file /tmp/dreamy-init-data.txt \
+  --cookies-file /tmp/myshell-cookies.json \
+  --apply
+```
+
+Without `--apply`, this command is a dry-run and does not upload values. The script validates the init data shape and cookie JSON, updates `myshell-dreamy-init-data` plus `myshell-cookies`, triggers Cloud Build, and runs `python -m generation_smoke --execute --require-live` against the public service.
+
 ## Tests
 
 ```bash
