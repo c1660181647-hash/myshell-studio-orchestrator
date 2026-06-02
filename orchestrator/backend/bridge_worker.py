@@ -103,20 +103,20 @@ async def generate(bot_slug, gen_button, image_b64, prompt=""):
         await ev("(()=>{const b=Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='I Agree');if(b)b.click()})()")
         await asyncio.sleep(2)
         
-        # Click generate button
-        if gen_button:
-            click = await ev(f"""
-                (()=>{{
-                    const btns=Array.from(document.querySelectorAll('button'));
-                    const btn=btns.find(b=>b.textContent.includes('{gen_button}')&&!b.disabled);
-                    if(btn){{btn.click();return 'ok'}}
-                    const fb=btns.find(b=>/generate|create|start/i.test(b.textContent)&&!b.disabled);
-                    if(fb){{fb.click();return 'fb'}}
-                    return 'no'
-                }})()
-            """)
-            if click == 'no':
-                return {"status": "error", "message": "Generate button not found or disabled"}
+        button_label = json.dumps(gen_button or "")
+        click = await ev(f"""
+            (()=>{{
+                const wanted={button_label}.trim();
+                const btns=Array.from(document.querySelectorAll('button'));
+                const btn=wanted ? btns.find(b=>b.textContent.includes(wanted)&&!b.disabled) : null;
+                if(btn){{btn.click();return 'ok'}}
+                const fb=btns.find(b=>/generate|create|start/i.test(b.textContent)&&!b.disabled);
+                if(fb){{fb.click();return 'fb'}}
+                return 'no'
+            }})()
+        """)
+        if click == 'no':
+            return {"status": "error", "message": "Generate button not found or disabled"}
         
         # Wait for generation: monitor progress % → completion
         # Typical flow: 0% → 5% → ... → 99% → done (progress disappears)
