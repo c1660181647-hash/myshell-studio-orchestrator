@@ -954,6 +954,17 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(len(body["actions"]), len({action["id"] for action in body["actions"]}))
         self.assertEqual(body["summary"]["actions"], len(body["actions"]))
 
+    def test_delivery_audit_without_project_keeps_handoff_context_non_blocking(self) -> None:
+        audit = self.client.get("/api/studio/delivery-audit")
+
+        self.assertEqual(audit.status_code, 200)
+        body = audit.json()
+        requirements = {item["id"]: item for item in body["requirements"]}
+        self.assertEqual(requirements["handoff-snapshot"]["status"], "ready")
+        self.assertFalse(requirements["handoff-snapshot"]["required"])
+        action_ids = {action["id"] for action in body["actions"]}
+        self.assertNotIn("audit:provide-project-id:handoff-snapshot", action_ids)
+
     def test_studio_action_resolve_executes_verification_and_explains_manual_auth(self) -> None:
         def fake_auth_status(page_id: str) -> dict:
             if page_id == "myshell-art":

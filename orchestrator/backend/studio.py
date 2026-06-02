@@ -2049,9 +2049,10 @@ async def _studio_delivery_audit(
             _requirement(
                 "handoff-snapshot",
                 "Handoff Snapshot",
-                "degraded",
+                "ready",
                 required=False,
-                message="Pass project_id to audit project delivery evidence.",
+                message="Pass project_id to include project delivery evidence.",
+                evidence={"projectContext": "not_selected"},
             )
         )
 
