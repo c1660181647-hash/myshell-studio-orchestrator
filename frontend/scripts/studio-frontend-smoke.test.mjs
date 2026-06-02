@@ -22,6 +22,14 @@ test('normalizeFrontendBaseUrl trims trailing slash and rejects missing URL', ()
   assert.throws(() => normalizeFrontendBaseUrl(''), /frontend URL is required/i);
 });
 
+test('studio smoke CLI has a global timeout guard', async () => {
+  const fs = await import('node:fs/promises');
+  const source = await fs.readFile(new URL('./studio-frontend-smoke.mjs', import.meta.url), 'utf8');
+  assert.match(source, /global-timeout-ms/);
+  assert.match(source, /STUDIO_FRONTEND_SMOKE_GLOBAL_TIMEOUT_MS/);
+  assert.match(source, /global timeout/);
+});
+
 test('createSmokeSummary records checked UI surfaces and console errors', () => {
   const summary = createSmokeSummary({
     frontendUrl: 'http://127.0.0.1:5174',

@@ -9,6 +9,7 @@ import { chromium } from 'playwright';
 
 const DEFAULT_FRONTEND_URL = 'http://127.0.0.1:5174';
 const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_GLOBAL_TIMEOUT_MS = 180_000;
 const AGE_GATE_STORAGE_KEY = 'dp_age_gate_passed';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -142,6 +143,7 @@ function parseArgs(argv) {
   const args = {
     frontendUrl: process.env.STUDIO_FRONTEND_URL || DEFAULT_FRONTEND_URL,
     timeoutMs: DEFAULT_TIMEOUT_MS,
+    globalTimeoutMs: Number(process.env.STUDIO_FRONTEND_SMOKE_GLOBAL_TIMEOUT_MS || DEFAULT_GLOBAL_TIMEOUT_MS),
     screenshotPath: defaultEvidenceScreenshot,
     workspaceScreenshotPath: path.join(defaultScreenshotDir, 'dreamy-workspace.png'),
     evidenceScreenshotPath: defaultEvidenceScreenshot,
@@ -158,6 +160,9 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg === '--timeout-ms') {
       args.timeoutMs = Number(next);
+      index += 1;
+    } else if (arg === '--global-timeout-ms') {
+      args.globalTimeoutMs = Number(next);
       index += 1;
     } else if (arg === '--screenshot') {
       args.screenshotPath = next;
@@ -191,6 +196,9 @@ function parseArgs(argv) {
   if (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0) {
     throw new Error('--timeout-ms must be a positive number');
   }
+  if (!Number.isFinite(args.globalTimeoutMs) || args.globalTimeoutMs <= 0) {
+    throw new Error('--global-timeout-ms must be a positive number');
+  }
   return args;
 }
 
@@ -200,7 +208,8 @@ function usage() {
     '',
     'Options:',
     '  --url, --frontend-url <url>   Frontend dev/preview URL. Default: STUDIO_FRONTEND_URL or http://127.0.0.1:5174',
-    '  --timeout-ms <ms>             Per-check timeout. Default: 15000',
+  '  --timeout-ms <ms>             Per-check timeout. Default: 15000',
+  '  --global-timeout-ms <ms>      Whole smoke timeout. Default: 180000',
     '  --screenshot <path>           Legacy alias for --evidence-screenshot',
     '  --workspace-screenshot <path> Canvas workspace screenshot path',
     '  --evidence-screenshot <path>  Delivery Evidence drawer screenshot path',
@@ -540,7 +549,18 @@ async function main() {
     console.log(usage());
     return;
   }
-  const summary = await runStudioFrontendSmoke(args);
+  let globalTimer;
+  const summary = await Promise.race([
+    runStudioFrontendSmoke(args),
+    new Promise((_, reject) => {
+      globalTimer = setTimeout(
+        () => reject(new Error(`Studio frontend smoke exceeded ${args.globalTimeoutMs}ms global timeout`)),
+        args.globalTimeoutMs,
+      );
+    }),
+  ]).finally(() => {
+    if (globalTimer) clearTimeout(globalTimer);
+  });
   if (args.reportPath) {
     await fs.mkdir(path.dirname(args.reportPath), { recursive: true });
     await fs.writeFile(args.reportPath, `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
