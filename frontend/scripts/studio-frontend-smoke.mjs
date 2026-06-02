@@ -17,6 +17,9 @@ const currentFile = fileURLToPath(import.meta.url);
 
 export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'studio-title',
+  'starter-presets',
+  'starter-preset-direct-generate',
+  'starter-preset-prompt-ready',
   'canvas-mode',
   'layers-panel',
   'inspector-panel',
@@ -247,6 +250,30 @@ async function checkEnabled(checks, page, id, label, locator, timeoutMs) {
   }
 }
 
+async function checkTextareaValue(checks, page, id, label, pattern, timeoutMs) {
+  const target = page.locator('textarea').first();
+  const started = Date.now();
+  try {
+    await target.waitFor({ state: 'visible', timeout: timeoutMs });
+    while (Date.now() - started < timeoutMs) {
+      const value = await target.evaluate((node) => node.value).catch(() => '');
+      if (pattern.test(String(value || ''))) {
+        checks.push({ id, label, ok: true });
+        return;
+      }
+      await page.waitForTimeout(100);
+    }
+    checks.push({ id, label, ok: false, message: 'Textarea value did not match expected preset prompt' });
+  } catch (error) {
+    checks.push({
+      id,
+      label,
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function clickEnabled(checks, page, id, label, locator, timeoutMs) {
   const target = locator.first();
   try {
@@ -293,7 +320,10 @@ export async function runStudioFrontendSmoke(options = {}) {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
     await page.addInitScript(createStudioSmokeInitScript());
     page.on('console', (message) => {
-      if (message.type() === 'error') consoleErrors.push(message.text());
+      if (message.type() === 'error') {
+        const location = message.location();
+        consoleErrors.push([message.text(), location.url].filter(Boolean).join(' @ '));
+      }
     });
     page.on('pageerror', (error) => {
       consoleErrors.push(error.message);
@@ -303,6 +333,23 @@ export async function runStudioFrontendSmoke(options = {}) {
     await page.waitForLoadState('networkidle', { timeout: Math.min(timeoutMs, 5000) }).catch(() => undefined);
 
     await checkVisible(checks, page, 'studio-title', 'Dreamy Studio title', page.getByText('Dreamy Studio').first(), timeoutMs);
+    await checkVisible(checks, page, 'starter-presets', 'Starter presets', page.getByTestId('starter-presets'), timeoutMs);
+    await clickEnabled(
+      checks,
+      page,
+      'starter-preset-direct-generate',
+      'Select starter preset for direct generate',
+      page.getByRole('button', { name: /use cinematic portrait preset/i }),
+      timeoutMs,
+    );
+    await checkTextareaValue(
+      checks,
+      page,
+      'starter-preset-prompt-ready',
+      'Starter preset prompt is ready',
+      /cinematic neon rain portrait/i,
+      timeoutMs,
+    );
 
     const canvasButton = page.getByRole('button', { name: /switch studio mode to canvas/i });
     if (await canvasButton.count()) {

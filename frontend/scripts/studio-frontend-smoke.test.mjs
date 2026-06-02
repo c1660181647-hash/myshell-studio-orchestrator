@@ -91,3 +91,13 @@ test('runStudioFrontendSmoke records the delivery command center surface', () =>
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('delivery-command-center'));
   assert.match(runStudioFrontendSmoke.toString(), /delivery-command-center/);
 });
+
+test('runStudioFrontendSmoke records starter presets and direct preset generation', () => {
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-presets'));
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-preset-direct-generate'));
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-preset-prompt-ready'));
+  assert.match(runStudioFrontendSmoke.toString(), /starter-presets/);
+  assert.match(runStudioFrontendSmoke.toString(), /starter-preset-direct-generate/);
+  assert.match(runStudioFrontendSmoke.toString(), /starter-preset-prompt-ready/);
+  assert.doesNotMatch(runStudioFrontendSmoke.toString(), /getByDisplayValue/);
+});

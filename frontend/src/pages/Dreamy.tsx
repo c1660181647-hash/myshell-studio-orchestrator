@@ -186,9 +186,44 @@ interface StudioDispatchRunOverride {
   executor?: StudioExecutor;
 }
 
+interface StudioStarterPreset {
+  id: string;
+  title: string;
+  prompt: string;
+  pageId: StudioApi | string;
+  pageName: string;
+  agentId: string;
+}
+
 const DEFAULT_DREAMY_SLUG = 'ai-porn-generator';
 const LOCAL_POSTERS = [exampleGood, exampleMultiple];
 const DEFAULT_STUDIO_AGENT_ID = 'dreamy-miniapp-executor';
+const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
+  {
+    id: 'cinematic-portrait',
+    title: 'Cinematic Portrait',
+    prompt: 'A cinematic neon rain portrait, detailed face, soft rim light, high contrast, polished studio finish.',
+    pageId: 'dreamy-miniapp',
+    pageName: 'Dreamy Miniapp',
+    agentId: DEFAULT_STUDIO_AGENT_ID,
+  },
+  {
+    id: 'character-scene',
+    title: 'Character Scene',
+    prompt: 'A full body character scene in a glowing city street, expressive pose, cinematic lighting, sharp details.',
+    pageId: 'dreamy-miniapp',
+    pageName: 'Dreamy Miniapp',
+    agentId: DEFAULT_STUDIO_AGENT_ID,
+  },
+  {
+    id: 'style-poster',
+    title: 'Style Poster',
+    prompt: 'A vertical movie poster composition with dramatic color, premium fashion styling, clean background, editorial finish.',
+    pageId: 'dreamy-miniapp',
+    pageName: 'Dreamy Miniapp',
+    agentId: DEFAULT_STUDIO_AGENT_ID,
+  },
+];
 const QUEUE_STATUS_OPTIONS: Array<StudioStatus | 'all'> = [
   'all',
   'queued',
@@ -2687,11 +2722,15 @@ function Composer({
   mode,
   prompt,
   canSubmitWithoutPrompt,
+  showStarterPresets,
+  starterPresets,
+  selectedStarterPresetId,
   previewUrl,
   selectedFileName,
   submitting,
   onModeChange,
   onPromptChange,
+  onSelectPreset,
   onSubmit,
   onPickFile,
   onClearFile,
@@ -2700,16 +2739,22 @@ function Composer({
   mode: StudioMode;
   prompt: string;
   canSubmitWithoutPrompt?: boolean;
+  showStarterPresets?: boolean;
+  starterPresets?: StudioStarterPreset[];
+  selectedStarterPresetId?: string;
   previewUrl: string;
   selectedFileName?: string;
   submitting: boolean;
   onModeChange: (mode: StudioMode) => void;
   onPromptChange: (value: string) => void;
+  onSelectPreset?: (preset: StudioStarterPreset) => void;
   onSubmit: () => void;
   onPickFile: () => void;
   onClearFile: () => void;
   onStop: () => void;
 }) {
+  const visiblePresets = showStarterPresets ? starterPresets || [] : [];
+
   return (
     <div className="shrink-0 border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-3">
       <div className="mb-2 flex items-center justify-between gap-3">
@@ -2717,6 +2762,43 @@ function Composer({
         <Pill>{mode === 'canvas' ? 'Canvas chain' : 'Player loop'}</Pill>
       </div>
       <div className="rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-3">
+        {!!visiblePresets.length && (
+          <div data-testid="starter-presets" className="mb-3 grid gap-2">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
+              <Sparkles size={13} className="text-dreamy-brand-hot-v2" />
+              Start Presets
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {visiblePresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  data-testid={`starter-preset-${preset.id}`}
+                  aria-label={`Use ${preset.title} preset`}
+                  aria-pressed={selectedStarterPresetId === preset.id}
+                  disabled={submitting}
+                  onClick={() => onSelectPreset?.(preset)}
+                  className={`grid min-h-[92px] gap-2 rounded-lg-v2 border p-3 text-left transition-colors active:bg-Cr-beta-white-8-v2 disabled:opacity-50 ${
+                    selectedStarterPresetId === preset.id
+                      ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
+                      : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2'
+                  }`}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate text-xs font-semibold text-Cr-text-default-v2">{preset.title}</span>
+                    {selectedStarterPresetId === preset.id ? (
+                      <CheckCircle2 size={13} className="shrink-0 text-Cr-text-success-default-v2" />
+                    ) : (
+                      <Send size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
+                    )}
+                  </span>
+                  <span className="line-clamp-2 text-[11px] leading-4 text-Cr-text-subtler-v2">{preset.prompt}</span>
+                  <span className="text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2">{preset.pageName}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <textarea
           value={prompt}
           onChange={(event) => onPromptChange(event.target.value)}
@@ -2776,7 +2858,7 @@ export default function Dreamy() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const restoredDispatchUrlRef = useRef('');
-  const [mode, setMode] = useState<StudioMode>('canvas');
+  const [mode, setMode] = useState<StudioMode>('player');
   const [activeTab, setActiveTab] = useState<TabKey>('chat');
   const [prompt, setPrompt] = useState('');
   const [project, setProject] = useState<StudioProject | null>(null);
@@ -2784,10 +2866,10 @@ export default function Dreamy() {
     {
       id: 'welcome',
       role: 'assistant',
-      content: 'Dreamy Studio is ready.',
+      content: 'Dreamy Studio is ready for the first result.',
       createdAt: nowIso(),
       steps: [
-        { step: 'route', message: 'Natural language selects the next agent and segment shape.', progress: 0 },
+        { step: 'dreamy', message: 'Dreamy Miniapp is the first generation target.', progress: 0 },
       ],
     },
   ]);
@@ -2795,6 +2877,7 @@ export default function Dreamy() {
   const [submitting, setSubmitting] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState('');
+  const [selectedStarterPresetId, setSelectedStarterPresetId] = useState('');
   const [pages, setPages] = useState<StudioPageAdapter[]>([]);
   const [agents, setAgents] = useState<StudioAgentCapability[]>([]);
   const [hubJobs, setHubJobs] = useState<StudioJob[]>([]);
@@ -3526,7 +3609,9 @@ export default function Dreamy() {
       if (cancelled) return;
       if (!storedProjects.length) return;
       const lastProjectId = readLastStudioProjectId();
-      const restored = storedProjects.find((item) => item.projectId === lastProjectId) || storedProjects[0];
+      if (!lastProjectId) return;
+      const restored = storedProjects.find((item) => item.projectId === lastProjectId);
+      if (!restored) return;
       setProject((current) => current || restored);
       saveLastStudioProjectId(restored.projectId);
       setMode(restored.mode || 'player');
@@ -4292,6 +4377,15 @@ export default function Dreamy() {
     abortRef.current = null;
     setSubmitting(false);
   };
+
+  const selectStarterPreset = useCallback((preset: StudioStarterPreset) => {
+    setMode('player');
+    setActiveTab('chat');
+    setSelectedStarterPresetId(preset.id);
+    setSelectedPageId(preset.pageId);
+    setSelectedAgentId(preset.agentId);
+    setPrompt(preset.prompt);
+  }, []);
 
   const runMatrixEntry = useCallback((entry: StudioDispatchMatrixEntry) => {
     changePage(entry.pageId);
@@ -5112,11 +5206,15 @@ export default function Dreamy() {
             mode={mode}
             prompt={prompt}
             canSubmitWithoutPrompt={selectedPage?.executor === 'navigation'}
+            showStarterPresets={mode === 'player'}
+            starterPresets={DREAMY_STARTER_PRESETS}
+            selectedStarterPresetId={selectedStarterPresetId}
             previewUrl={previewUrl}
             selectedFileName={selectedFile?.name}
             submitting={submitting}
             onModeChange={setMode}
             onPromptChange={setPrompt}
+            onSelectPreset={selectStarterPreset}
             onPickFile={() => fileInputRef.current?.click()}
             onClearFile={clearFile}
             onSubmit={() => void runStudio('generate')}
