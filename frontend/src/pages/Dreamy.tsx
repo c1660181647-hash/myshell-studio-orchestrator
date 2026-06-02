@@ -60,6 +60,7 @@ import {
   fetchStudioReadiness,
   fetchStudioDispatchSession,
   fetchStudioDispatchSessions,
+  getStudioDispatchTargetHref,
   getStudioRootEndpoint,
   planStudioDispatchBatch,
   postStudioClientResult,
@@ -606,6 +607,45 @@ function actionUiHref(action: StudioHandoffAction): string {
   if (!action.uiUrl) return '';
   if (/^https?:\/\//i.test(action.uiUrl)) return action.uiUrl;
   return action.uiUrl.startsWith('/') ? action.uiUrl : `/${action.uiUrl}`;
+}
+
+function absoluteAppHref(href: string): string {
+  if (!href || /^https?:\/\//i.test(href) || typeof window === 'undefined') return href;
+  return new URL(href, window.location.origin).toString();
+}
+
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (!text || typeof document === 'undefined') return false;
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } catch {
+    copied = false;
+  } finally {
+    textarea.remove();
+  }
+
+  if (copied) return true;
+
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 function readDispatchSessionRestoreParams(): { sessionId?: string; targetId?: string } {
@@ -1172,12 +1212,14 @@ function StudioDispatchMatrixPanel({
   submitting,
   onSelectPage,
   onRunEntry,
+  onCopyEntryLink,
 }: {
   matrix: StudioDispatchMatrix | null;
   selectedPageId: string;
   submitting: boolean;
   onSelectPage: (pageId: string) => void;
   onRunEntry: (entry: StudioDispatchMatrixEntry) => void;
+  onCopyEntryLink: (entry: StudioDispatchMatrixEntry) => void;
 }) {
   const entries = matrix?.entries || [];
   if (!entries.length) return null;
@@ -1204,6 +1246,7 @@ function StudioDispatchMatrixPanel({
       <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
         {entries.map((entry) => {
           const active = entry.pageId === selectedPageId;
+          const entryHref = getStudioDispatchTargetHref(entry);
           const missingLabel = entry.missingRouteParams.length
             ? `Needs ${entry.missingRouteParams.join(', ')}`
             : '';
@@ -1240,17 +1283,49 @@ function StudioDispatchMatrixPanel({
                   )}
                 </div>
               </button>
-              <button
-                type="button"
-                disabled={!entry.dispatchReady || submitting}
-                onClick={() => onRunEntry(entry)}
-                title={entry.dispatchReady ? `Dispatch ${entry.pageName}` : blockedLabel}
-                aria-label={`Dispatch ${entry.pageName}`}
-                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-default-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
-              >
-                <Play size={12} />
-                <span className="truncate">{entry.dispatchReady ? 'Dispatch' : blockedLabel}</span>
-              </button>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-1.5">
+                <button
+                  type="button"
+                  disabled={!entry.dispatchReady || submitting}
+                  onClick={() => onRunEntry(entry)}
+                  title={entry.dispatchReady ? `Dispatch ${entry.pageName}` : blockedLabel}
+                  aria-label={`Dispatch ${entry.pageName}`}
+                  className="inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-default-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+                >
+                  <Play size={12} className="shrink-0" />
+                  <span className="truncate">{entry.dispatchReady ? 'Dispatch' : blockedLabel}</span>
+                </button>
+                {entryHref ? (
+                  <a
+                    data-testid="studio-dispatch-open-link"
+                    href={entryHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={`Open ${entry.pageName} at ${entryHref}`}
+                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-default-v2 hover:bg-Cr-beta-white-12-v2"
+                  >
+                    <ExternalLink size={12} />
+                    Open
+                  </a>
+                ) : (
+                  <span
+                    title="No direct page link for this executor"
+                    className="inline-flex h-8 items-center justify-center rounded-md-v2 bg-Cr-Bg-surface-subtle-v2 px-2 text-[11px] font-semibold text-Cr-text-subtlest-v2"
+                  >
+                    Open
+                  </span>
+                )}
+                <button
+                  type="button"
+                  disabled={!entryHref}
+                  onClick={() => onCopyEntryLink(entry)}
+                  title={entryHref ? `Copy ${entry.pageName} link` : 'No direct page link to copy'}
+                  aria-label={`Copy ${entry.pageName} dispatch link`}
+                  className="inline-flex h-8 items-center justify-center rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-default-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+                >
+                  <Copy size={12} />
+                </button>
+              </div>
             </div>
           );
         })}
@@ -3555,6 +3630,12 @@ export default function Dreamy() {
     });
   }, [changePage, runStudio, selectedSegment]);
 
+  const copyMatrixEntryLink = useCallback((entry: StudioDispatchMatrixEntry) => {
+    const href = getStudioDispatchTargetHref(entry);
+    if (!href) return;
+    void copyTextToClipboard(absoluteAppHref(href));
+  }, []);
+
   const selectSegment = (segmentId: string) => {
     setProject((prev) => (prev ? { ...prev, selectedSegmentId: segmentId } : prev));
     setActiveTab('preview');
@@ -3978,6 +4059,7 @@ export default function Dreamy() {
         submitting={submitting}
         onSelectPage={selectOverviewPage}
         onRunEntry={runMatrixEntry}
+        onCopyEntryLink={copyMatrixEntryLink}
       />
 
       <div className="shrink-0 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">

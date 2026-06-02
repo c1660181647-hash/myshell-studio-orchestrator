@@ -12,20 +12,25 @@ export type UnifiedMode = 'orchestrator' | 'miniapp' | 'monitor';
 export type StudioMode = 'player' | 'canvas';
 export type StudioAction = 'generate' | 'extend' | 'restyle' | 'retry-agent';
 export type StudioStatus = 'draft' | 'queued' | 'running' | 'done' | 'timeout' | 'auth_missing' | 'error' | 'cancelled';
-export type KnownStudioApi =
-  | 'dreamy-miniapp'
-  | 'myshell-art'
-  | 'explore'
-  | 'ai-picks'
-  | 'bot-detail'
-  | 'upload'
-  | 'tag-generator'
-  | 'library'
-  | 'energy-store'
-  | 'earn'
-  | 'share-invite'
-  | 'settings'
-  | 'checkin';
+export const KNOWN_STUDIO_PAGE_IDS = [
+  'dreamy-miniapp',
+  'myshell-art',
+  'explore',
+  'ai-picks',
+  'bot-detail',
+  'upload',
+  'tag-generator',
+  'library',
+  'library-detail',
+  'energy-store',
+  'energy-history',
+  'earn',
+  'share-invite',
+  'settings',
+  'profile',
+  'checkin',
+] as const;
+export type KnownStudioApi = (typeof KNOWN_STUDIO_PAGE_IDS)[number];
 export type StudioApi = KnownStudioApi | (string & {});
 export type StudioExecutor = 'client' | 'server' | 'navigation';
 
@@ -233,6 +238,15 @@ export interface StudioDispatchMatrix {
     server: number;
   };
   entries: StudioDispatchMatrixEntry[];
+}
+
+export type StudioDispatchLinkTarget = Pick<StudioDispatchMatrixEntry, 'navigationPath'>;
+
+export function getStudioDispatchTargetHref(target: StudioDispatchLinkTarget): string {
+  const path = (target.navigationPath || '').trim();
+  if (!path) return '';
+  if (/^https?:\/\//i.test(path)) return path;
+  return path.startsWith('/') ? path : `/${path}`;
 }
 
 export interface StudioPageAdapter {
