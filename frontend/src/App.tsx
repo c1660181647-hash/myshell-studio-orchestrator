@@ -18,7 +18,7 @@ import {
   normalizeStudioNavigationPath,
   readStudioDispatchSession,
 } from './services/studioSession';
-import { resolveMiniappPageDeepLink, resolveStartParamDeepLink } from './services/deepLinks';
+import { resolveInitialEntry } from './services/initialEntry';
 import { trackEvent } from './services/tracking';
 import Explore from './pages/Characters';
 import AiPicks from './pages/AiPicks';
@@ -100,43 +100,13 @@ function collectCommunityPushAttributionParams(
 // Parse deep-link params before MemoryRouter takes over.
 // Supports: slug_id (from URL query) and startapp (from Telegram start_param).
 function getInitialEntry(): string {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    // Test harness deep-link (automated L1 rendering tests)
-    const testRoute = params.get('test_route');
-    if (testRoute === 'customize-scene') {
-      const state = params.get('state') || 'free-default';
-      return `/__test-customize-scene?state=${encodeURIComponent(state)}`;
-    }
-    if (testRoute === 'tag-generator') {
-      const img = params.get('img') || 'https://placehold.co/400x600/1a1a1a/ff195e?text=Photo';
-      const slug = params.get('slug_id') || 'ai-porn-generator';
-      return `/tag-generator?slug_id=${encodeURIComponent(slug)}&img=${encodeURIComponent(img)}`;
-    }
-    if (testRoute === 'dreamy') return '/dreamy';
-
-    const pageLink = resolveMiniappPageDeepLink(params);
-    if (pageLink) return pageLink;
-
-    const slugId = params.get('slug_id');
-    if (slugId) return `/upload?slug_id=${encodeURIComponent(slugId)}`;
-  } catch { /* fallback */ }
-
-  // Telegram deep link: startapp param → route mapping
-  // In dev mode, also accept ?startapp= URL param for testing without Telegram.
-  // WebApp button passes ?page= directly in the URL.
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const startParam = (
+  return resolveInitialEntry({
+    pathname: window.location.pathname,
+    search: window.location.search,
+    telegramStartParam: (
       window.Telegram?.WebApp?.initDataUnsafe as { start_param?: string } | undefined
-    )?.start_param
-      ?? params.get('startapp')
-      ?? params.get('tgWebAppStartParam');
-    const startLink = resolveStartParamDeepLink(startParam);
-    if (startLink) return startLink;
-  } catch { /* fallback */ }
-
-  return '/';
+    )?.start_param,
+  });
 }
 
 // Error boundary to catch rendering crashes (prevents blank screen)
