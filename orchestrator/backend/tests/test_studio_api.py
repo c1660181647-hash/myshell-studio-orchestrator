@@ -938,6 +938,15 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("MYSHELL_CDP_URL", content)
         self.assertIn("--remote-debugging-port=${MYSHELL_CDP_PORT}", content)
         self.assertIn("--remote-debugging-address=${MYSHELL_CDP_HOST}", content)
+
+    def test_cloud_start_script_records_cdp_startup_timeout(self) -> None:
+        start_script = BACKEND_DIR.parent / "start-cloud.sh"
+        content = start_script.read_text(encoding="utf-8")
+
+        self.assertIn("MYSHELL_COOKIE_INJECTION_STATUS_PATH", content)
+        self.assertIn("cookie-injection-status.json", content)
+        self.assertIn("Chrome CDP was not ready after 30s", content)
+        self.assertIn("checkedAt", content)
         self.assertIn('curl -s "$MYSHELL_CDP_URL/json"', content)
         self.assertNotIn("curl -s http://127.0.0.1:9222/json", content)
 
