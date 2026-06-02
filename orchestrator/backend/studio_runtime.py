@@ -10,20 +10,76 @@ import httpx
 
 DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 DEFAULT_COOKIE_INJECTION_STATUS_PATH = os.path.join(os.path.dirname(__file__), ".studio", "cookie-injection-status.json")
+COOKIE_FILE_NAMES = ("myshell-cookies.json", "myshell_cookies_embedded.json")
 
 
 def cdp_url() -> str:
     return (os.environ.get("MYSHELL_CDP_URL") or DEFAULT_CDP_URL).rstrip("/")
 
 
-def cookies_available() -> bool:
-    if os.environ.get("MYSHELL_COOKIES"):
-        return True
+def _cookie_payload_status(payload: Any, *, mode: str, source: str) -> dict[str, Any]:
+    if not isinstance(payload, list):
+        return {
+            "status": "error",
+            "mode": mode,
+            "source": source,
+            "message": f"{source} must be a valid JSON cookie array",
+        }
+    if not payload:
+        return {
+            "status": "auth_missing",
+            "mode": mode,
+            "source": source,
+            "cookieCount": 0,
+            "message": f"{source} contains no cookies",
+        }
+    return {
+        "status": "ready",
+        "mode": mode,
+        "source": source,
+        "cookieCount": len(payload),
+        "message": "Cookies configured",
+    }
+
+
+def cookie_source_status() -> dict[str, Any]:
+    env = os.environ.get("MYSHELL_COOKIES")
+    if env:
+        try:
+            return _cookie_payload_status(json.loads(env), mode="env", source="MYSHELL_COOKIES")
+        except Exception as exc:
+            return {
+                "status": "error",
+                "mode": "env",
+                "source": "MYSHELL_COOKIES",
+                "message": f"MYSHELL_COOKIES must be valid JSON: {exc}",
+            }
+
     base = os.path.dirname(__file__)
-    return any(
-        os.path.exists(os.path.join(base, filename))
-        for filename in ("myshell-cookies.json", "myshell_cookies_embedded.json")
-    )
+    for filename in COOKIE_FILE_NAMES:
+        path = os.path.join(base, filename)
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as cookie_file:
+                return _cookie_payload_status(json.load(cookie_file), mode="file", source=filename)
+        except Exception as exc:
+            return {
+                "status": "error",
+                "mode": "file",
+                "source": filename,
+                "message": f"{filename} must be valid JSON: {exc}",
+            }
+
+    return {
+        "status": "auth_missing",
+        "mode": "env-or-file",
+        "message": "No MyShell cookies configured",
+    }
+
+
+def cookies_available() -> bool:
+    return cookie_source_status().get("status") == "ready"
 
 
 async def chrome_cdp_ready() -> bool:
@@ -35,14 +91,22 @@ async def chrome_cdp_ready() -> bool:
         return False
 
 
-def cookie_injection_status(has_cookies: bool) -> dict[str, Any]:
+def cookie_injection_status(has_cookies: bool, cookie_source: dict[str, Any] | None = None) -> dict[str, Any]:
     status_path = os.environ.get("MYSHELL_COOKIE_INJECTION_STATUS_PATH") or DEFAULT_COOKIE_INJECTION_STATUS_PATH
+    cookie_source = cookie_source or cookie_source_status()
+    if cookie_source.get("status") == "error":
+        return {
+            "status": "error",
+            "mode": "cookie-source",
+            "statusPath": status_path,
+            "message": str(cookie_source.get("message") or "Cookie source is invalid"),
+        }
     if not has_cookies:
         return {
             "status": "auth_missing",
             "mode": "env-or-file",
             "statusPath": status_path,
-            "message": "Set MYSHELL_COOKIES or a backend cookie file",
+            "message": str(cookie_source.get("message") or "Set MYSHELL_COOKIES or a backend cookie file"),
         }
     if not os.path.exists(status_path):
         return {
@@ -77,15 +141,16 @@ def cookie_injection_status(has_cookies: bool) -> dict[str, Any]:
 
 async def runtime_health(store_path: str) -> dict[str, Any]:
     storage_ready = os.path.exists(os.path.dirname(store_path)) and os.access(os.path.dirname(store_path), os.W_OK)
-    has_cookies = cookies_available()
+    cookie_source = cookie_source_status()
+    has_cookies = cookie_source.get("status") == "ready"
     cdp_ready = await chrome_cdp_ready()
     dreamy_auth = "client_delegated"
     art_auth = "ready" if has_cookies else "auth_missing"
-    injection_status = cookie_injection_status(has_cookies)
+    injection_status = cookie_injection_status(has_cookies, cookie_source)
     degraded_component = (
         not storage_ready
         or not cdp_ready
-        or str(injection_status.get("status") or "") in {"error", "pending"}
+        or str(injection_status.get("status") or "") in {"auth_missing", "error", "pending"}
     )
     overall = "degraded" if degraded_component else "ok"
     return {
@@ -96,7 +161,7 @@ async def runtime_health(store_path: str) -> dict[str, Any]:
             "backend": {"status": "ok", "message": "FastAPI runtime is serving requests"},
             "storage": {"status": "ok" if storage_ready else "error", "path": store_path},
             "chromeCdp": {"status": "ok" if cdp_ready else "unavailable", "url": cdp_url()},
-            "myshellCookies": {"status": art_auth, "message": "Cookies configured" if has_cookies else "No MyShell cookies configured"},
+            "myshellCookies": {**cookie_source, "status": "ready" if has_cookies else cookie_source.get("status", art_auth)},
             "cookieInjection": injection_status,
             "dreamyApiAuth": {"status": dreamy_auth, "mode": "telegram-init-data"},
         },
@@ -105,8 +170,9 @@ async def runtime_health(store_path: str) -> dict[str, Any]:
 
 def adapter_auth_status(page_id: str) -> dict[str, Any]:
     if page_id == "myshell-art":
-        has_cookies = cookies_available()
-        injection_status = cookie_injection_status(has_cookies)
+        cookie_source = cookie_source_status()
+        has_cookies = cookie_source.get("status") == "ready"
+        injection_status = cookie_injection_status(has_cookies, cookie_source)
         injection_state = str(injection_status.get("status") or "")
         ready = has_cookies and injection_state == "ready"
         return {

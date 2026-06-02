@@ -369,6 +369,49 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(cookie_injection["statusPath"], str(status_path))
         self.assertIn("Network.setCookie", cookie_injection["message"])
 
+    def test_health_reports_invalid_cookie_source_as_error(self) -> None:
+        with patch.dict(os.environ, {"MYSHELL_COOKIES": "{not-json"}):
+            health = self.client.get("/api/health")
+            pages = self.client.get("/api/pages")
+
+        self.assertEqual(health.status_code, 200)
+        components = health.json()["components"]
+        self.assertEqual(components["myshellCookies"]["status"], "error")
+        self.assertIn("valid JSON", components["myshellCookies"]["message"])
+        self.assertEqual(components["cookieInjection"]["status"], "error")
+        self.assertIn("valid JSON", components["cookieInjection"]["message"])
+
+        page_by_id = {page["id"]: page for page in pages.json()["pages"]}
+        art_auth = page_by_id["myshell-art"]["authStatus"]
+        self.assertEqual(art_auth["status"], "auth_missing")
+        self.assertEqual(art_auth["injectionStatus"], "error")
+
+    def test_health_degrades_when_myshell_cookie_auth_is_missing(self) -> None:
+        import studio_runtime
+
+        async def fake_chrome_cdp_ready() -> bool:
+            return True
+
+        with (
+            tempfile.TemporaryDirectory() as tmp_dir,
+            patch.object(studio_runtime, "chrome_cdp_ready", side_effect=fake_chrome_cdp_ready),
+            patch.object(
+                studio_runtime,
+                "cookie_source_status",
+                return_value={
+                    "status": "auth_missing",
+                    "mode": "env-or-file",
+                    "message": "No MyShell cookies configured",
+                },
+            ),
+        ):
+            health = asyncio.run(studio_runtime.runtime_health(str(Path(tmp_dir) / "store.sqlite3")))
+
+        self.assertEqual(health["status"], "degraded")
+        self.assertEqual(health["components"]["chromeCdp"]["status"], "ok")
+        self.assertEqual(health["components"]["myshellCookies"]["status"], "auth_missing")
+        self.assertEqual(health["components"]["cookieInjection"]["status"], "auth_missing")
+
     def test_runtime_health_reads_configured_cdp_url_at_call_time(self) -> None:
         import studio_runtime
 
