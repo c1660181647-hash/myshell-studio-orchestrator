@@ -579,6 +579,28 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("valid JSON", payload["message"])
         self.assertIn("MYSHELL_COOKIES", payload["message"])
 
+    def test_cookie_injection_cli_returns_nonzero_on_failure(self) -> None:
+        import inject_cookies
+
+        async def fake_inject_cookies() -> bool:
+            return False
+
+        with patch.object(inject_cookies, "inject_cookies", side_effect=fake_inject_cookies):
+            exit_code = inject_cookies.main()
+
+        self.assertEqual(exit_code, 1)
+
+    def test_cookie_injection_cli_returns_zero_on_success(self) -> None:
+        import inject_cookies
+
+        async def fake_inject_cookies() -> bool:
+            return True
+
+        with patch.object(inject_cookies, "inject_cookies", side_effect=fake_inject_cookies):
+            exit_code = inject_cookies.main()
+
+        self.assertEqual(exit_code, 0)
+
     def test_bridge_worker_uses_configured_cdp_url(self) -> None:
         import bridge_worker
 

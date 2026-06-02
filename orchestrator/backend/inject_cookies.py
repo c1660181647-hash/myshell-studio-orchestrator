@@ -1,7 +1,7 @@
 """Inject MyShell cookies into headless Chrome via CDP.
 Reads cookies from: 1) MYSHELL_COOKIES env var, 2) myshell-cookies.json, 3) embedded fallback
 """
-import json, os, asyncio, httpx, websockets, time
+import json, os, asyncio, httpx, websockets, time, sys
 from datetime import UTC, datetime
 
 DEFAULT_CDP_URL = "http://127.0.0.1:9222"
@@ -154,10 +154,15 @@ async def inject_cookies():
         )
         return success
 
-if __name__ == "__main__":
+def main():
     try:
         result = asyncio.run(inject_cookies())
     except Exception as exc:
         _write_status("failed", str(exc), 0)
         raise
     print(f"[COOKIES] {'SUCCESS' if result else 'FAILED'}")
+    return 0 if result else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
