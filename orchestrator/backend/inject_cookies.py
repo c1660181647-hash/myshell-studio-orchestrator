@@ -2,8 +2,28 @@
 Reads cookies from: 1) MYSHELL_COOKIES env var, 2) myshell-cookies.json, 3) embedded fallback
 """
 import json, os, asyncio, httpx, websockets, time
+from datetime import UTC, datetime
 
 CDP_URL = "http://127.0.0.1:9222"
+STATUS_PATH = os.environ.get(
+    "MYSHELL_COOKIE_INJECTION_STATUS_PATH",
+    os.path.join(os.path.dirname(__file__), ".studio", "cookie-injection-status.json"),
+)
+
+def _write_status(status, message, cookie_count=0, energy_display=""):
+    os.makedirs(os.path.dirname(STATUS_PATH), exist_ok=True)
+    with open(STATUS_PATH, "w", encoding="utf-8") as status_file:
+        json.dump(
+            {
+                "status": status,
+                "message": message,
+                "cookieCount": cookie_count,
+                "energyDisplay": energy_display,
+                "checkedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            },
+            status_file,
+            ensure_ascii=False,
+        )
 
 def _load_cookies():
     """Load cookies from env, file, or embedded fallback."""
@@ -30,6 +50,7 @@ async def inject_cookies():
     cookies = _load_cookies()
     if not cookies:
         print("[COOKIES] No cookies found — MyShell bots will not work")
+        _write_status("missing_cookies", "No cookies found", 0)
         return False
     
     print(f"[COOKIES] Loaded {len(cookies)} cookies")
@@ -43,6 +64,7 @@ async def inject_cookies():
             time.sleep(1)
     else:
         print("[COOKIES] Chrome not ready after 30s")
+        _write_status("failed", "Chrome not ready after 30s", len(cookies))
         return False
     
     ws_url = pages[0]["webSocketDebuggerUrl"]
@@ -92,9 +114,19 @@ async def inject_cookies():
         
         energy = await ev("document.body.innerText.match(/(\\d+)\\s*\\/\\s*(\\d+)/)?.[0] || 'not found'")
         print(f"[COOKIES] Energy display: {energy}")
-        
-        return "not found" not in energy
+        success = "not found" not in energy
+        _write_status(
+            "success" if success else "failed",
+            "Cookie injection succeeded" if success else "Cookie injection did not reveal a logged-in energy display",
+            len(cookies),
+            energy,
+        )
+        return success
 
 if __name__ == "__main__":
-    result = asyncio.run(inject_cookies())
+    try:
+        result = asyncio.run(inject_cookies())
+    except Exception as exc:
+        _write_status("failed", str(exc), 0)
+        raise
     print(f"[COOKIES] {'SUCCESS' if result else 'FAILED'}")

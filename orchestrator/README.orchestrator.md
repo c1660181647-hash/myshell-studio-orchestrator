@@ -4,7 +4,7 @@ The backend exposes the Studio API for MyShell page and agent dispatch. It keeps
 
 ## Core Surfaces
 
-- `GET /api/health` reports backend, SQLite storage, Chrome CDP, MyShell cookie, cookie injection, and Dreamy delegated-auth state.
+- `GET /api/health` reports backend, SQLite storage, Chrome CDP, MyShell cookie, cookie injection result evidence, and Dreamy delegated-auth state.
 - `GET /api/pages` lists registered page adapters and miniapp navigation surfaces, including `dreamy-miniapp`, `myshell-art`, Explore, AI Picks, Bot Detail, Upload, Tag Generator, Library, Library Detail, Energy, Energy History, Earn, Share Invite, Settings, Profile, and Checkin.
 - `GET /api/studio/readiness` includes a `page-registry` route coverage evidence block that compares registered `appRoute` values with the frontend `<Route>` paths when the App source is available. Missing or extra production routes block readiness; missing source is reported as `source_unavailable` without blocking runtime startup.
 - `GET /api/agents` lists the dispatch graph agents.
@@ -49,7 +49,7 @@ google-chrome-stable --remote-debugging-port=9222 --user-data-dir=/tmp/myshell-c
 export MYSHELL_COOKIES='[{"name":"...","value":"...","domain":".myshell.ai"}]'
 ```
 
-Without cookies, MyShell Art jobs are visible in Studio but stop as `auth_missing`.
+The Cloud Run startup script writes the latest cookie injection result to `.studio/cookie-injection-status.json` by default; set `MYSHELL_COOKIE_INJECTION_STATUS_PATH` to use a different path. Without cookies, MyShell Art jobs are visible in Studio but stop as `auth_missing`. If cookies exist but injection fails, health/readiness report degraded cookie-injection evidence instead of marking the adapter ready.
 
 ## Tests
 

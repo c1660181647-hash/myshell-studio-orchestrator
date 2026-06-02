@@ -331,6 +331,76 @@ class StudioApiTest(unittest.TestCase):
             self.assertIn(component_id, components)
             self.assertIn("status", components[component_id])
 
+    def test_health_reports_cookie_injection_result_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            status_path = Path(tmp_dir) / "cookie-injection-status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "status": "failed",
+                        "checkedAt": "2026-06-02T00:00:00Z",
+                        "cookieCount": 2,
+                        "message": "CDP Network.setCookie failed",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "MYSHELL_COOKIES": json.dumps(
+                        [
+                            {"name": "token", "value": "redacted", "domain": ".myshell.ai"},
+                            {"name": "session", "value": "redacted", "domain": ".myshell.ai"},
+                        ]
+                    ),
+                    "MYSHELL_COOKIE_INJECTION_STATUS_PATH": str(status_path),
+                },
+            ):
+                health = self.client.get("/api/health")
+
+        self.assertEqual(health.status_code, 200)
+        body = health.json()
+        self.assertEqual(body["status"], "degraded")
+        cookie_injection = body["components"]["cookieInjection"]
+        self.assertEqual(cookie_injection["status"], "error")
+        self.assertEqual(cookie_injection["cookieCount"], 2)
+        self.assertEqual(cookie_injection["statusPath"], str(status_path))
+        self.assertIn("Network.setCookie", cookie_injection["message"])
+
+    def test_myshell_art_auth_requires_successful_cookie_injection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            status_path = Path(tmp_dir) / "cookie-injection-status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "status": "failed",
+                        "checkedAt": "2026-06-02T00:00:00Z",
+                        "cookieCount": 1,
+                        "message": "Cookie injection did not reveal a logged-in energy display",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "MYSHELL_COOKIES": json.dumps(
+                        [{"name": "token", "value": "redacted", "domain": ".myshell.ai"}]
+                    ),
+                    "MYSHELL_COOKIE_INJECTION_STATUS_PATH": str(status_path),
+                },
+            ):
+                pages = self.client.get("/api/pages")
+
+        self.assertEqual(pages.status_code, 200)
+        page_by_id = {page["id"]: page for page in pages.json()["pages"]}
+        art = page_by_id["myshell-art"]
+        self.assertEqual(art["authStatus"]["status"], "auth_missing")
+        self.assertEqual(art["authStatus"]["injectionStatus"], "error")
+        self.assertFalse(art["dispatchReady"])
+        self.assertEqual(art["dispatchStatus"], "auth_missing")
+
     def test_studio_readiness_reports_delivery_gates(self) -> None:
         readiness = self.client.get("/api/studio/readiness")
 
