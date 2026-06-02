@@ -18,6 +18,7 @@ import {
   getStudioReturnPath,
   readStudioDispatchSessionFromUrl,
   readStudioDispatchSession,
+  stripStudioDispatchNavigationParams,
 } from './services/studioSession';
 import { resolveInitialEntry } from './services/initialEntry';
 import { trackEvent } from './services/tracking';
@@ -162,6 +163,24 @@ function StudioReturnDock() {
   if (!session || location.pathname === '/dreamy') return null;
 
   const targetPath = getStudioReturnPath(session);
+  const dismissSession = () => {
+    clearStudioDispatchSession();
+    setSession(null);
+    const cleanedPath = stripStudioDispatchNavigationParams({
+      pathname: location.pathname,
+      search: location.search,
+      hash: window.location.hash,
+    });
+    const cleanedBrowserPath = stripStudioDispatchNavigationParams(window.location);
+    try {
+      window.history.replaceState(window.history.state, '', cleanedBrowserPath);
+    } catch {
+      // MemoryRouter can still hide the dock even if the outer URL cannot be rewritten.
+    }
+    if (cleanedPath !== `${location.pathname}${location.search}${window.location.hash}`) {
+      navigate(cleanedPath, { replace: true });
+    }
+  };
 
   return (
     <div className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-32px)] items-center gap-1 rounded-full-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-1 shadow-[0_10px_28px_rgba(0,0,0,0.32)]">
@@ -182,7 +201,7 @@ function StudioReturnDock() {
       </button>
       <button
         type="button"
-        onClick={clearStudioDispatchSession}
+        onClick={dismissSession}
         className="flex h-8 w-8 items-center justify-center rounded-full-v2 text-Cr-text-subtler-v2 active:bg-Cr-beta-white-8-v2"
         aria-label="Dismiss Studio return"
       >

@@ -63,6 +63,17 @@ function pathWithSearchAndHash(url: URL): string {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
+const STUDIO_DISPATCH_URL_PARAMS = [
+  'studio_project_id',
+  'dispatch_session_id',
+  'dispatch_target_id',
+  'studio_page_id',
+  'studio_return_path',
+  'project_id',
+  'session_id',
+  'target_id',
+];
+
 export function buildStudioDispatchNavigationPath(
   path: string | undefined,
   session: Partial<Omit<StudioDispatchSession, 'updatedAt'>>,
@@ -104,6 +115,16 @@ export function readStudioDispatchSessionFromUrl(location: { pathname?: string; 
     studioReturnPath: params.get('studio_return_path') || undefined,
     updatedAt: new Date().toISOString(),
   };
+}
+
+export function stripStudioDispatchNavigationParams(location: { pathname?: string; search?: string; hash?: string }): string {
+  const pathname = normalizeStudioNavigationPath(location.pathname || '') || '/';
+  const params = new URLSearchParams(location.search || '');
+  for (const key of STUDIO_DISPATCH_URL_PARAMS) {
+    params.delete(key);
+  }
+  const query = params.toString();
+  return `${pathname}${query ? `?${query}` : ''}${location.hash || ''}`;
 }
 
 export function saveStudioDispatchSession(session: Omit<StudioDispatchSession, 'updatedAt'>): void {
