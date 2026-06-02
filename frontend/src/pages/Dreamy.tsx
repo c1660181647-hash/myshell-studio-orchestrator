@@ -69,6 +69,7 @@ import {
   resetStudioProject,
   resolveStudioAction,
   resolveStudioActionsBatch,
+  retryStudioDispatchSession,
   retryStudioJob,
   resolveStudioAssetUrl,
   streamStudioRun,
@@ -1055,6 +1056,7 @@ function StudioDispatchBatchStrip({
   onStartSession,
   onStartSelectedSession,
   onCancelSession,
+  onRetrySession,
   onOpenTarget,
   onCompleteTarget,
   onErrorTarget,
@@ -1071,6 +1073,7 @@ function StudioDispatchBatchStrip({
   onStartSession: () => void;
   onStartSelectedSession: () => void;
   onCancelSession: () => void;
+  onRetrySession: () => void;
   onOpenTarget: (target: StudioDispatchBatchTarget | StudioDispatchSessionTarget) => void;
   onCompleteTarget: (target: StudioDispatchSessionTarget) => void;
   onErrorTarget: (target: StudioDispatchSessionTarget) => void;
@@ -1090,6 +1093,10 @@ function StudioDispatchBatchStrip({
   const focusedTargetVisible = focusedTarget && !visibleTargets.some((target) => target.id === focusedTarget.id);
   const hasSelectedPages = selectedPageCount > 0;
   const canCancelSession = Boolean(session && session.status !== 'cancelled' && session.status !== 'done');
+  const canRetrySession = Boolean(
+    session &&
+    ((session.summary.targetCancelled || 0) > 0 || (session.summary.targetErrors || 0) > 0 || session.status === 'cancelled'),
+  );
 
   return (
     <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2 [-webkit-overflow-scrolling:touch]">
@@ -1152,6 +1159,15 @@ function StudioDispatchBatchStrip({
       >
         <Pause size={12} />
         Cancel Queue
+      </button>
+      <button
+        type="button"
+        disabled={!canRetrySession || sessionRunning}
+        onClick={onRetrySession}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <RotateCcw size={12} className={sessionRunning ? 'animate-spin' : ''} />
+        Retry Queue
       </button>
       <button
         type="button"
@@ -2925,6 +2941,52 @@ export default function Dreamy() {
     studioContextSourceSegmentId,
   ]);
 
+  const retryDispatchSession = useCallback(async () => {
+    if (!dispatchSession?.sessionId || dispatchSessionRunning) return;
+    setDispatchSessionRunning(true);
+    try {
+      const session = await retryStudioDispatchSession(dispatchSession.sessionId);
+      applyDispatchSession(session);
+      const snapshot = await refreshHandoffSnapshot({
+        projectId: session.projectId || project?.projectId,
+        sourceSegmentId: session.sourceSegmentId || studioContextSourceSegmentId,
+        interactive: false,
+      });
+      if (snapshot) {
+        setDispatchBatchPlan((current) => current ? { ...current, handoffSnapshot: snapshot } : current);
+      }
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: `Dispatch queue retry opened ${session.summary.pending} pending target${session.summary.pending === 1 ? '' : 's'}.`,
+          createdAt: nowIso(),
+        },
+      ]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: 'Dispatch queue retry failed.',
+          error: error instanceof Error ? error.message : String(error),
+          createdAt: nowIso(),
+        },
+      ]);
+    } finally {
+      setDispatchSessionRunning(false);
+    }
+  }, [
+    applyDispatchSession,
+    dispatchSession?.sessionId,
+    dispatchSessionRunning,
+    project?.projectId,
+    refreshHandoffSnapshot,
+    studioContextSourceSegmentId,
+  ]);
+
   const completeDispatchSessionTarget = useCallback(
     async (target: StudioDispatchSessionTarget) => {
       if (!dispatchSession?.sessionId || dispatchSessionRunning) return;
@@ -4132,6 +4194,7 @@ export default function Dreamy() {
         onStartSession={() => void startDispatchSession()}
         onStartSelectedSession={() => void startDispatchSession({ pageIds: selectedDispatchBatchPageIds })}
         onCancelSession={() => void cancelDispatchSession()}
+        onRetrySession={() => void retryDispatchSession()}
         onOpenTarget={(target) => void openDispatchBatchTarget(target)}
         onCompleteTarget={(target) => void completeDispatchSessionTarget(target)}
         onErrorTarget={(target) => void reviewDispatchSessionTarget(target, 'error')}

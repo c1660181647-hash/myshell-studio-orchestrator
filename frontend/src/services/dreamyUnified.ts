@@ -499,6 +499,7 @@ export interface StudioDeliveryBundle {
   remainingTargets: StudioDispatchSessionTarget[];
   skippedTargets: Array<StudioDispatchBatchSkip | StudioDispatchSessionTarget>;
   errorTargets: StudioDispatchSessionTarget[];
+  cancelledTargets: StudioDispatchSessionTarget[];
   reports: {
     deliveryReport: StudioProjectDeliveryReport;
     coverage: StudioCoverageReport;
@@ -691,6 +692,7 @@ export interface StudioDispatchSessionTarget extends StudioDispatchBatchTarget {
   completedAt?: string;
   skippedAt?: string;
   erroredAt?: string;
+  retriedAt?: string;
   updatedAt?: string;
 }
 
@@ -700,6 +702,8 @@ export interface StudioDispatchSession extends Omit<StudioDispatchBatchPlan, 'st
   readyForDispatch: boolean;
   createdAt: string;
   updatedAt: string;
+  retryCount?: number;
+  retriedAt?: string;
   planStatus?: string;
   summary: StudioDispatchBatchPlan['summary'] & {
     pending: number;
@@ -1282,6 +1286,15 @@ export async function cancelStudioDispatchSession(sessionId: string): Promise<St
     { method: 'POST' },
   );
   if (!response.ok) throw new Error(`Studio dispatch session cancel ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function retryStudioDispatchSession(sessionId: string): Promise<StudioDispatchSession> {
+  const response = await fetch(
+    getStudioRootEndpoint(`/api/studio/dispatch-sessions/${encodeURIComponent(sessionId)}/retry`),
+    { method: 'POST' },
+  );
+  if (!response.ok) throw new Error(`Studio dispatch session retry ${response.status}: ${response.statusText}`);
   return response.json();
 }
 

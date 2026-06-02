@@ -961,6 +961,40 @@ def _cancel_dispatch_session(session_id: str) -> dict[str, Any]:
     return view
 
 
+def _retry_dispatch_session(session_id: str) -> dict[str, Any]:
+    session = STUDIO_STORE.get_dispatch_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Dispatch session not found")
+
+    now = now_iso()
+    reopened = 0
+    for target in session.get("targets", []):
+        previous_status = str(target.get("status") or "pending")
+        if previous_status not in {"cancelled", "error"}:
+            continue
+        current_evidence = target.get("evidence") if isinstance(target.get("evidence"), dict) else {}
+        target["status"] = "pending"
+        target["retriedAt"] = now
+        target["updatedAt"] = now
+        target["evidence"] = {
+            **current_evidence,
+            "retriedFrom": previous_status,
+            "retriedAt": now,
+        }
+        reopened += 1
+
+    if reopened == 0:
+        raise HTTPException(status_code=409, detail="Dispatch session has no cancelled or error targets to retry")
+
+    session["status"] = "active"
+    session["retriedAt"] = now
+    session["retryCount"] = int(session.get("retryCount") or 0) + 1
+    session["updatedAt"] = now
+    view = _dispatch_session_view(session)
+    STUDIO_STORE.save_dispatch_session(view)
+    return view
+
+
 def _gate_status_from_report(status: str) -> str:
     if status in {"ok", "ready"}:
         return "ready"
@@ -2682,6 +2716,14 @@ async def _project_delivery_bundle(
         for target in all_targets
         if target.get("status") == "error"
     ]
+    cancelled_targets = [
+        {
+            **target,
+            "message": target.get("message") or (target.get("evidence") or {}).get("message") or "Target was cancelled before completion.",
+        }
+        for target in all_targets
+        if target.get("status") == "cancelled"
+    ]
     target_status_counts = {
         "pending": sum(1 for target in all_targets if target.get("status", "pending") == "pending"),
         "visited": sum(1 for target in all_targets if target.get("status") == "visited"),
@@ -2731,6 +2773,7 @@ async def _project_delivery_bundle(
         "remainingTargets": remaining_targets,
         "skippedTargets": skipped_targets,
         "errorTargets": error_targets,
+        "cancelledTargets": cancelled_targets,
         "reports": {
             "deliveryReport": delivery_report,
             "coverage": coverage,
@@ -3007,6 +3050,10 @@ def register_studio_routes(app) -> None:
     @app.post("/api/studio/dispatch-sessions/{session_id}/cancel")
     async def cancel_studio_dispatch_session(session_id: str):
         return _cancel_dispatch_session(session_id)
+
+    @app.post("/api/studio/dispatch-sessions/{session_id}/retry")
+    async def retry_studio_dispatch_session(session_id: str):
+        return _retry_dispatch_session(session_id)
 
     @app.post("/api/studio/dispatch-sessions/{session_id}/targets/{target_id}")
     async def update_studio_dispatch_session_target(session_id: str, target_id: str, payload: dict[str, Any] = Body(...)):

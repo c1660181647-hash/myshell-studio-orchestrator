@@ -3,6 +3,7 @@ import {
   createStudioDispatchSession,
   fetchStudioDispatchSession,
   planStudioDispatchBatch,
+  retryStudioDispatchSession,
   type StudioActionResolveResult,
   type StudioDispatchBatchPlan,
   type StudioDispatchSession,
@@ -80,3 +81,9 @@ async function cancelDispatchSessionContract(): Promise<StudioDispatchSession> {
 }
 
 void cancelDispatchSessionContract;
+
+async function retryDispatchSessionContract(): Promise<StudioDispatchSession> {
+  return retryStudioDispatchSession('dispatch_session_contract');
+}
+
+void retryDispatchSessionContract;

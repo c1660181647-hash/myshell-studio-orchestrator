@@ -1720,6 +1720,107 @@ class StudioApiTest(unittest.TestCase):
         bundle_body = bundle.json()
         self.assertEqual(bundle_body["summary"]["cancelledTargets"], body["summary"]["targetCancelled"])
         self.assertEqual(bundle_body["targetStatusCounts"]["cancelled"], body["summary"]["targetCancelled"])
+        self.assertEqual(len(bundle_body["cancelledTargets"]), body["summary"]["targetCancelled"])
+        self.assertTrue(all(target["status"] == "cancelled" for target in bundle_body["cancelledTargets"]))
+
+    def test_dispatch_session_retry_reopens_cancelled_and_error_targets(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            with self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={"message": "create retryable dispatch source image"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                source_events = _sse_events("".join(response.iter_text()))
+
+            source_meta = next(payload for name, payload in source_events if name == "meta")
+            source_execution = next(payload for name, payload in source_events if name == "execution_request")
+            source_url = "https://example.com/retryable-dispatch-source.png"
+            update = self.client.post(
+                f"/api/studio/projects/{source_meta['projectId']}/client-result",
+                json={
+                    "segmentId": source_execution["segmentId"],
+                    "jobId": source_execution["jobId"],
+                    "status": "done",
+                    "taskId": "task_retryable_dispatch_source",
+                    "url": source_url,
+                    "posterUrl": source_url,
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            created = self.client.post(
+                "/api/studio/dispatch-sessions",
+                json={
+                    "project_id": source_meta["projectId"],
+                    "source_segment_id": source_execution["segmentId"],
+                    "limit": 50,
+                },
+            )
+            self.assertEqual(created.status_code, 200)
+            session = created.json()
+            first_target = session["nextTarget"]
+            second_target = next(target for target in session["targets"] if target["id"] != first_target["id"])
+            third_target = next(
+                target
+                for target in session["targets"]
+                if target["id"] not in {first_target["id"], second_target["id"]}
+            )
+
+            completed = self.client.post(
+                f"/api/studio/dispatch-sessions/{session['sessionId']}/targets/{first_target['id']}",
+                json={"status": "completed", "evidence": {"accepted": True, "completedFrom": "retry-test"}},
+            )
+            self.assertEqual(completed.status_code, 200)
+            errored = self.client.post(
+                f"/api/studio/dispatch-sessions/{session['sessionId']}/targets/{second_target['id']}",
+                json={"status": "error", "evidence": {"message": "temporary page issue"}},
+            )
+            self.assertEqual(errored.status_code, 200)
+            opened = self.client.post(
+                f"/api/studio/dispatch-sessions/{session['sessionId']}/targets/{third_target['id']}",
+                json={"status": "visited", "evidence": {"openedFrom": "retry-test"}},
+            )
+            self.assertEqual(opened.status_code, 200)
+            cancelled = self.client.post(f"/api/studio/dispatch-sessions/{session['sessionId']}/cancel")
+            self.assertEqual(cancelled.status_code, 200)
+
+            retried = self.client.post(f"/api/studio/dispatch-sessions/{session['sessionId']}/retry")
+
+        self.assertEqual(retried.status_code, 200)
+        body = retried.json()
+        self.assertEqual(body["status"], "active")
+        self.assertTrue(body["readyForDispatch"])
+        self.assertEqual(body["summary"]["completed"], 1)
+        self.assertEqual(body["summary"]["targetErrors"], 0)
+        self.assertEqual(body["summary"]["targetCancelled"], 0)
+        self.assertEqual(body["summary"]["pending"], body["summary"]["planned"] - 1)
+        self.assertEqual(body["retryCount"], 1)
+        self.assertIsNotNone(body["nextTarget"])
+
+        targets = {target["id"]: target for target in body["targets"]}
+        self.assertEqual(targets[first_target["id"]]["status"], "completed")
+        self.assertEqual(targets[first_target["id"]]["evidence"]["completedFrom"], "retry-test")
+        self.assertEqual(targets[second_target["id"]]["status"], "pending")
+        self.assertEqual(targets[second_target["id"]]["evidence"]["message"], "temporary page issue")
+        self.assertEqual(targets[second_target["id"]]["evidence"]["retriedFrom"], "error")
+        self.assertEqual(targets[third_target["id"]]["status"], "pending")
+        self.assertEqual(targets[third_target["id"]]["evidence"]["openedFrom"], "retry-test")
+        self.assertEqual(targets[third_target["id"]]["evidence"]["cancelledFrom"], "studio")
+        self.assertEqual(targets[third_target["id"]]["evidence"]["retriedFrom"], "cancelled")
+
+        PROJECTS.clear()
+        restored = self.client.get(f"/api/studio/dispatch-sessions/{session['sessionId']}")
+        self.assertEqual(restored.status_code, 200)
+        restored_body = restored.json()
+        self.assertEqual(restored_body["status"], "active")
+        self.assertEqual(restored_body["retryCount"], 1)
+        self.assertEqual(restored_body["summary"]["pending"], body["summary"]["pending"])
 
     def test_run_stream_preserves_selected_agent_id_through_retry(self) -> None:
         with self.client.stream(
