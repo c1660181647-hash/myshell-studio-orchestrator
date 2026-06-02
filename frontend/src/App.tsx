@@ -15,7 +15,8 @@ import { reportInviteOpened, reportPickOpened, reportShareOpened } from './servi
 import {
   STUDIO_SESSION_CHANGED_EVENT,
   clearStudioDispatchSession,
-  normalizeStudioNavigationPath,
+  getStudioReturnPath,
+  readStudioDispatchSessionFromUrl,
   readStudioDispatchSession,
 } from './services/studioSession';
 import { resolveInitialEntry } from './services/initialEntry';
@@ -145,10 +146,10 @@ function GlobalCheckinModal() {
 function StudioReturnDock() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [session, setSession] = useState(() => readStudioDispatchSession());
+  const [session, setSession] = useState(() => readStudioDispatchSession() || readStudioDispatchSessionFromUrl(window.location));
 
   useEffect(() => {
-    const refresh = () => setSession(readStudioDispatchSession());
+    const refresh = () => setSession(readStudioDispatchSession() || readStudioDispatchSessionFromUrl(window.location));
     window.addEventListener(STUDIO_SESSION_CHANGED_EVENT, refresh);
     window.addEventListener('storage', refresh);
     refresh();
@@ -160,7 +161,7 @@ function StudioReturnDock() {
 
   if (!session || location.pathname === '/dreamy') return null;
 
-  const targetPath = normalizeStudioNavigationPath(session.studioReturnPath) || '/dreamy';
+  const targetPath = getStudioReturnPath(session);
 
   return (
     <div className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-32px)] items-center gap-1 rounded-full-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-1 shadow-[0_10px_28px_rgba(0,0,0,0.32)]">

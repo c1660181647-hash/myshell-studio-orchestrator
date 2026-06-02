@@ -77,6 +77,7 @@ import {
   verifyStudioCoverage,
 } from '../services/dreamyUnified';
 import {
+  buildStudioDispatchNavigationPath,
   clearStudioDispatchSession,
   forgetLastStudioProjectId,
   normalizeStudioNavigationPath,
@@ -2991,7 +2992,13 @@ export default function Dreamy() {
         navigationPath: targetPath,
         studioReturnPath: target.studioReturnPath || '/dreamy',
       });
-      navigate(targetPath);
+      navigate(buildStudioDispatchNavigationPath(targetPath, {
+        projectId,
+        sessionId: dispatchSession?.sessionId,
+        targetId: target.id,
+        pageId: String(target.pageId),
+        studioReturnPath: target.studioReturnPath || '/dreamy',
+      }));
     },
     [dispatchSession?.projectId, dispatchSession?.sessionId, navigate, project?.projectId],
   );
@@ -3624,7 +3631,11 @@ export default function Dreamy() {
                     navigationPath: targetPath,
                     studioReturnPath: executionEvent.studioReturnPath || '/dreamy',
                   });
-                  navigate(targetPath);
+                  navigate(buildStudioDispatchNavigationPath(targetPath, {
+                    projectId: currentProjectId,
+                    pageId: executionEvent.page?.id || executionEvent.api,
+                    studioReturnPath: executionEvent.studioReturnPath || '/dreamy',
+                  }));
                 }
               } else {
                 updateAssistant(assistantId, {

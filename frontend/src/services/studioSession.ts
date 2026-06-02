@@ -54,6 +54,58 @@ export function normalizeStudioNavigationPath(path: string | undefined): string 
   return path;
 }
 
+function appendSearchParam(params: URLSearchParams, key: string, value: string | undefined): void {
+  const trimmed = (value || '').trim();
+  if (trimmed) params.set(key, trimmed);
+}
+
+function pathWithSearchAndHash(url: URL): string {
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+export function buildStudioDispatchNavigationPath(
+  path: string | undefined,
+  session: Partial<Omit<StudioDispatchSession, 'updatedAt'>>,
+): string {
+  const normalized = normalizeStudioNavigationPath(path);
+  if (!normalized) return '';
+  const url = new URL(normalized, 'https://studio.local');
+  appendSearchParam(url.searchParams, 'studio_project_id', session.projectId);
+  appendSearchParam(url.searchParams, 'dispatch_session_id', session.sessionId);
+  appendSearchParam(url.searchParams, 'dispatch_target_id', session.targetId);
+  appendSearchParam(url.searchParams, 'studio_page_id', session.pageId);
+  appendSearchParam(url.searchParams, 'studio_return_path', session.studioReturnPath);
+  return pathWithSearchAndHash(url);
+}
+
+export function getStudioReturnPath(session: Pick<StudioDispatchSession, 'projectId' | 'sessionId' | 'targetId' | 'studioReturnPath'>): string {
+  const explicitReturnPath = normalizeStudioNavigationPath(session.studioReturnPath);
+  if (explicitReturnPath && explicitReturnPath !== '/dreamy') return explicitReturnPath;
+  const params = new URLSearchParams();
+  appendSearchParam(params, 'project_id', session.projectId);
+  appendSearchParam(params, 'dispatch_session_id', session.sessionId);
+  appendSearchParam(params, 'target_id', session.targetId);
+  const query = params.toString();
+  return `/dreamy${query ? `?${query}` : ''}`;
+}
+
+export function readStudioDispatchSessionFromUrl(location: { pathname?: string; search?: string }): StudioDispatchSession | null {
+  const params = new URLSearchParams(location.search || '');
+  const projectId = params.get('studio_project_id') || params.get('project_id') || '';
+  const sessionId = params.get('dispatch_session_id') || params.get('session_id') || '';
+  const targetId = params.get('dispatch_target_id') || params.get('target_id') || '';
+  if (!projectId && !sessionId && !targetId) return null;
+  return {
+    projectId,
+    sessionId: sessionId || undefined,
+    targetId: targetId || undefined,
+    pageId: params.get('studio_page_id') || undefined,
+    navigationPath: normalizeStudioNavigationPath(location.pathname || '') || undefined,
+    studioReturnPath: params.get('studio_return_path') || undefined,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export function saveStudioDispatchSession(session: Omit<StudioDispatchSession, 'updatedAt'>): void {
   if (typeof window === 'undefined') return;
   try {
