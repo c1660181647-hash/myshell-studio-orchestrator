@@ -32,7 +32,7 @@ PROJECTS: dict[str, StudioProject] = {}
 VALID_MODES = {"player", "canvas"}
 VALID_ACTIONS = {"generate", "extend", "restyle", "retry-agent"}
 VALID_STATUSES = {"draft", "queued", "running", "done", "timeout", "auth_missing", "error", "cancelled"}
-VALID_DISPATCH_TARGET_STATUSES = {"pending", "visited", "completed", "skipped", "error"}
+VALID_DISPATCH_TARGET_STATUSES = {"pending", "visited", "completed", "skipped", "error", "cancelled"}
 READY_AUTH_STATUSES = {"ok", "ready", "client_delegated"}
 STATUS_COUNT_KEYS = ("draft", "queued", "running", "done", "timeout", "auth_missing", "error", "cancelled")
 TERMINAL_CANCEL_STATUSES = {"done", "cancelled"}
@@ -754,6 +754,7 @@ def _dispatch_session_view(session: dict[str, Any]) -> dict[str, Any]:
     pending = sum(1 for target in targets if target.get("status") == "pending")
     skipped_targets = sum(1 for target in targets if target.get("status") == "skipped")
     errors = sum(1 for target in targets if target.get("status") == "error")
+    cancelled_targets = sum(1 for target in targets if target.get("status") == "cancelled")
     summary = dict(session.get("summary") or {})
     summary.update(
         {
@@ -762,6 +763,7 @@ def _dispatch_session_view(session: dict[str, Any]) -> dict[str, Any]:
             "completed": completed,
             "targetSkipped": skipped_targets,
             "targetErrors": errors,
+            "targetCancelled": cancelled_targets,
         }
     )
     if not targets:
@@ -778,7 +780,7 @@ def _dispatch_session_view(session: dict[str, Any]) -> dict[str, Any]:
     view["summary"] = summary
     view["status"] = status if session.get("status") != "cancelled" else "cancelled"
     view["readyForDispatch"] = bool(targets) and view["status"] in {"active", "needs_review", "done"}
-    view["nextTarget"] = _dispatch_session_next_target(targets)
+    view["nextTarget"] = None if view["status"] == "cancelled" else _dispatch_session_next_target(targets)
     return view
 
 
@@ -927,6 +929,32 @@ def _update_dispatch_session_target(
         operator_evidence = target.get("evidence") if isinstance(target.get("evidence"), dict) else {}
         _record_dispatch_session_target_completion(session, target, operator_evidence)
 
+    session["updatedAt"] = now
+    view = _dispatch_session_view(session)
+    STUDIO_STORE.save_dispatch_session(view)
+    return view
+
+
+def _cancel_dispatch_session(session_id: str) -> dict[str, Any]:
+    session = STUDIO_STORE.get_dispatch_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Dispatch session not found")
+
+    now = now_iso()
+    for target in session.get("targets", []):
+        if target.get("status", "pending") not in {"pending", "visited"}:
+            continue
+        current_evidence = target.get("evidence") if isinstance(target.get("evidence"), dict) else {}
+        target["status"] = "cancelled"
+        target["cancelledAt"] = now
+        target["updatedAt"] = now
+        target["evidence"] = {
+            **current_evidence,
+            "cancelledFrom": "studio",
+        }
+
+    session["status"] = "cancelled"
+    session["cancelledAt"] = now
     session["updatedAt"] = now
     view = _dispatch_session_view(session)
     STUDIO_STORE.save_dispatch_session(view)
@@ -2660,6 +2688,7 @@ async def _project_delivery_bundle(
         "completed": sum(1 for target in all_targets if target.get("status") == "completed"),
         "skipped": sum(1 for target in all_targets if target.get("status") == "skipped"),
         "error": sum(1 for target in all_targets if target.get("status") == "error"),
+        "cancelled": sum(1 for target in all_targets if target.get("status") == "cancelled"),
         "blocked": len(batch_skipped_targets),
         "remaining": len(remaining_targets),
         "total": len(all_targets) + len(batch_skipped_targets),
@@ -2689,6 +2718,7 @@ async def _project_delivery_bundle(
             "completedTargets": target_status_counts["completed"],
             "skippedTargets": target_status_counts["skipped"],
             "errorTargets": target_status_counts["error"],
+            "cancelledTargets": target_status_counts["cancelled"],
             "blockedTargets": target_status_counts["blocked"],
             "gaps": len(handoff.get("gaps") or []),
             "actions": len(handoff.get("actions") or []),
@@ -2973,6 +3003,10 @@ def register_studio_routes(app) -> None:
         target_id: Optional[str] = Query(None),
     ):
         return _dispatch_session_with_focused_target(_get_dispatch_session_or_404(session_id), target_id)
+
+    @app.post("/api/studio/dispatch-sessions/{session_id}/cancel")
+    async def cancel_studio_dispatch_session(session_id: str):
+        return _cancel_dispatch_session(session_id)
 
     @app.post("/api/studio/dispatch-sessions/{session_id}/targets/{target_id}")
     async def update_studio_dispatch_session_target(session_id: str, target_id: str, payload: dict[str, Any] = Body(...)):

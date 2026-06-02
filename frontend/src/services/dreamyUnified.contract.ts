@@ -1,4 +1,5 @@
 import {
+  cancelStudioDispatchSession,
   createStudioDispatchSession,
   fetchStudioDispatchSession,
   planStudioDispatchBatch,
@@ -73,3 +74,9 @@ async function remainingDispatchSessionContract(): Promise<StudioDispatchSession
 }
 
 void remainingDispatchSessionContract;
+
+async function cancelDispatchSessionContract(): Promise<StudioDispatchSession> {
+  return cancelStudioDispatchSession('dispatch_session_contract');
+}
+
+void cancelDispatchSessionContract;

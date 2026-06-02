@@ -486,6 +486,7 @@ export interface StudioDeliveryBundle {
     completedTargets: number;
     skippedTargets: number;
     errorTargets: number;
+    cancelledTargets: number;
     blockedTargets: number;
     gaps: number;
     actions: number;
@@ -681,7 +682,7 @@ export interface StudioDispatchBatchPlan {
   handoffSnapshot: StudioHandoffSnapshot;
 }
 
-export type StudioDispatchSessionTargetStatus = 'pending' | 'visited' | 'completed' | 'skipped' | 'error' | string;
+export type StudioDispatchSessionTargetStatus = 'pending' | 'visited' | 'completed' | 'skipped' | 'error' | 'cancelled' | string;
 
 export interface StudioDispatchSessionTarget extends StudioDispatchBatchTarget {
   status: StudioDispatchSessionTargetStatus;
@@ -706,6 +707,7 @@ export interface StudioDispatchSession extends Omit<StudioDispatchBatchPlan, 'st
     completed: number;
     targetSkipped: number;
     targetErrors: number;
+    targetCancelled?: number;
   };
   targets: StudioDispatchSessionTarget[];
   nextTarget?: StudioDispatchSessionTarget | null;
@@ -1271,6 +1273,15 @@ export async function fetchStudioDispatchSession(
     getStudioRootEndpoint(`/api/studio/dispatch-sessions/${encodeURIComponent(sessionId)}${query ? `?${query}` : ''}`),
   );
   if (!response.ok) throw new Error(`Studio dispatch session ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function cancelStudioDispatchSession(sessionId: string): Promise<StudioDispatchSession> {
+  const response = await fetch(
+    getStudioRootEndpoint(`/api/studio/dispatch-sessions/${encodeURIComponent(sessionId)}/cancel`),
+    { method: 'POST' },
+  );
+  if (!response.ok) throw new Error(`Studio dispatch session cancel ${response.status}: ${response.statusText}`);
   return response.json();
 }
 

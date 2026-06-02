@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react';
 import { trackEvent } from '../services/tracking';
+import { shouldBypassAgeGateForDev } from './ageGate';
 
 const AGE_GATE_STORAGE_KEY = 'dp_age_gate_passed';
 
 function readPassed(): boolean {
+  if (typeof window !== 'undefined' && shouldBypassAgeGateForDev(window.location.search)) {
+    return true;
+  }
   try {
     return localStorage.getItem(AGE_GATE_STORAGE_KEY) === '1';
   } catch {

@@ -1632,6 +1632,95 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(focused_body["focusedTarget"]["status"], "completed")
         self.assertEqual(focused_body["focusedTargetIndex"], expected_focus_index)
 
+    def test_dispatch_session_cancel_marks_unfinished_targets_and_persists(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            with self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={"message": "create cancellable dispatch source image"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                source_events = _sse_events("".join(response.iter_text()))
+
+            source_meta = next(payload for name, payload in source_events if name == "meta")
+            source_execution = next(payload for name, payload in source_events if name == "execution_request")
+            source_url = "https://example.com/cancellable-dispatch-source.png"
+            update = self.client.post(
+                f"/api/studio/projects/{source_meta['projectId']}/client-result",
+                json={
+                    "segmentId": source_execution["segmentId"],
+                    "jobId": source_execution["jobId"],
+                    "status": "done",
+                    "taskId": "task_cancellable_dispatch_source",
+                    "url": source_url,
+                    "posterUrl": source_url,
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            created = self.client.post(
+                "/api/studio/dispatch-sessions",
+                json={
+                    "project_id": source_meta["projectId"],
+                    "source_segment_id": source_execution["segmentId"],
+                    "limit": 50,
+                },
+            )
+            self.assertEqual(created.status_code, 200)
+            session = created.json()
+            first_target = session["nextTarget"]
+            second_target = next(target for target in session["targets"] if target["id"] != first_target["id"])
+
+            self.client.post(
+                f"/api/studio/dispatch-sessions/{session['sessionId']}/targets/{first_target['id']}",
+                json={"status": "visited", "evidence": {"openedFrom": "cancel-test"}},
+            )
+            completed = self.client.post(
+                f"/api/studio/dispatch-sessions/{session['sessionId']}/targets/{second_target['id']}",
+                json={"status": "completed", "evidence": {"accepted": True, "completedFrom": "cancel-test"}},
+            )
+            self.assertEqual(completed.status_code, 200)
+
+            cancelled = self.client.post(f"/api/studio/dispatch-sessions/{session['sessionId']}/cancel")
+
+        self.assertEqual(cancelled.status_code, 200)
+        body = cancelled.json()
+        self.assertEqual(body["status"], "cancelled")
+        self.assertFalse(body["readyForDispatch"])
+        self.assertIsNone(body["nextTarget"])
+        self.assertEqual(body["summary"]["pending"], 0)
+        self.assertEqual(body["summary"]["visited"], 0)
+        self.assertEqual(body["summary"]["completed"], 1)
+        self.assertEqual(body["summary"]["targetCancelled"], body["summary"]["planned"] - 1)
+
+        targets = {target["id"]: target for target in body["targets"]}
+        self.assertEqual(targets[first_target["id"]]["status"], "cancelled")
+        self.assertEqual(targets[first_target["id"]]["evidence"]["openedFrom"], "cancel-test")
+        self.assertEqual(targets[first_target["id"]]["evidence"]["cancelledFrom"], "studio")
+        self.assertEqual(targets[second_target["id"]]["status"], "completed")
+
+        PROJECTS.clear()
+        restored = self.client.get(f"/api/studio/dispatch-sessions/{session['sessionId']}")
+        self.assertEqual(restored.status_code, 200)
+        restored_body = restored.json()
+        self.assertEqual(restored_body["status"], "cancelled")
+        self.assertEqual(restored_body["summary"]["targetCancelled"], body["summary"]["targetCancelled"])
+        self.assertIsNone(restored_body["nextTarget"])
+
+        bundle = self.client.get(
+            f"/api/studio/projects/{source_meta['projectId']}/delivery-bundle",
+            params={"source_segment_id": source_execution["segmentId"]},
+        )
+        self.assertEqual(bundle.status_code, 200)
+        bundle_body = bundle.json()
+        self.assertEqual(bundle_body["summary"]["cancelledTargets"], body["summary"]["targetCancelled"])
+        self.assertEqual(bundle_body["targetStatusCounts"]["cancelled"], body["summary"]["targetCancelled"])
+
     def test_run_stream_preserves_selected_agent_id_through_retry(self) -> None:
         with self.client.stream(
             "POST",
