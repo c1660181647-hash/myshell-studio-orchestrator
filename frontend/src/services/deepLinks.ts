@@ -86,9 +86,48 @@ export function resolveMiniappPageDeepLink(params: URLSearchParams): string | nu
   return MINIAPP_PAGE_DEEP_LINKS[page].route;
 }
 
+function normalizeStartParamQuery(value: string): URLSearchParams | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const withoutQuestion = trimmed.startsWith('?') ? trimmed.slice(1) : trimmed;
+  const decoded = (() => {
+    try {
+      return decodeURIComponent(withoutQuestion);
+    } catch {
+      return withoutQuestion;
+    }
+  })();
+  if (!/[=&]/.test(decoded)) return null;
+  const params = new URLSearchParams(decoded);
+  return [...params.keys()].length ? params : null;
+}
+
+function resolvePageKeyDeepLink(page: keyof typeof MINIAPP_PAGE_DEEP_LINKS | 'self-director'): string | null {
+  if (page === 'self-director') return '/upload?mode=tag-generator';
+  if (page === 'bot-detail') {
+    return withQuery(MINIAPP_PAGE_DEEP_LINKS[page].route, { slug_id: DEFAULT_BOT_SLUG });
+  }
+  if (page === 'upload') {
+    return withQuery(MINIAPP_PAGE_DEEP_LINKS[page].route, { slug_id: DEFAULT_BOT_SLUG });
+  }
+  if (page === 'tag-generator') {
+    return withQuery(MINIAPP_PAGE_DEEP_LINKS[page].route, { slug_id: DEFAULT_BOT_SLUG });
+  }
+  if (page === 'library-detail') {
+    return `/library/${encodeURIComponent(DEFAULT_LIBRARY_DETAIL_ID)}`;
+  }
+  return MINIAPP_PAGE_DEEP_LINKS[page].route;
+}
+
 export function resolveStartParamDeepLink(startParam: string | null | undefined): string | null {
   const value = (startParam || '').trim();
   if (!value) return null;
+
+  const queryParams = normalizeStartParamQuery(value);
+  if (queryParams) {
+    const pageLink = resolveMiniappPageDeepLink(queryParams);
+    if (pageLink) return pageLink;
+  }
 
   const normalized = value.toLowerCase();
   if (normalized === 'earn') return MINIAPP_PAGE_DEEP_LINKS['share-invite'].route;
@@ -96,10 +135,7 @@ export function resolveStartParamDeepLink(startParam: string | null | undefined)
   if (normalized.startsWith('share_')) return MINIAPP_PAGE_DEEP_LINKS.library.route;
 
   const page = normalizeMiniappPageKey(normalized);
-  if (page && page !== 'self-director' && page !== 'bot-detail' && page !== 'upload' && page !== 'tag-generator') {
-    return MINIAPP_PAGE_DEEP_LINKS[page].route;
-  }
-  if (page === 'self-director') return '/upload?mode=tag-generator';
+  if (page) return resolvePageKeyDeepLink(page);
 
   return `/bot?slug_id=${encodeURIComponent(value)}`;
 }

@@ -25,8 +25,21 @@ const rootSlugFallbackContract = resolveInitialEntry({
   search: '?slug_id=luna-star',
 });
 
+const startAppLibraryDetailContract = resolveInitialEntry({
+  pathname: '/',
+  search: '?startapp=library-detail',
+});
+
+const telegramStartParamLibraryDetailContract = resolveInitialEntry({
+  pathname: '/',
+  search: '',
+  telegramStartParam: 'page=library-detail&id=artifact-123',
+});
+
 void libraryDetailPathContract;
 void energyHistoryPathContract;
 void botPathContract;
 void pageParamStillWinsContract;
 void rootSlugFallbackContract;
+void startAppLibraryDetailContract;
+void telegramStartParamLibraryDetailContract;

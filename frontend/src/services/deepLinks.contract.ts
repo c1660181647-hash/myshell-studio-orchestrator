@@ -44,6 +44,11 @@ const libraryDetailPageContract = resolveMiniappPageDeepLink(new URLSearchParams
 const legacyEnergyPageContract = resolveMiniappPageDeepLink(new URLSearchParams('page=energy'));
 const legacyCheckinPageContract = resolveMiniappPageDeepLink(new URLSearchParams('page=checkin-demo'));
 const buyStartContract = resolveStartParamDeepLink('buy');
+const libraryDetailStartContract = resolveStartParamDeepLink('library-detail');
+const libraryDetailQueryStartContract = resolveStartParamDeepLink('page=library-detail&id=artifact-123');
+const botDetailStartContract = resolveStartParamDeepLink('bot-detail');
+const uploadStartContract = resolveStartParamDeepLink('upload');
+const tagGeneratorStartContract = resolveStartParamDeepLink('tag-generator');
 
 void [
   profilePageContract,
@@ -52,4 +57,9 @@ void [
   legacyEnergyPageContract,
   legacyCheckinPageContract,
   buyStartContract,
+  libraryDetailStartContract,
+  libraryDetailQueryStartContract,
+  botDetailStartContract,
+  uploadStartContract,
+  tagGeneratorStartContract,
 ];
