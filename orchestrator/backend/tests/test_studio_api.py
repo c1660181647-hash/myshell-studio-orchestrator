@@ -560,6 +560,25 @@ class StudioApiTest(unittest.TestCase):
         self.assertTrue(requested_urls)
         self.assertEqual(requested_urls[0], "http://cdp.internal:9333/json")
 
+    def test_cookie_injection_reports_invalid_cookie_source_without_throwing(self) -> None:
+        import inject_cookies
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            status_path = Path(tmp_dir) / "cookie-injection-status.json"
+            with (
+                patch.dict(os.environ, {"MYSHELL_COOKIES": "{not-json"}),
+                patch.object(inject_cookies, "STATUS_PATH", str(status_path)),
+            ):
+                result = asyncio.run(inject_cookies.inject_cookies())
+
+            self.assertFalse(result)
+            payload = json.loads(status_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["status"], "failed")
+        self.assertEqual(payload["cookieCount"], 0)
+        self.assertIn("valid JSON", payload["message"])
+        self.assertIn("MYSHELL_COOKIES", payload["message"])
+
     def test_bridge_worker_uses_configured_cdp_url(self) -> None:
         import bridge_worker
 

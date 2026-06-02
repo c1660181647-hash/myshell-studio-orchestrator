@@ -13,6 +13,11 @@ STATUS_PATH = os.environ.get(
 def _cdp_url():
     return (os.environ.get("MYSHELL_CDP_URL") or DEFAULT_CDP_URL).rstrip("/")
 
+
+class CookieSourceError(ValueError):
+    pass
+
+
 def _write_status(status, message, cookie_count=0, energy_display=""):
     os.makedirs(os.path.dirname(STATUS_PATH), exist_ok=True)
     with open(STATUS_PATH, "w", encoding="utf-8") as status_file:
@@ -28,29 +33,52 @@ def _write_status(status, message, cookie_count=0, energy_display=""):
             ensure_ascii=False,
         )
 
+
+def _validate_cookie_payload(payload, source):
+    if not isinstance(payload, list):
+        raise CookieSourceError(f"{source} must be a valid JSON cookie array")
+    for index, cookie in enumerate(payload):
+        if not isinstance(cookie, dict) or not cookie.get("name") or cookie.get("value") is None:
+            raise CookieSourceError(f"{source}[{index}] must include cookie name and value")
+    return payload
+
+
+def _load_cookie_json(source, loader):
+    try:
+        payload = loader()
+    except Exception as exc:
+        raise CookieSourceError(f"{source} must be valid JSON cookie array: {exc}") from exc
+    return _validate_cookie_payload(payload, source)
+
+
 def _load_cookies():
     """Load cookies from env, file, or embedded fallback."""
     # 1. Environment variable
     env = os.environ.get("MYSHELL_COOKIES", "")
     if env:
-        return json.loads(env)
+        return _load_cookie_json("MYSHELL_COOKIES", lambda: json.loads(env))
     
     # 2. External file
     cookie_file = os.path.join(os.path.dirname(__file__), "myshell-cookies.json")
     if os.path.exists(cookie_file):
         with open(cookie_file) as f:
-            return json.load(f)
+            return _load_cookie_json("myshell-cookies.json", lambda: json.load(f))
     
     # 3. Embedded fallback
     embedded_file = os.path.join(os.path.dirname(__file__), "myshell_cookies_embedded.json")
     if os.path.exists(embedded_file):
         with open(embedded_file) as f:
-            return json.load(f)
+            return _load_cookie_json("myshell_cookies_embedded.json", lambda: json.load(f))
     
     return None
 
 async def inject_cookies():
-    cookies = _load_cookies()
+    try:
+        cookies = _load_cookies()
+    except CookieSourceError as exc:
+        print(f"[COOKIES] Invalid cookie source: {exc}")
+        _write_status("failed", str(exc), 0)
+        return False
     if not cookies:
         print("[COOKIES] No cookies found — MyShell bots will not work")
         _write_status("missing_cookies", "No cookies found", 0)
