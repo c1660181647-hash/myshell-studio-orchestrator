@@ -51,6 +51,10 @@ class StudioSmokeTest(unittest.TestCase):
                 "summary": {"ready": 4, "blocked": 1},
             },
             "/api/studio/coverage": {"summary": {"total": 5, "covered": 0, "blocked": 1}},
+            "/api/studio/generation-smoke": {
+                "status": "needs_configuration",
+                "prerequisites": {"status": "needs_configuration"},
+            },
             "/api/studio/delivery-audit": {
                 "status": "degraded",
                 "requirements": [{"id": "readiness", "status": "ready"}],
@@ -73,6 +77,7 @@ class StudioSmokeTest(unittest.TestCase):
         self.assertEqual(result["summary"]["agents"], 5)
         self.assertEqual(result["summary"]["requiredGatesReady"], 4)
         self.assertEqual(result["summary"]["matrixEntries"], 5)
+        self.assertEqual(result["summary"]["generationSmoke"], "needs_configuration")
         self.assertEqual(result["summary"]["auditArtifacts"], 1)
         self.assertEqual(result["warnings"], ["Optional gate myshell-art-auth is auth_missing"])
 
@@ -84,6 +89,10 @@ class StudioSmokeTest(unittest.TestCase):
             "/api/studio/readiness": {"gates": []},
             "/api/studio/dispatch-matrix": {"entries": []},
             "/api/studio/coverage": {"summary": {}},
+            "/api/studio/generation-smoke": {
+                "status": "needs_configuration",
+                "prerequisites": {"status": "needs_configuration"},
+            },
             "/api/studio/delivery-audit": {"requirements": [], "artifacts": [], "reports": {}},
         }
 

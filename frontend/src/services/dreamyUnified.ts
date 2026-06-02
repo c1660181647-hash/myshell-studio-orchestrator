@@ -132,6 +132,15 @@ export interface StudioHealthComponent {
     configured?: boolean;
     status?: string;
   }>;
+  checks?: Record<
+    string,
+    {
+      status?: string;
+      message?: string;
+      required?: boolean;
+    }
+  >;
+  blockedChecks?: string[];
   missingEnv?: string[];
 }
 

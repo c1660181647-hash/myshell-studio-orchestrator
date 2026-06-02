@@ -517,6 +517,7 @@ class StudioApiTest(unittest.TestCase):
             "dreamyApiAuth",
             "ffmpeg",
             "credentialSetup",
+            "liveGeneration",
         ):
             self.assertIn(component_id, components)
             self.assertIn("status", components[component_id])
@@ -526,6 +527,92 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(binding_by_env["DREAMY_TELEGRAM_INIT_DATA"]["secret"], "myshell-dreamy-init-data")
         self.assertEqual(binding_by_env["MYSHELL_COOKIES"]["secret"], "myshell-cookies")
         self.assertFalse(binding_by_env["DREAMY_TELEGRAM_INIT_DATA"]["configured"])
+        self.assertEqual(components["liveGeneration"]["status"], "needs_configuration")
+        self.assertEqual(components["liveGeneration"]["endpoint"], "/api/studio/generation-smoke")
+
+    def test_generation_smoke_reports_missing_credentials_without_running(self) -> None:
+        import studio
+
+        async def forbidden_dreamy_request(endpoint: str, body: dict, init_data: str) -> dict:
+            raise AssertionError(f"unexpected Dreamy request: {endpoint}")
+
+        with (
+            patch.dict(os.environ, {"DREAMY_TELEGRAM_INIT_DATA": "", "MYSHELL_COOKIES": ""}, clear=False),
+            patch.object(studio, "_dreamy_api_request", side_effect=forbidden_dreamy_request),
+        ):
+            readiness = self.client.get("/api/studio/generation-smoke")
+            executed = self.client.post("/api/studio/generation-smoke", json={"execute": True})
+
+        self.assertEqual(readiness.status_code, 200)
+        self.assertEqual(readiness.json()["status"], "needs_configuration")
+        self.assertIn("DREAMY_TELEGRAM_INIT_DATA", readiness.json()["prerequisites"]["missingEnv"])
+        self.assertEqual(executed.status_code, 200)
+        self.assertEqual(executed.json()["status"], "needs_configuration")
+        self.assertEqual(self.client.get("/api/studio/jobs").json()["count"], 0)
+
+    def test_generation_smoke_executes_dreamy_and_persists_accepted_evidence(self) -> None:
+        import studio
+
+        calls: list[tuple[str, dict]] = []
+
+        async def fake_dreamy_request(endpoint: str, body: dict, init_data: str) -> dict:
+            calls.append((endpoint, body))
+            self.assertEqual(init_data, "query_id=server-auth")
+            if endpoint.endswith("/get-by-slug"):
+                return {"info": {"botId": "bot_live_smoke", "slugId": "live-smoke"}}
+            if endpoint.endswith("/generate"):
+                return {"outputJobId": "dreamy_live_smoke_123"}
+            if endpoint.endswith("/generate/result"):
+                return {
+                    "tasks": [
+                        {
+                            "status": "done",
+                            "jobId": "dreamy_live_smoke_123",
+                            "result": json.dumps(
+                                {
+                                    "outputImg": "https://cdn.example.test/live-smoke.mp4",
+                                    "outputPreview": "https://cdn.example.test/live-smoke-poster.jpg",
+                                }
+                            ),
+                        }
+                    ]
+                }
+            raise AssertionError(endpoint)
+
+        async def fake_runtime_health(store_path: str) -> dict:
+            return {
+                "status": "ok",
+                "components": {
+                    "liveGeneration": {
+                        "status": "ready",
+                        "checks": {"dreamyServer": {"status": "ready"}},
+                    }
+                },
+            }
+
+        with (
+            patch.dict(os.environ, {"DREAMY_TELEGRAM_INIT_DATA": "query_id=server-auth"}, clear=False),
+            patch.object(studio, "_dreamy_api_request", side_effect=fake_dreamy_request),
+            patch.object(studio, "runtime_health", side_effect=fake_runtime_health),
+        ):
+            response = self.client.post(
+                "/api/studio/generation-smoke",
+                json={"execute": True, "prompt": "live smoke prompt"},
+            )
+            audit = self.client.get("/api/studio/delivery-audit")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "done")
+        self.assertTrue(body["latest"]["accepted"])
+        self.assertEqual(body["latest"]["mediaUrl"], "https://cdn.example.test/live-smoke.mp4")
+        self.assertEqual(calls[0][0], "/v1/telegram/miniapp/dreamy/get-by-slug")
+        self.assertEqual(calls[1][0], "/v1/telegram/miniapp/dreamy/generate")
+        self.assertEqual(calls[2][0], "/v1/telegram/miniapp/dreamy/generate/result")
+
+        requirements = {item["id"]: item for item in audit.json()["requirements"]}
+        self.assertEqual(requirements["live-generation-smoke"]["status"], "ready")
+        self.assertTrue(requirements["live-generation-smoke"]["evidence"]["latest"]["accepted"])
 
     def test_dreamy_server_auth_status_uses_configured_init_data(self) -> None:
         with patch.dict(os.environ, {"DREAMY_TELEGRAM_INIT_DATA": "query_id=server-auth"}, clear=False):

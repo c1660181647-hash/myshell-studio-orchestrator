@@ -82,6 +82,22 @@ printf '%s' "$MYSHELL_COOKIES" | gcloud secrets versions add myshell-cookies --d
 
 After the next Cloud Build deploy, `/api/health` exposes `credentialSetup`. It reports `ready` only when `DREAMY_TELEGRAM_INIT_DATA` and `MYSHELL_COOKIES` are injected into the Cloud Run runtime. Without those secrets, Dreamy remains client-delegated and MyShell Art remains `auth_missing`.
 
+## Live Generation Smoke
+
+`GET /api/studio/generation-smoke` reports whether the deployed backend is ready to prove a real generation. It does not spend generation credits. When `DREAMY_TELEGRAM_INIT_DATA` is missing it returns `needs_configuration` and no job is created.
+
+After credentials are configured, run a real Dreamy backend generation smoke:
+
+```bash
+cd orchestrator/backend
+python -m generation_smoke \
+  --base-url https://YOUR-CLOUD-RUN-URL \
+  --execute \
+  --require-live
+```
+
+The smoke creates a persisted Studio project/job, calls Dreamy `get-by-slug` -> `generate` -> `generate/result`, and only passes `--require-live` when the latest evidence contains accepted media. The result is also exposed in `/api/studio/delivery-audit` as `live-generation-smoke`, so delivery evidence survives backend restarts through the SQLite store.
+
 ## Tests
 
 ```bash

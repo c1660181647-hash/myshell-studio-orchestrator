@@ -181,6 +181,81 @@ def credential_setup_status() -> dict[str, Any]:
     }
 
 
+def live_generation_status(
+    *,
+    credential_setup: dict[str, Any] | None = None,
+    cookie_source: dict[str, Any] | None = None,
+    injection_status: dict[str, Any] | None = None,
+    cdp_ready: bool | None = None,
+) -> dict[str, Any]:
+    credential_setup = credential_setup or credential_setup_status()
+    cookie_source = cookie_source or cookie_source_status()
+    dreamy_auth = dreamy_api_auth_status()
+    missing_env = list(credential_setup.get("missingEnv") or [])
+    checks = {
+        "dreamyServer": {
+            "status": dreamy_auth.get("status"),
+            "message": dreamy_auth.get("message", ""),
+            "required": True,
+        },
+        "myshellCookies": {
+            "status": cookie_source.get("status"),
+            "message": cookie_source.get("message", ""),
+            "required": True,
+        },
+    }
+    if injection_status is not None:
+        checks["cookieInjection"] = {
+            "status": injection_status.get("status"),
+            "message": injection_status.get("message", ""),
+            "required": True,
+        }
+    if cdp_ready is not None:
+        checks["chromeCdp"] = {
+            "status": "ok" if cdp_ready else "unavailable",
+            "message": "Chrome CDP is reachable" if cdp_ready else "Chrome CDP is not reachable",
+            "required": True,
+        }
+    if missing_env:
+        return {
+            "status": "needs_configuration",
+            "mode": "live-generation-smoke",
+            "endpoint": "/api/studio/generation-smoke",
+            "message": "Live generation smoke needs Cloud Run secrets before it can prove real media output.",
+            "missingEnv": missing_env,
+            "checks": checks,
+        }
+    if dreamy_auth.get("status") != "ready":
+        return {
+            "status": "auth_missing",
+            "mode": "live-generation-smoke",
+            "endpoint": "/api/studio/generation-smoke",
+            "message": "Dreamy server auth is not ready; live generation cannot run from the backend.",
+            "checks": checks,
+        }
+    blocking_art_checks = [
+        key
+        for key, check in checks.items()
+        if key != "dreamyServer" and check.get("status") not in {"ok", "ready"}
+    ]
+    if blocking_art_checks:
+        return {
+            "status": "auth_missing",
+            "mode": "live-generation-smoke",
+            "endpoint": "/api/studio/generation-smoke",
+            "message": "Dreamy server auth is ready, but MyShell Art CDP auth is not ready for the full chain.",
+            "checks": checks,
+            "blockedChecks": blocking_art_checks,
+        }
+    return {
+        "status": "ready",
+        "mode": "live-generation-smoke",
+        "endpoint": "/api/studio/generation-smoke",
+        "message": "Live Dreamy generation and MyShell Art authentication prerequisites are ready to verify.",
+        "checks": checks,
+    }
+
+
 async def chrome_cdp_ready() -> bool:
     try:
         async with httpx.AsyncClient(timeout=1.5) as client:
@@ -271,6 +346,12 @@ async def runtime_health(store_path: str) -> dict[str, Any]:
     injection_status = cookie_injection_status(has_cookies, cookie_source)
     media_export_status = ffmpeg_status()
     credential_setup = credential_setup_status()
+    generation_status = live_generation_status(
+        credential_setup=credential_setup,
+        cookie_source=cookie_source,
+        injection_status=injection_status,
+        cdp_ready=cdp_ready,
+    )
     degraded_component = (
         not storage_ready
         or not cdp_ready
@@ -291,6 +372,7 @@ async def runtime_health(store_path: str) -> dict[str, Any]:
             "dreamyApiAuth": dreamy_api_auth_status(),
             "ffmpeg": media_export_status,
             "credentialSetup": credential_setup,
+            "liveGeneration": generation_status,
         },
     }
 

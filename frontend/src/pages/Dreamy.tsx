@@ -777,6 +777,7 @@ function StudioHealthStrip({ health }: { health: StudioHealth | null }) {
     ['cookieInjection', 'Injection'],
     ['dreamyApiAuth', 'Dreamy'],
     ['credentialSetup', 'Secrets'],
+    ['liveGeneration', 'Live'],
   ] as const;
 
   return (

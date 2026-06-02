@@ -1767,7 +1767,7 @@ def _audit_action_for_requirement(requirement: dict[str, Any]) -> dict[str, Any]
     requirement_id = str(requirement.get("id") or "")
     label = str(requirement.get("label") or requirement_id)
     action = "inspect-requirement"
-    if status == "auth_missing" or "auth" in requirement_id or "cookie" in requirement_id:
+    if status in {"auth_missing", "needs_configuration"} or "auth" in requirement_id or "cookie" in requirement_id:
         action = "restore-auth"
     elif requirement_id == "chrome-cdp":
         action = "start-chrome-cdp"
@@ -1971,6 +1971,7 @@ def _delivery_audit_artifacts(project_id: str | None, source_segment_id: str | N
     context_query = _context_query(project_id, source_segment_id)
     artifacts = [
         _artifact("delivery-audit", "Delivery Audit", "/api/studio/delivery-audit", query=context_query),
+        _artifact("generation-smoke", "Live Generation Smoke", "/api/studio/generation-smoke"),
         *_handoff_artifacts(project_id, source_segment_id),
     ]
     if project_id:
@@ -2006,6 +2007,11 @@ async def _studio_delivery_audit(
         if project
         else None
     )
+    generation_prerequisites = ((readiness.get("health") or {}).get("components") or {}).get("liveGeneration") or {}
+    generation_smoke = _generation_smoke_summary(
+        prerequisites=generation_prerequisites,
+        latest_job=_latest_generation_smoke_job(),
+    )
 
     readiness_gates = [_requirement_from_gate(gate) for gate in readiness.get("gates") or []]
     pages = list_studio_pages()
@@ -2024,6 +2030,18 @@ async def _studio_delivery_audit(
             "ready" if matrix_summary.get("total", 0) >= len(CORE_DELIVERY_PAGE_IDS) else "blocked",
             message=f"{matrix_summary.get('ready', 0)}/{matrix_summary.get('total', 0)} targets ready",
             evidence=matrix_summary,
+        ),
+        _requirement(
+            "live-generation-smoke",
+            "Live Generation Smoke",
+            "ready" if generation_smoke.get("status") == "done" and (generation_smoke.get("latest") or {}).get("accepted") else str(generation_smoke.get("status") or "needs_verification"),
+            message=str(generation_smoke.get("message") or ""),
+            evidence={
+                "endpoint": "/api/studio/generation-smoke",
+                "readyForLiveRun": bool(generation_smoke.get("readyForLiveRun")),
+                "latest": generation_smoke.get("latest") or {},
+                "missingEnv": (generation_prerequisites.get("missingEnv") or []),
+            },
         ),
     ]
 
@@ -2098,6 +2116,7 @@ async def _studio_delivery_audit(
             "coverage": coverage,
             "deliveryReport": delivery_report,
             "handoffSnapshot": handoff,
+            "generationSmoke": generation_smoke,
         },
     }
 
@@ -2170,6 +2189,14 @@ def _materialize_operator_instruction(instruction: dict[str, Any]) -> dict[str, 
 
 def _manual_action_instruction(action: str, target_id: str, *, session_id: str | None = None) -> dict[str, Any]:
     if action == "restore-auth":
+        if target_id in {"live-generation-smoke", "liveGeneration", "credentialSetup"}:
+            return {
+                "label": "Restore live generation auth",
+                "message": "Set DREAMY_TELEGRAM_INIT_DATA and MYSHELL_COOKIES, or create the Cloud Run secrets myshell-dreamy-init-data and myshell-cookies, then redeploy and run the live generation smoke.",
+                "env": "DREAMY_TELEGRAM_INIT_DATA,MYSHELL_COOKIES",
+                "endpoint": "/api/studio/generation-smoke",
+                "targetId": target_id,
+            }
         return {
             "label": "Restore MyShell auth",
             "message": "Set MYSHELL_COOKIES or myshell-cookies.json, then restart the backend and refresh readiness.",
@@ -3921,6 +3948,138 @@ def _update_job(job: dict[str, Any], **patch: Any) -> dict[str, Any]:
     return job
 
 
+def _latest_generation_smoke_job() -> dict[str, Any] | None:
+    for job in STUDIO_STORE.list_jobs(page_id="dreamy-miniapp", limit=100):
+        evidence = job.get("evidence") if isinstance(job.get("evidence"), dict) else {}
+        if evidence.get("generationSmoke"):
+            return job
+    return None
+
+
+def _generation_smoke_status_from_latest(latest_job: dict[str, Any] | None, prerequisites: dict[str, Any]) -> str:
+    prerequisite_status = str(prerequisites.get("status") or "unknown")
+    if prerequisite_status in {"needs_configuration", "auth_missing"}:
+        return prerequisite_status
+    if latest_job and latest_job.get("status") == "done" and latest_job.get("mediaUrl"):
+        return "done"
+    return "needs_verification"
+
+
+def _generation_smoke_summary(
+    *,
+    prerequisites: dict[str, Any],
+    latest_job: dict[str, Any] | None,
+    executed_job: dict[str, Any] | None = None,
+    project: StudioProject | None = None,
+    message: str = "",
+) -> dict[str, Any]:
+    job = executed_job or latest_job
+    evidence = job.get("evidence") if isinstance((job or {}).get("evidence"), dict) else {}
+    status = str(job.get("status") or "") if executed_job else _generation_smoke_status_from_latest(latest_job, prerequisites)
+    if executed_job and status == "done" and not job.get("mediaUrl"):
+        status = "error"
+    return {
+        "status": status or "unknown",
+        "readyForLiveRun": prerequisites.get("status") == "ready",
+        "checkedAt": now_iso(),
+        "message": message
+        or (
+            "Latest live generation smoke accepted real media."
+            if status == "done"
+            else prerequisites.get("message", "Live generation smoke has not produced accepted media yet.")
+        ),
+        "prerequisites": prerequisites,
+        "latest": {
+            "jobId": job.get("jobId", "") if job else "",
+            "projectId": job.get("projectId", "") if job else "",
+            "segmentId": job.get("segmentId", "") if job else "",
+            "taskId": job.get("taskId", "") if job else "",
+            "status": job.get("status", "") if job else "",
+            "mediaUrl": job.get("mediaUrl", "") if job else "",
+            "posterUrl": job.get("posterUrl", "") if job else "",
+            "checkedAt": evidence.get("checkedAt", "") if evidence else "",
+            "accepted": bool(evidence.get("accepted")) if evidence else False,
+            "message": evidence.get("message", "") if evidence else "",
+        },
+        "project": {"projectId": project.get("projectId", "")} if project else None,
+        "actions": [
+            {
+                "label": "Create Cloud Run secrets",
+                "message": "Create myshell-dreamy-init-data and myshell-cookies, deploy again, then run POST /api/studio/generation-smoke with execute=true.",
+                "endpoint": "/api/studio/generation-smoke",
+                "missingEnv": prerequisites.get("missingEnv") or [],
+            }
+        ]
+        if prerequisites.get("status") in {"needs_configuration", "auth_missing"}
+        else [
+            {
+                "label": "Run live smoke",
+                "message": "POST /api/studio/generation-smoke with execute=true to prove fresh Dreamy media output.",
+                "endpoint": "/api/studio/generation-smoke",
+            }
+        ],
+    }
+
+
+async def _execute_generation_smoke(prompt: str) -> dict[str, Any]:
+    project = _project(None, "player")
+    prompt = prompt.strip() or "Create a short cinematic neon city source image for live generation smoke."
+    _append_message(project, "user", prompt, action="generate", hasImage=False)
+    route = await choose_route(prompt, False, "generate", None)
+    page = {
+        **get_page("dreamy-miniapp"),
+        "executor": "server",
+        "dispatchMode": "execute-server",
+    }
+    route["action"] = "generate"
+    route["sourceSegmentId"] = None
+    route["sourceSummary"] = "Live generation smoke from backend credentials"
+    route["page"] = page
+    route["api"] = page["id"]
+    route["executor"] = page["executor"]
+    route["agentId"] = _agent_id_for_dispatch(page, None)
+    route.update(_navigation_contract(page, route, None))
+    segment = _append_queued_segment(project, route, route.get("optimizedPrompt") or prompt, "generate", None)
+    job = _create_job(project, segment, route, page, None, agent_id=route["agentId"])
+    smoke_context = {
+        "generationSmoke": True,
+        "probeId": make_id("generation_smoke"),
+        "probeType": "dreamy-server-live",
+        "prompt": route.get("optimizedPrompt") or prompt,
+    }
+    job["evidence"] = {**(job.get("evidence") or {}), **smoke_context}
+    STUDIO_STORE.save_job(job)
+    STUDIO_STORE.save_evidence(job, job["evidence"])
+    try:
+        job = await _run_dreamy_server_adapter(
+            project=project,
+            segment=segment,
+            job=job,
+            route=route,
+            prompt=route.get("optimizedPrompt") or prompt,
+            source_segment=None,
+        )
+    except Exception as exc:
+        segment["status"] = "error"
+        segment["evidence"] = _evidence("error", "dreamy-miniapp", message=str(exc))
+        segment["updatedAt"] = now_iso()
+        job = _update_job(job, status="error", evidence=segment["evidence"])
+        _set_graph_status(project, route, segment)
+        _save_project(project)
+        _sync_project_jobs(project)
+    refreshed = STUDIO_STORE.get_job(job["jobId"]) or job
+    evidence = {
+        **(refreshed.get("evidence") if isinstance(refreshed.get("evidence"), dict) else {}),
+        **smoke_context,
+    }
+    refreshed = _update_job(refreshed, evidence=evidence)
+    segment["evidence"] = evidence
+    segment["updatedAt"] = now_iso()
+    _save_project(project)
+    _sync_project_jobs(project)
+    return {"project": project, "job": refreshed, "segment": segment}
+
+
 def _append_queued_segment(
     project: StudioProject,
     route: dict[str, Any],
@@ -4092,6 +4251,42 @@ def register_studio_routes(app) -> None:
     @app.get("/api/studio/readiness")
     async def get_studio_readiness():
         return await _studio_readiness()
+
+    @app.get("/api/studio/generation-smoke")
+    async def get_studio_generation_smoke():
+        health = await runtime_health(STUDIO_STORE.path)
+        prerequisites = (health.get("components") or {}).get("liveGeneration") or {}
+        latest_job = _latest_generation_smoke_job()
+        return _generation_smoke_summary(prerequisites=prerequisites, latest_job=latest_job)
+
+    @app.post("/api/studio/generation-smoke")
+    async def post_studio_generation_smoke(payload: Optional[dict[str, Any]] = Body(None)):
+        body = payload or {}
+        execute = _payload_bool(body.get("execute", False))
+        prompt = str(body.get("prompt") or "").strip()
+        health = await runtime_health(STUDIO_STORE.path)
+        prerequisites = (health.get("components") or {}).get("liveGeneration") or {}
+        latest_job = _latest_generation_smoke_job()
+        if not execute:
+            return _generation_smoke_summary(
+                prerequisites=prerequisites,
+                latest_job=latest_job,
+                message="Pass execute=true to run a live Dreamy generation smoke.",
+            )
+        dreamy_check = ((prerequisites.get("checks") or {}).get("dreamyServer") or {}).get("status")
+        if dreamy_check != "ready":
+            return _generation_smoke_summary(
+                prerequisites=prerequisites,
+                latest_job=latest_job,
+                message="Dreamy server credentials are missing; no live generation request was sent.",
+            )
+        executed = await _execute_generation_smoke(prompt)
+        return _generation_smoke_summary(
+            prerequisites=prerequisites,
+            latest_job=latest_job,
+            executed_job=executed["job"],
+            project=executed["project"],
+        )
 
     @app.get("/api/studio/delivery-audit")
     async def get_studio_delivery_audit(

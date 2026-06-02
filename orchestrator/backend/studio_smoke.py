@@ -45,6 +45,7 @@ SMOKE_ENDPOINTS = (
     "/api/studio/readiness",
     "/api/studio/dispatch-matrix",
     "/api/studio/coverage",
+    "/api/studio/generation-smoke",
     "/api/studio/delivery-audit",
 )
 
@@ -94,6 +95,7 @@ def run_smoke(
     readiness = responses["/api/studio/readiness"]
     matrix = responses["/api/studio/dispatch-matrix"]
     coverage = responses["/api/studio/coverage"]
+    generation_smoke = responses["/api/studio/generation-smoke"]
     audit = responses["/api/studio/delivery-audit"]
 
     page_ids = _ids(pages)
@@ -126,6 +128,8 @@ def run_smoke(
     _require(not blocked_required_gates, f"Required gates not ready: {', '.join(blocked_required_gates)}", failures)
     _require(not matrix_missing_pages, f"Dispatch matrix missing pages: {', '.join(matrix_missing_pages)}", failures)
     _require(isinstance(coverage.get("summary"), dict), "Coverage summary is missing", failures)
+    _require(bool(generation_smoke.get("status")), "Generation smoke status is missing", failures)
+    _require(isinstance(generation_smoke.get("prerequisites"), dict), "Generation smoke prerequisites are missing", failures)
     _require(bool(audit.get("requirements")), "Delivery audit requirements are missing", failures)
     _require(bool(audit.get("artifacts")), "Delivery audit artifacts are missing", failures)
     _require(isinstance(audit.get("reports"), dict), "Delivery audit reports are missing", failures)
@@ -140,6 +144,7 @@ def run_smoke(
             "requiredGatesReady": len(required_gates) - len(blocked_required_gates),
             "matrixEntries": len(matrix.get("entries") or []),
             "coveragePages": (coverage.get("summary") or {}).get("total", 0),
+            "generationSmoke": generation_smoke.get("status", ""),
             "auditRequirements": len(audit.get("requirements") or []),
             "auditArtifacts": len(audit.get("artifacts") or []),
         },
