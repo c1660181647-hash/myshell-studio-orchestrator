@@ -508,6 +508,7 @@ export interface StudioActionResolveResult {
   checkedAt: string;
   action: string;
   targetId: string;
+  sessionId?: string | null;
   projectId?: string | null;
   sourceSegmentId?: string | null;
   resultType: 'coverage-verify' | 'operator-instruction' | string;
@@ -525,6 +526,7 @@ export interface StudioActionResolveResult {
     cancelUrl?: string;
     query?: Record<string, unknown>;
     targetId?: string;
+    sessionId?: string;
   };
   result?: StudioCoverageVerifyResult;
   audit: StudioDeliveryAudit;
@@ -554,6 +556,7 @@ export interface StudioActionResolveBatchResult {
     status: string;
     action: string;
     targetId: string;
+    sessionId?: string | null;
     resultType: string;
     message?: string;
     next?: StudioActionResolveResult['next'];
@@ -1255,6 +1258,7 @@ export async function verifyStudioCoverage(options: {
 export async function resolveStudioAction(options: {
   action: string;
   targetId: string;
+  sessionId?: string;
   projectId?: string;
   sourceSegmentId?: string;
 }): Promise<StudioActionResolveResult> {
@@ -1264,6 +1268,7 @@ export async function resolveStudioAction(options: {
     body: JSON.stringify({
       action: options.action,
       target_id: options.targetId,
+      session_id: options.sessionId,
       project_id: options.projectId,
       source_segment_id: options.sourceSegmentId,
     }),
@@ -1275,7 +1280,7 @@ export async function resolveStudioAction(options: {
 export async function resolveStudioActionsBatch(options: {
   projectId?: string;
   sourceSegmentId?: string;
-  actions?: Array<{ action: string; targetId?: string; target_id?: string }>;
+  actions?: Array<{ action: string; targetId?: string; target_id?: string; sessionId?: string; session_id?: string }>;
 }): Promise<StudioActionResolveBatchResult> {
   const response = await fetch(getStudioRootEndpoint('/api/studio/actions/resolve-batch'), {
     method: 'POST',
@@ -1286,6 +1291,7 @@ export async function resolveStudioActionsBatch(options: {
       actions: options.actions?.map((action) => ({
         action: action.action,
         target_id: action.target_id || action.targetId,
+        session_id: action.session_id || action.sessionId,
       })),
     }),
   });

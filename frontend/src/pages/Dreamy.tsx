@@ -650,6 +650,7 @@ function StudioDeliveryAuditStrip({
   const summary = audit?.summary;
   const gaps = (audit?.requirements || []).filter((item) => item.status !== 'ready');
   const actions = audit?.actions || [];
+  const visibleActions = [...actions].sort((first, second) => handoffItemPriority(first) - handoffItemPriority(second)).slice(0, 3);
   const safeActionCount = actions.filter((action) => action.action === 'verify-ready').length;
 
   return (
@@ -695,7 +696,7 @@ function StudioDeliveryAuditStrip({
           <StudioArtifactLinks artifacts={audit?.artifacts} limit={4} />
         </>
       )}
-      {actions.slice(0, 3).map((action) => {
+      {visibleActions.map((action) => {
         const resolving = resolvingActionId === action.id;
         return (
           <button
@@ -2982,6 +2983,7 @@ export default function Dreamy() {
       const result = await resolveStudioAction({
         action: action.action,
         targetId,
+        sessionId: action.sessionId,
         projectId: project?.projectId || deliveryAudit?.projectId || undefined,
         sourceSegmentId: studioContextSourceSegmentId || deliveryAudit?.sourceSegmentId || undefined,
       });
@@ -3034,6 +3036,7 @@ export default function Dreamy() {
       .map((action) => ({
         action: action.action,
         targetId: action.targetId || action.pageId || action.segmentId || action.jobId || action.id,
+        sessionId: action.sessionId,
       }))
       .filter((action) => Boolean(action.targetId));
     if (!safeActions.length) return;

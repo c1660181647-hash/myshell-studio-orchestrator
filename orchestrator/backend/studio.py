@@ -1680,12 +1680,21 @@ async def _studio_delivery_audit(
     }
 
 
-def _operator_action_url(endpoint: str, target_id: str, query: dict[str, Any] | None = None) -> str:
+def _operator_action_url(
+    endpoint: str,
+    target_id: str,
+    query: dict[str, Any] | None = None,
+    *,
+    project_id: str | None = None,
+    session_id: str | None = None,
+) -> str:
     encoded_target = quote(str(target_id), safe="")
+    encoded_project = quote(str(project_id or target_id), safe="")
+    encoded_session = quote(str(session_id or target_id), safe="")
     url = (
         endpoint.replace("{job_id}", encoded_target)
-        .replace("{project_id}", encoded_target)
-        .replace("{session_id}", encoded_target)
+        .replace("{project_id}", encoded_project)
+        .replace("{session_id}", encoded_session)
     )
     clean_query = {
         key: value
@@ -1701,9 +1710,20 @@ def _operator_action_url(endpoint: str, target_id: str, query: dict[str, Any] | 
 def _materialize_operator_instruction(instruction: dict[str, Any]) -> dict[str, Any]:
     materialized = dict(instruction)
     target_id = str(materialized.get("targetId") or "")
+    project_id = str(materialized.get("projectId") or "") or None
+    session_id = str(materialized.get("sessionId") or "") or None
     endpoint_query: dict[str, Any] = {}
+    raw_query = materialized.get("query")
+    if isinstance(raw_query, dict):
+        endpoint_query = {
+            str(key): value
+            for key, value in raw_query.items()
+            if value is not None and value != ""
+        }
     if materialized.get("endpoint") == "/api/studio/dispatch-preview" and target_id:
         endpoint_query["page_id"] = target_id
+        materialized["query"] = endpoint_query
+    elif endpoint_query:
         materialized["query"] = endpoint_query
 
     for field, url_field in (
@@ -1714,13 +1734,19 @@ def _materialize_operator_instruction(instruction: dict[str, Any]) -> dict[str, 
         endpoint = materialized.get(field)
         if endpoint:
             query = endpoint_query if field == "endpoint" else None
-            concrete_url = _operator_action_url(str(endpoint), target_id, query)
+            concrete_url = _operator_action_url(
+                str(endpoint),
+                target_id,
+                query,
+                project_id=project_id,
+                session_id=session_id,
+            )
             materialized[field] = concrete_url
             materialized[url_field] = concrete_url
     return materialized
 
 
-def _manual_action_instruction(action: str, target_id: str) -> dict[str, Any]:
+def _manual_action_instruction(action: str, target_id: str, *, session_id: str | None = None) -> dict[str, Any]:
     if action == "restore-auth":
         return {
             "label": "Restore MyShell auth",
@@ -1787,6 +1813,15 @@ def _manual_action_instruction(action: str, target_id: str) -> dict[str, Any]:
             "targetId": target_id,
         }
     if action == "inspect-gap":
+        if session_id:
+            return {
+                "label": "Inspect dispatch target",
+                "message": "Open the dispatch session and review the target evidence before deciding whether to retry, skip, or keep it blocked.",
+                "endpoint": "/api/studio/dispatch-sessions/{session_id}",
+                "query": {"target_id": target_id},
+                "targetId": target_id,
+                "sessionId": session_id,
+            }
         return {
             "label": "Inspect handoff gap",
             "message": "Inspect the handoff snapshot gap and related coverage evidence before retrying the target.",
@@ -1841,6 +1876,7 @@ async def _resolve_studio_action(payload: dict[str, Any] | None) -> dict[str, An
     body = payload or {}
     action = str(body.get("action") or "").strip()
     target_id = str(body.get("target_id") or body.get("targetId") or "").strip()
+    session_id = str(body.get("session_id") or body.get("sessionId") or "").strip()
     project_id = body.get("project_id") or body.get("projectId")
     source_segment_id = body.get("source_segment_id") or body.get("sourceSegmentId")
     if not action:
@@ -1880,11 +1916,14 @@ async def _resolve_studio_action(payload: dict[str, Any] | None) -> dict[str, An
             "checkedAt": now_iso(),
             "action": action,
             "targetId": target_id,
+            "sessionId": session_id or None,
             "projectId": project_id,
             "sourceSegmentId": source_segment_id,
             "resultType": "operator-instruction",
             "message": "Manual operator action is required.",
-            "next": _materialize_operator_instruction(_manual_action_instruction(action, target_id)),
+            "next": _materialize_operator_instruction(
+                _manual_action_instruction(action, target_id, session_id=session_id or None)
+            ),
             "audit": audit,
         }
 
@@ -1908,9 +1947,10 @@ async def _resolve_studio_actions_batch(payload: dict[str, Any] | None) -> dict[
             raise HTTPException(status_code=400, detail="Each action must be an object")
         action = str(item.get("action") or "").strip()
         target_id = str(item.get("target_id") or item.get("targetId") or "").strip()
+        session_id = str(item.get("session_id") or item.get("sessionId") or "").strip()
         if not action or not target_id:
             raise HTTPException(status_code=400, detail="Each action requires action and target_id")
-        normalized_actions.append({"action": action, "targetId": target_id, "raw": item})
+        normalized_actions.append({"action": action, "targetId": target_id, "sessionId": session_id, "raw": item})
 
     verify_page_ids = []
     manual_actions: list[dict[str, Any]] = []
@@ -1918,6 +1958,7 @@ async def _resolve_studio_actions_batch(payload: dict[str, Any] | None) -> dict[
     for item in normalized_actions:
         action = item["action"]
         target_id = item["targetId"]
+        session_id = item.get("sessionId") or ""
         if action == "verify-ready":
             verify_page_ids.append(target_id)
         elif action in MANUAL_STUDIO_ACTIONS:
@@ -1926,9 +1967,12 @@ async def _resolve_studio_actions_batch(payload: dict[str, Any] | None) -> dict[
                     "status": "manual_required",
                     "action": action,
                     "targetId": target_id,
+                    "sessionId": session_id or None,
                     "resultType": "operator-instruction",
                     "message": "Manual operator action is required.",
-                    "next": _materialize_operator_instruction(_manual_action_instruction(action, target_id)),
+                    "next": _materialize_operator_instruction(
+                        _manual_action_instruction(action, target_id, session_id=session_id or None)
+                    ),
                 }
             )
         else:

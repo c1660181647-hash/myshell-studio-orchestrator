@@ -2014,6 +2014,16 @@ class StudioApiTest(unittest.TestCase):
                 "/api/studio/delivery-audit",
                 params={"project_id": meta["projectId"], "source_segment_id": execution["segmentId"]},
             )
+            resolved_action = self.client.post(
+                "/api/studio/actions/resolve",
+                json={
+                    "action": "inspect-gap",
+                    "target_id": error_target["id"],
+                    "session_id": session["sessionId"],
+                    "project_id": meta["projectId"],
+                    "source_segment_id": execution["segmentId"],
+                },
+            )
 
         self.assertEqual(bundle.status_code, 200)
         body = bundle.json()
@@ -2042,6 +2052,19 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(audit.status_code, 200)
         audit_action_ids = {action["id"] for action in audit.json()["actions"]}
         self.assertIn(expected_action_id, audit_action_ids)
+
+        self.assertEqual(resolved_action.status_code, 200)
+        resolved_body = resolved_action.json()
+        self.assertEqual(resolved_body["status"], "manual_required")
+        self.assertEqual(resolved_body["action"], "inspect-gap")
+        self.assertEqual(resolved_body["targetId"], error_target["id"])
+        self.assertEqual(resolved_body["sessionId"], session["sessionId"])
+        self.assertEqual(resolved_body["next"]["sessionId"], session["sessionId"])
+        self.assertEqual(resolved_body["next"]["targetId"], error_target["id"])
+        self.assertEqual(
+            resolved_body["next"]["url"],
+            f"/api/studio/dispatch-sessions/{session['sessionId']}?target_id=dispatch%3Aexplore",
+        )
 
     def test_job_queue_can_filter_by_page_and_agent(self) -> None:
         with self.client.stream(
