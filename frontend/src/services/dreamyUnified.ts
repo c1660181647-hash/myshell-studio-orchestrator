@@ -380,6 +380,7 @@ export interface StudioHandoffArtifact {
   url: string;
   projectId?: string;
   sessionId?: string;
+  targetId?: string;
   query?: Record<string, unknown>;
   filename?: string;
 }

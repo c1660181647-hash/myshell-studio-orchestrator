@@ -941,6 +941,7 @@ def _artifact(
     *,
     project_id: str | None = None,
     session_id: str | None = None,
+    target_id: str | None = None,
     query: dict[str, Any] | None = None,
     filename: str | None = None,
 ) -> dict[str, Any]:
@@ -954,6 +955,8 @@ def _artifact(
         artifact["projectId"] = project_id
     if session_id is not None:
         artifact["sessionId"] = session_id
+    if target_id is not None:
+        artifact["targetId"] = target_id
     clean_query = {
         key: value
         for key, value in (query or {}).items()
@@ -1026,6 +1029,21 @@ def _delivery_bundle_artifacts(
                 session_id=session_id,
             )
         )
+        for target in session.get("targets") or []:
+            target_id = str(target.get("id") or "")
+            if not target_id:
+                continue
+            artifacts.append(
+                _artifact(
+                    f"dispatch-target:{session_id}:{target_id}",
+                    f"Dispatch Target {target.get('pageName') or target.get('pageId') or target_id}",
+                    "/api/studio/dispatch-sessions/{session_id}",
+                    project_id=project_id,
+                    session_id=session_id,
+                    target_id=target_id,
+                    query={"target_id": target_id},
+                )
+            )
     return artifacts
 
 
