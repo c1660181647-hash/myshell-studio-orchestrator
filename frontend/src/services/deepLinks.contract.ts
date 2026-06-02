@@ -46,6 +46,8 @@ const legacyCheckinPageContract = resolveMiniappPageDeepLink(new URLSearchParams
 const buyStartContract = resolveStartParamDeepLink('buy');
 const libraryDetailStartContract = resolveStartParamDeepLink('library-detail');
 const libraryDetailQueryStartContract = resolveStartParamDeepLink('page=library-detail&id=artifact-123');
+const taskIdQueryStartContract = resolveStartParamDeepLink('task_id=artifact-456');
+const slugQueryStartContract = resolveStartParamDeepLink('slug_id=luna-star');
 const botDetailStartContract = resolveStartParamDeepLink('bot-detail');
 const uploadStartContract = resolveStartParamDeepLink('upload');
 const tagGeneratorStartContract = resolveStartParamDeepLink('tag-generator');
@@ -59,6 +61,8 @@ void [
   buyStartContract,
   libraryDetailStartContract,
   libraryDetailQueryStartContract,
+  taskIdQueryStartContract,
+  slugQueryStartContract,
   botDetailStartContract,
   uploadStartContract,
   tagGeneratorStartContract,

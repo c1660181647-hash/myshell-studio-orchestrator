@@ -36,6 +36,16 @@ const telegramStartParamLibraryDetailContract = resolveInitialEntry({
   telegramStartParam: 'page=library-detail&id=artifact-123',
 });
 
+const startAppWinsOverAttributionSlugContract = resolveInitialEntry({
+  pathname: '/',
+  search: '?startapp=library-detail&slug_id=luna-star',
+});
+
+const queryStartAppSlugContract = resolveInitialEntry({
+  pathname: '/',
+  search: '?startapp=slug_id=luna-star',
+});
+
 void libraryDetailPathContract;
 void energyHistoryPathContract;
 void botPathContract;
@@ -43,3 +53,5 @@ void pageParamStillWinsContract;
 void rootSlugFallbackContract;
 void startAppLibraryDetailContract;
 void telegramStartParamLibraryDetailContract;
+void startAppWinsOverAttributionSlugContract;
+void queryStartAppSlugContract;

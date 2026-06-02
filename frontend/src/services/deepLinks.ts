@@ -102,6 +102,19 @@ function normalizeStartParamQuery(value: string): URLSearchParams | null {
   return [...params.keys()].length ? params : null;
 }
 
+function resolveQueryStartParamDeepLink(params: URLSearchParams): string | null {
+  const pageLink = resolveMiniappPageDeepLink(params);
+  if (pageLink) return pageLink;
+
+  const taskId = firstParam(params, ['id', 'task_id', 'taskId', 'media_id']);
+  if (taskId) return `/library/${encodeURIComponent(taskId)}`;
+
+  const slug = firstParam(params, ['slug_id', 'slug', 'bot', 'bot_slug']);
+  if (slug) return withQuery(MINIAPP_PAGE_DEEP_LINKS['bot-detail'].route, { slug_id: slug });
+
+  return null;
+}
+
 function resolvePageKeyDeepLink(page: keyof typeof MINIAPP_PAGE_DEEP_LINKS | 'self-director'): string | null {
   if (page === 'self-director') return '/upload?mode=tag-generator';
   if (page === 'bot-detail') {
@@ -125,7 +138,7 @@ export function resolveStartParamDeepLink(startParam: string | null | undefined)
 
   const queryParams = normalizeStartParamQuery(value);
   if (queryParams) {
-    const pageLink = resolveMiniappPageDeepLink(queryParams);
+    const pageLink = resolveQueryStartParamDeepLink(queryParams);
     if (pageLink) return pageLink;
   }
 

@@ -76,12 +76,12 @@ export function resolveInitialEntry(input: InitialEntryInput): string {
 
   try {
     const params = new URLSearchParams(search);
-    const slugId = params.get('slug_id');
-    if (slugId) return `/upload?slug_id=${encodeURIComponent(slugId)}`;
-
     const startParam = input.telegramStartParam || params.get('startapp') || params.get('tgWebAppStartParam');
     const startLink = resolveStartParamDeepLink(startParam);
     if (startLink) return startLink;
+
+    const slugId = params.get('slug_id');
+    if (slugId) return `/upload?slug_id=${encodeURIComponent(slugId)}`;
   } catch {
     /* fallback to root */
   }
