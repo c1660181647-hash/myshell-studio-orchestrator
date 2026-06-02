@@ -1860,6 +1860,7 @@ def _manual_action_instruction(action: str, target_id: str, *, session_id: str |
                 "label": "Inspect dispatch target",
                 "message": "Open the dispatch session and review the target evidence before deciding whether to retry, skip, or keep it blocked.",
                 "endpoint": "/api/studio/dispatch-sessions/{session_id}",
+                "uiUrl": _dispatch_session_ui_url(session_id, target_id),
                 "query": {"target_id": target_id},
                 "targetId": target_id,
                 "sessionId": session_id,

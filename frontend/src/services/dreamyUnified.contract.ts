@@ -1,4 +1,9 @@
-import { fetchStudioDispatchSession, type StudioDispatchSession, type StudioHandoffArtifact } from './dreamyUnified';
+import {
+  fetchStudioDispatchSession,
+  type StudioActionResolveResult,
+  type StudioDispatchSession,
+  type StudioHandoffArtifact,
+} from './dreamyUnified';
 
 async function dispatchSessionRestoreContract(): Promise<StudioDispatchSession> {
   return fetchStudioDispatchSession('dispatch_session_contract', {
@@ -19,3 +24,14 @@ const dispatchTargetArtifactContract: StudioHandoffArtifact = {
 };
 
 void dispatchTargetArtifactContract;
+
+const dispatchTargetActionContract: Pick<StudioActionResolveResult, 'next'> = {
+  next: {
+    url: '/api/studio/dispatch-sessions/dispatch_session_contract?target_id=dispatch%3Aexplore',
+    uiUrl: '/dreamy?dispatch_session_id=dispatch_session_contract&target_id=dispatch%3Aexplore',
+    sessionId: 'dispatch_session_contract',
+    targetId: 'dispatch:explore',
+  },
+};
+
+void dispatchTargetActionContract;

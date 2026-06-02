@@ -232,6 +232,7 @@ function formatStudioActionNext(next?: StudioActionResolveResult['next']): strin
   const details = [
     next.label,
     next.message,
+    next.uiUrl ? `Open Studio ${next.uiUrl}` : '',
     next.url ? `Open ${next.url}` : '',
     next.retryUrl ? `Retry ${next.retryUrl}` : '',
     next.cancelUrl ? `Cancel ${next.cancelUrl}` : '',

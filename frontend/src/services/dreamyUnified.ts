@@ -526,6 +526,7 @@ export interface StudioActionResolveResult {
     retryUrl?: string;
     cancelEndpoint?: string;
     cancelUrl?: string;
+    uiUrl?: string;
     query?: Record<string, unknown>;
     targetId?: string;
     sessionId?: string;

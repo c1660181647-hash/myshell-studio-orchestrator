@@ -2093,6 +2093,10 @@ class StudioApiTest(unittest.TestCase):
             resolved_body["next"]["url"],
             f"/api/studio/dispatch-sessions/{session['sessionId']}?target_id=dispatch%3Aexplore",
         )
+        self.assertEqual(
+            resolved_body["next"]["uiUrl"],
+            f"/dreamy?dispatch_session_id={session['sessionId']}&target_id=dispatch%3Aexplore",
+        )
 
     def test_job_queue_can_filter_by_page_and_agent(self) -> None:
         with self.client.stream(
