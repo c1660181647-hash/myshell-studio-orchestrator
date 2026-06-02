@@ -206,3 +206,5 @@ Cloud Run build from repository root:
 ```bash
 gcloud builds submit --config orchestrator/cloudbuild.yaml .
 ```
+
+The current Cloud Run blueprint sets `--max-instances 1` because Studio projects, jobs, and evidence use the container-local SQLite store. Move `STUDIO_STORE_PATH` to a shared durable store before increasing instance count.

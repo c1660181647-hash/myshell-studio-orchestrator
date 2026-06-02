@@ -1297,6 +1297,13 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("/app/frontend/src/App.tsx", content)
         self.assertIn("COPY --from=frontend-build /app/frontend/src/App.tsx", content)
 
+    def test_cloud_build_limits_cloud_run_to_single_instance_for_sqlite_store(self) -> None:
+        cloudbuild = BACKEND_DIR.parent / "cloudbuild.yaml"
+        content = cloudbuild.read_text(encoding="utf-8")
+
+        self.assertIn("--max-instances", content)
+        self.assertIn("'1'", content)
+
     def test_cloud_start_script_uses_configured_cdp_url_consistently(self) -> None:
         start_script = BACKEND_DIR.parent / "start-cloud.sh"
         content = start_script.read_text(encoding="utf-8")

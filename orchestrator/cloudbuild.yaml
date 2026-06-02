@@ -45,6 +45,8 @@ steps:
       - '--cpu-boost'
       - '--min-instances'
       - '0'
+      - '--max-instances'
+      - '1'
 
 images:
   - 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/art-chat-orchestrator:$SHORT_SHA'
