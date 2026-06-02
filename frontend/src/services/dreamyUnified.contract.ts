@@ -4,9 +4,11 @@ import {
   fetchStudioDispatchSession,
   planStudioDispatchBatch,
   retryStudioDispatchSession,
+  runStudioDispatchSessionTarget,
   type StudioActionResolveResult,
   type StudioDispatchBatchPlan,
   type StudioDispatchSession,
+  type StudioDispatchSessionTargetRunResult,
   type StudioHandoffArtifact,
   type StudioHandoffAction,
 } from './dreamyUnified';
@@ -87,3 +89,12 @@ async function retryDispatchSessionContract(): Promise<StudioDispatchSession> {
 }
 
 void retryDispatchSessionContract;
+
+async function runDispatchSessionTargetContract(): Promise<StudioDispatchSessionTargetRunResult> {
+  return runStudioDispatchSessionTarget({
+    sessionId: 'dispatch_session_contract',
+    targetId: 'dispatch:dreamy-miniapp',
+  });
+}
+
+void runDispatchSessionTargetContract;

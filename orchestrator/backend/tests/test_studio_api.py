@@ -1822,6 +1822,98 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(restored_body["retryCount"], 1)
         self.assertEqual(restored_body["summary"]["pending"], body["summary"]["pending"])
 
+    def test_dispatch_session_run_client_target_returns_execution_request_and_completes(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "create client dispatch queue project"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            source_events = _sse_events("".join(response.iter_text()))
+
+        source_meta = next(payload for name, payload in source_events if name == "meta")
+        source_execution = next(payload for name, payload in source_events if name == "execution_request")
+        created = self.client.post(
+            "/api/studio/dispatch-sessions",
+            json={
+                "project_id": source_meta["projectId"],
+                "source_segment_id": source_execution["segmentId"],
+                "page_ids": ["dreamy-miniapp"],
+                "limit": 1,
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+        session = created.json()
+        target = session["nextTarget"]
+        self.assertEqual(target["pageId"], "dreamy-miniapp")
+        self.assertEqual(target["executor"], "client")
+
+        run = self.client.post(f"/api/studio/dispatch-sessions/{session['sessionId']}/targets/{target['id']}/run")
+
+        self.assertEqual(run.status_code, 200)
+        body = run.json()
+        self.assertEqual(body["status"], "execution_required")
+        self.assertEqual(body["target"]["status"], "visited")
+        self.assertEqual(body["session"]["summary"]["visited"], 1)
+        self.assertEqual(body["executionRequest"]["executor"], "client")
+        self.assertEqual(body["executionRequest"]["api"], "dreamy-miniapp")
+        self.assertEqual(body["executionRequest"]["dispatchSessionId"], session["sessionId"])
+        self.assertEqual(body["executionRequest"]["dispatchTargetId"], target["id"])
+        self.assertEqual(body["job"]["evidence"]["dispatchSessionId"], session["sessionId"])
+        self.assertEqual(body["job"]["evidence"]["dispatchTargetId"], target["id"])
+
+        client_result = self.client.post(
+            f"/api/studio/projects/{source_meta['projectId']}/client-result",
+            json={
+                "segmentId": body["executionRequest"]["segmentId"],
+                "jobId": body["executionRequest"]["jobId"],
+                "dispatchSessionId": session["sessionId"],
+                "dispatchTargetId": target["id"],
+                "status": "done",
+                "taskId": "task_dispatch_client_target",
+                "url": "https://example.com/dispatch-client-target.png",
+                "posterUrl": "https://example.com/dispatch-client-target.png",
+            },
+        )
+        self.assertEqual(client_result.status_code, 200)
+
+        restored = self.client.get(f"/api/studio/dispatch-sessions/{session['sessionId']}")
+        self.assertEqual(restored.status_code, 200)
+        restored_body = restored.json()
+        completed_target = next(item for item in restored_body["targets"] if item["id"] == target["id"])
+        self.assertEqual(completed_target["status"], "completed")
+        self.assertEqual(completed_target["jobId"], body["executionRequest"]["jobId"])
+        self.assertEqual(completed_target["segmentId"], body["executionRequest"]["segmentId"])
+        self.assertEqual(completed_target["evidence"]["accepted"], True)
+        self.assertEqual(completed_target["evidence"]["mediaUrl"], "https://example.com/dispatch-client-target.png")
+        self.assertEqual(restored_body["summary"]["completed"], 1)
+
+    def test_dispatch_session_run_client_target_creates_project_when_missing(self) -> None:
+        created = self.client.post(
+            "/api/studio/dispatch-sessions",
+            json={
+                "page_ids": ["dreamy-miniapp"],
+                "limit": 1,
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+        session = created.json()
+        self.assertIsNone(session["projectId"])
+        target = session["nextTarget"]
+        self.assertEqual(target["pageId"], "dreamy-miniapp")
+
+        run = self.client.post(f"/api/studio/dispatch-sessions/{session['sessionId']}/targets/{target['id']}/run")
+
+        self.assertEqual(run.status_code, 200)
+        body = run.json()
+        self.assertEqual(body["status"], "execution_required")
+        self.assertTrue(body["project"]["projectId"].startswith("project_"))
+        self.assertEqual(body["session"]["projectId"], body["project"]["projectId"])
+        self.assertEqual(body["target"]["projectId"], body["project"]["projectId"])
+        self.assertEqual(body["executionRequest"]["dispatchSessionId"], session["sessionId"])
+        self.assertEqual(body["executionRequest"]["dispatchTargetId"], target["id"])
+        self.assertEqual(body["executionRequest"]["executor"], "client")
+
     def test_run_stream_preserves_selected_agent_id_through_retry(self) -> None:
         with self.client.stream(
             "POST",

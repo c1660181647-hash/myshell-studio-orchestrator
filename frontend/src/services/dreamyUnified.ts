@@ -720,6 +720,17 @@ export interface StudioDispatchSession extends Omit<StudioDispatchBatchPlan, 'st
   focusedTarget?: StudioDispatchSessionTarget | null;
 }
 
+export interface StudioDispatchSessionTargetRunResult {
+  status: 'execution_required' | 'navigation_required' | string;
+  checkedAt: string;
+  session: StudioDispatchSession;
+  target: StudioDispatchSessionTarget;
+  job?: StudioJob;
+  project?: StudioProject;
+  executionRequest?: StudioExecutionRequest;
+  navigationPath?: string;
+}
+
 export interface StudioAgentCapability {
   id: string;
   label: string;
@@ -855,6 +866,8 @@ export interface StudioExecutionRequest {
   segment: StudioSegment;
   authStatus?: StudioAuthStatus;
   evidence?: StudioEvidence;
+  dispatchSessionId?: string;
+  dispatchTargetId?: string;
 }
 
 export interface StudioDispatchPreview {
@@ -919,6 +932,8 @@ export interface StudioClientResultInput {
   source?: string;
   evidence?: StudioEvidence;
   authStatus?: StudioAuthStatus;
+  dispatchSessionId?: string;
+  dispatchTargetId?: string;
 }
 
 function stripTrailingSlash(value: string): string {
@@ -1295,6 +1310,20 @@ export async function retryStudioDispatchSession(sessionId: string): Promise<Stu
     { method: 'POST' },
   );
   if (!response.ok) throw new Error(`Studio dispatch session retry ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
+export async function runStudioDispatchSessionTarget(options: {
+  sessionId: string;
+  targetId: string;
+}): Promise<StudioDispatchSessionTargetRunResult> {
+  const response = await fetch(
+    getStudioRootEndpoint(
+      `/api/studio/dispatch-sessions/${encodeURIComponent(options.sessionId)}/targets/${encodeURIComponent(options.targetId)}/run`,
+    ),
+    { method: 'POST' },
+  );
+  if (!response.ok) throw new Error(`Studio dispatch target run ${response.status}: ${response.statusText}`);
   return response.json();
 }
 

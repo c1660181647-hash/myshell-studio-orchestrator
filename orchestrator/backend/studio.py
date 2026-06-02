@@ -935,6 +935,135 @@ def _update_dispatch_session_target(
     return view
 
 
+def _run_dispatch_session_target(session_id: str, target_id: str) -> dict[str, Any]:
+    session = STUDIO_STORE.get_dispatch_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Dispatch session not found")
+
+    target = next((entry for entry in session.get("targets", []) if entry.get("id") == target_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Dispatch target not found")
+
+    target_status = str(target.get("status") or "pending")
+    if target_status not in {"pending", "visited"}:
+        raise HTTPException(status_code=409, detail=f"Dispatch target cannot run from status {target_status}")
+
+    page = get_page(str(target.get("pageId") or ""))
+    project_id = target.get("projectId") or session.get("projectId")
+    if not project_id:
+        project = _project(None, "player")
+        project_id = project["projectId"]
+        session["projectId"] = project_id
+        target["projectId"] = project_id
+    else:
+        project = _get_project(str(project_id))
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+    source_segment_id = target.get("sourceSegmentId") or session.get("sourceSegmentId")
+    source_segment = _resolve_source_segment(project, str(source_segment_id) if source_segment_id else None)
+    resolved_source_segment_id = source_segment.get("id") if source_segment else source_segment_id
+    now = now_iso()
+
+    if page.get("executor") == "navigation":
+        target_path = str(target.get("navigationPath") or "")
+        current_evidence = target.get("evidence") if isinstance(target.get("evidence"), dict) else {}
+        target["status"] = "visited"
+        target["visitedAt"] = target.get("visitedAt") or now
+        target["updatedAt"] = now
+        target["evidence"] = {
+            **current_evidence,
+            "openedFrom": "studio-target-run",
+            "dispatchSessionId": session_id,
+            "dispatchTargetId": target_id,
+            "pageId": page["id"],
+            "navigationPath": target_path,
+        }
+        session["updatedAt"] = now
+        view = _dispatch_session_view(session)
+        STUDIO_STORE.save_dispatch_session(view)
+        return {
+            "status": "navigation_required",
+            "checkedAt": now,
+            "session": _dispatch_session_with_focused_target(view, target_id),
+            "target": next(entry for entry in view.get("targets", []) if entry.get("id") == target_id),
+            "navigationPath": target_path,
+        }
+
+    route = _default_dispatch_route(
+        source_segment_id=str(resolved_source_segment_id) if resolved_source_segment_id else None,
+        source_segment=source_segment,
+    )
+    route.update(
+        {
+            "page": page,
+            "api": page["id"],
+            "executor": page["executor"],
+            "agentId": target.get("agentId") or _agent_id_for_page(page),
+            "analysis": "Dispatch session target materialized into an executable adapter request.",
+            "reason": "Operator ran a queued Studio dispatch target.",
+            "optimizedPrompt": f"Dispatch {page['name']} from Studio queue.",
+        }
+    )
+    prompt = str(route.get("optimizedPrompt") or f"Dispatch {page['name']}")
+    segment = _append_queued_segment(
+        project,
+        route,
+        prompt,
+        "generate",
+        str(resolved_source_segment_id) if resolved_source_segment_id else None,
+    )
+    job = _create_job(project, segment, route, page, source_segment, agent_id=str(route.get("agentId") or ""))
+    evidence = {
+        **(job.get("evidence") or {}),
+        "dispatchSessionId": session_id,
+        "dispatchTargetId": target_id,
+        "dispatchTargetPageId": page["id"],
+    }
+    segment["evidence"] = evidence
+    segment["updatedAt"] = now
+    job = _update_job(job, evidence=evidence, authStatus=adapter_auth_status(page["id"]))
+    _set_graph_status(project, route, segment)
+    _append_message(
+        project,
+        "assistant",
+        f"Queued {page['name']} dispatch target.",
+        route=route,
+        segmentId=segment["id"],
+        jobId=job["jobId"],
+    )
+
+    current_evidence = target.get("evidence") if isinstance(target.get("evidence"), dict) else {}
+    target["status"] = "visited"
+    target["visitedAt"] = target.get("visitedAt") or now
+    target["updatedAt"] = now
+    target["jobId"] = job["jobId"]
+    target["segmentId"] = segment["id"]
+    target["evidence"] = {
+        **current_evidence,
+        "dispatchSessionId": session_id,
+        "dispatchTargetId": target_id,
+        "jobId": job["jobId"],
+        "segmentId": segment["id"],
+        "runFrom": "studio",
+    }
+    session["updatedAt"] = now
+    view = _dispatch_session_view(session)
+    STUDIO_STORE.save_dispatch_session(view)
+    _save_project(project)
+    _sync_project_jobs(project)
+
+    return {
+        "status": "execution_required",
+        "checkedAt": now,
+        "session": _dispatch_session_with_focused_target(view, target_id),
+        "target": next(entry for entry in view.get("targets", []) if entry.get("id") == target_id),
+        "job": _job_with_evidence(job),
+        "project": project,
+        "executionRequest": _build_execution_request(project, job),
+    }
+
+
 def _cancel_dispatch_session(session_id: str) -> dict[str, Any]:
     session = STUDIO_STORE.get_dispatch_session(session_id)
     if not session:
@@ -2826,7 +2955,8 @@ def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dic
     graph = _set_graph_status(project, route, segment)
     contract = _navigation_contract(page, route, source_segment)
     navigation_path = contract.get("navigationPath", "")
-    return {
+    evidence = job.get("evidence") or {}
+    request = {
         "executor": page["executor"],
         "api": page["id"],
         "page": page,
@@ -2845,8 +2975,13 @@ def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dic
         "agentGraph": graph,
         "segment": segment,
         "authStatus": job.get("authStatus") or adapter_auth_status(page["id"]),
-        "evidence": job.get("evidence") or {},
+        "evidence": evidence,
     }
+    if evidence.get("dispatchSessionId"):
+        request["dispatchSessionId"] = evidence.get("dispatchSessionId")
+    if evidence.get("dispatchTargetId"):
+        request["dispatchTargetId"] = evidence.get("dispatchTargetId")
+    return request
 
 
 def _create_job(
@@ -3054,6 +3189,10 @@ def register_studio_routes(app) -> None:
     @app.post("/api/studio/dispatch-sessions/{session_id}/retry")
     async def retry_studio_dispatch_session(session_id: str):
         return _retry_dispatch_session(session_id)
+
+    @app.post("/api/studio/dispatch-sessions/{session_id}/targets/{target_id}/run")
+    async def run_studio_dispatch_session_target(session_id: str, target_id: str):
+        return _run_dispatch_session_target(session_id, target_id)
 
     @app.post("/api/studio/dispatch-sessions/{session_id}/targets/{target_id}")
     async def update_studio_dispatch_session_target(session_id: str, target_id: str, payload: dict[str, Any] = Body(...)):
@@ -3554,6 +3693,26 @@ def register_studio_routes(app) -> None:
                 posterUrl=segment.get("posterUrl") or job.get("posterUrl"),
                 evidence=segment.get("evidence"),
                 authStatus=segment.get("authStatus"),
+            )
+        dispatch_session_id = payload.get("dispatchSessionId") or ((job or {}).get("evidence") or {}).get("dispatchSessionId")
+        dispatch_target_id = payload.get("dispatchTargetId") or ((job or {}).get("evidence") or {}).get("dispatchTargetId")
+        if dispatch_session_id and dispatch_target_id and normalized_status in {"done", "error", "timeout", "auth_missing"}:
+            target_status = "completed" if normalized_status == "done" and (segment.get("evidence") or {}).get("accepted") else "error"
+            _update_dispatch_session_target(
+                str(dispatch_session_id),
+                str(dispatch_target_id),
+                status=target_status,
+                evidence={
+                    "dispatchSessionId": str(dispatch_session_id),
+                    "dispatchTargetId": str(dispatch_target_id),
+                    "jobId": segment.get("jobId") or "",
+                    "segmentId": segment.get("id") or "",
+                    "accepted": bool((segment.get("evidence") or {}).get("accepted")),
+                    "mediaUrl": segment.get("url") or "",
+                    "posterUrl": segment.get("posterUrl") or "",
+                    "taskId": segment.get("taskId") or "",
+                    "message": (segment.get("evidence") or {}).get("message") or "",
+                },
             )
         _sync_project_jobs(project)
         return {"project": project, "segment": segment, "job": job}
