@@ -104,6 +104,7 @@ import type {
   StudioDispatchBatchTarget,
   StudioDispatchSession,
   StudioDispatchSessionTarget,
+  StudioDispatchSessionTargetRunResult,
   StudioDispatchPreview,
   StudioExecutor,
   StudioExecutionRequest,
@@ -669,6 +670,12 @@ function readDispatchSessionRestoreParams(): { sessionId?: string; targetId?: st
   } catch {
     return {};
   }
+}
+
+function isDispatchTargetRunResult(
+  result: StudioActionResolveResult['result'],
+): result is StudioDispatchSessionTargetRunResult {
+  return Boolean(result && typeof result === 'object' && 'session' in result && 'target' in result);
 }
 
 function StudioArtifactLinks({
@@ -3415,116 +3422,6 @@ export default function Dreamy() {
     });
   }, []);
 
-  const resolveAuditAction = useCallback(async (action: StudioHandoffAction) => {
-    if (resolvingAuditActionId) return;
-    const targetId = action.targetId || action.pageId || action.segmentId || action.jobId || action.id;
-    if (!targetId) return;
-    setResolvingAuditActionId(action.id);
-    try {
-      const result = await resolveStudioAction({
-        action: action.action,
-        targetId,
-        sessionId: action.sessionId,
-        projectId: project?.projectId || deliveryAudit?.projectId || undefined,
-        sourceSegmentId: studioContextSourceSegmentId || deliveryAudit?.sourceSegmentId || undefined,
-      });
-      if (result.result?.project) mergeProject(result.result.project);
-      result.result?.jobs?.forEach((job) => mergeJob(job));
-      applyDeliveryAudit(result.audit);
-      const nextMessage = formatStudioActionNext(result.next);
-      const created = result.result?.createdCount ?? 0;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: makeId('assistant'),
-          role: 'assistant',
-          content:
-            result.resultType === 'coverage-verify'
-              ? `Audit action ${result.action} resolved for ${result.targetId}; verified ${created} target${created === 1 ? '' : 's'}.`
-              : `Audit action ${result.action} needs operator follow-up.${nextMessage}`,
-          createdAt: nowIso(),
-        },
-      ]);
-    } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: makeId('assistant'),
-          role: 'assistant',
-          content: `Audit action ${action.action} could not be resolved.`,
-          error: error instanceof Error ? error.message : String(error),
-          createdAt: nowIso(),
-        },
-      ]);
-    } finally {
-      setResolvingAuditActionId(null);
-    }
-  }, [
-    applyDeliveryAudit,
-    deliveryAudit?.projectId,
-    deliveryAudit?.sourceSegmentId,
-    mergeJob,
-    mergeProject,
-    project?.projectId,
-    resolvingAuditActionId,
-    studioContextSourceSegmentId,
-  ]);
-
-  const resolveSafeAuditActions = useCallback(async () => {
-    if (resolvingAuditBatch || resolvingAuditActionId || !deliveryAudit) return;
-    const safeActions = deliveryAudit.actions
-      .filter((action) => action.action === 'verify-ready')
-      .map((action) => ({
-        action: action.action,
-        targetId: action.targetId || action.pageId || action.segmentId || action.jobId || action.id,
-        sessionId: action.sessionId,
-      }))
-      .filter((action) => Boolean(action.targetId));
-    if (!safeActions.length) return;
-    setResolvingAuditBatch(true);
-    try {
-      const result = await resolveStudioActionsBatch({
-        projectId: project?.projectId || deliveryAudit.projectId || undefined,
-        sourceSegmentId: studioContextSourceSegmentId || deliveryAudit.sourceSegmentId || undefined,
-        actions: safeActions,
-      });
-      if (result.result?.project) mergeProject(result.result.project);
-      result.result?.jobs?.forEach((job) => mergeJob(job));
-      applyDeliveryAudit(result.audit);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: makeId('assistant'),
-          role: 'assistant',
-          content: `Resolved ${result.summary.executed} safe audit action${result.summary.executed === 1 ? '' : 's'}; ${result.audit.summary.actions} audit action${result.audit.summary.actions === 1 ? '' : 's'} remain.`,
-          createdAt: nowIso(),
-        },
-      ]);
-    } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: makeId('assistant'),
-          role: 'assistant',
-          content: 'Safe audit actions could not be resolved.',
-          error: error instanceof Error ? error.message : String(error),
-          createdAt: nowIso(),
-        },
-      ]);
-    } finally {
-      setResolvingAuditBatch(false);
-    }
-  }, [
-    applyDeliveryAudit,
-    deliveryAudit,
-    mergeJob,
-    mergeProject,
-    project?.projectId,
-    resolvingAuditActionId,
-    resolvingAuditBatch,
-    studioContextSourceSegmentId,
-  ]);
-
   const updateAssistant = useCallback((id: string, patch: Partial<ChatItem>) => {
     setMessages((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }, []);
@@ -3534,21 +3431,6 @@ export default function Dreamy() {
       prev.map((item) => (item.id === id ? { ...item, steps: [...(item.steps || []), step] } : item)),
     );
   }, []);
-
-  const clearFile = useCallback(() => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl('');
-    setSelectedFile(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  }, [previewUrl]);
-
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setSelectedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
-  };
 
   const registerClientExecution = useCallback(
     async (request: StudioExecutionRequest, projectId: string, fileForRequest: File | null, assistantId: string) => {
@@ -3648,6 +3530,188 @@ export default function Dreamy() {
     },
     [appendAssistantStep, mergeProject, refresh, updateAssistant],
   );
+
+  const resolveAuditAction = useCallback(async (action: StudioHandoffAction) => {
+    if (resolvingAuditActionId) return;
+    const targetId = action.targetId || action.pageId || action.segmentId || action.jobId || action.id;
+    if (!targetId) return;
+    setResolvingAuditActionId(action.id);
+    try {
+      const result = await resolveStudioAction({
+        action: action.action,
+        targetId,
+        sessionId: action.sessionId,
+        projectId: project?.projectId || deliveryAudit?.projectId || undefined,
+        sourceSegmentId: studioContextSourceSegmentId || deliveryAudit?.sourceSegmentId || undefined,
+      });
+
+      if (isDispatchTargetRunResult(result.result)) {
+        const targetRun = result.result;
+        applyDispatchSession(targetRun.session);
+        if (targetRun.project) mergeProject(targetRun.project);
+        if (targetRun.job) mergeJob(targetRun.job);
+        applyDeliveryAudit(result.audit);
+
+        const assistantId = makeId('assistant');
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: assistantId,
+            role: 'assistant',
+            content: `Running audit dispatch target ${targetRun.target.pageName || targetRun.target.pageId || targetRun.target.id}...`,
+            pending: true,
+            createdAt: nowIso(),
+            steps: [{ step: 'dispatch-target', message: 'Audit action materialized queued target', progress: 35 }],
+          },
+        ]);
+
+        const request = targetRun.executionRequest;
+        if (request?.executor === 'client') {
+          await registerClientExecution(
+            request,
+            targetRun.project?.projectId || targetRun.job?.projectId || targetRun.session.projectId || project?.projectId || '',
+            null,
+            assistantId,
+          );
+          const restored = await fetchStudioDispatchSession(targetRun.session.sessionId, { targetId: targetRun.target.id }).catch(() => null);
+          if (restored) applyDispatchSession(restored);
+        } else if (request?.executor === 'server') {
+          updateAssistant(assistantId, {
+            pending: false,
+            content: `Audit dispatch target queued for ${targetRun.target.pageName || targetRun.target.pageId}.`,
+            segmentId: request.segmentId,
+          });
+        } else {
+          updateAssistant(assistantId, {
+            pending: false,
+            content: `Audit dispatch target ${targetRun.target.pageName || targetRun.target.pageId || targetRun.target.id} is ready for operator review.`,
+          });
+        }
+
+        const refreshedAudit = await fetchStudioDeliveryAudit({
+          projectId: targetRun.session.projectId || result.projectId || project?.projectId || undefined,
+          sourceSegmentId: targetRun.session.sourceSegmentId || result.sourceSegmentId || studioContextSourceSegmentId || undefined,
+        }).catch(() => null);
+        if (refreshedAudit) applyDeliveryAudit(refreshedAudit);
+        return;
+      }
+
+      if (result.result && 'project' in result.result && result.result.project) mergeProject(result.result.project);
+      if (result.result && 'jobs' in result.result) result.result.jobs?.forEach((job) => mergeJob(job));
+      applyDeliveryAudit(result.audit);
+      const nextMessage = formatStudioActionNext(result.next);
+      const created = result.result && 'createdCount' in result.result ? result.result.createdCount ?? 0 : 0;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content:
+            result.resultType === 'coverage-verify'
+              ? `Audit action ${result.action} resolved for ${result.targetId}; verified ${created} target${created === 1 ? '' : 's'}.`
+              : `Audit action ${result.action} needs operator follow-up.${nextMessage}`,
+          createdAt: nowIso(),
+        },
+      ]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: `Audit action ${action.action} could not be resolved.`,
+          error: error instanceof Error ? error.message : String(error),
+          createdAt: nowIso(),
+        },
+      ]);
+    } finally {
+      setResolvingAuditActionId(null);
+    }
+  }, [
+    applyDeliveryAudit,
+    applyDispatchSession,
+    deliveryAudit?.projectId,
+    deliveryAudit?.sourceSegmentId,
+    fetchStudioDispatchSession,
+    fetchStudioDeliveryAudit,
+    mergeJob,
+    mergeProject,
+    project?.projectId,
+    registerClientExecution,
+    resolvingAuditActionId,
+    studioContextSourceSegmentId,
+    updateAssistant,
+  ]);
+
+  const resolveSafeAuditActions = useCallback(async () => {
+    if (resolvingAuditBatch || resolvingAuditActionId || !deliveryAudit) return;
+    const safeActions = deliveryAudit.actions
+      .filter((action) => action.action === 'verify-ready')
+      .map((action) => ({
+        action: action.action,
+        targetId: action.targetId || action.pageId || action.segmentId || action.jobId || action.id,
+        sessionId: action.sessionId,
+      }))
+      .filter((action) => Boolean(action.targetId));
+    if (!safeActions.length) return;
+    setResolvingAuditBatch(true);
+    try {
+      const result = await resolveStudioActionsBatch({
+        projectId: project?.projectId || deliveryAudit.projectId || undefined,
+        sourceSegmentId: studioContextSourceSegmentId || deliveryAudit.sourceSegmentId || undefined,
+        actions: safeActions,
+      });
+      if (result.result?.project) mergeProject(result.result.project);
+      result.result?.jobs?.forEach((job) => mergeJob(job));
+      applyDeliveryAudit(result.audit);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: `Resolved ${result.summary.executed} safe audit action${result.summary.executed === 1 ? '' : 's'}; ${result.audit.summary.actions} audit action${result.audit.summary.actions === 1 ? '' : 's'} remain.`,
+          createdAt: nowIso(),
+        },
+      ]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId('assistant'),
+          role: 'assistant',
+          content: 'Safe audit actions could not be resolved.',
+          error: error instanceof Error ? error.message : String(error),
+          createdAt: nowIso(),
+        },
+      ]);
+    } finally {
+      setResolvingAuditBatch(false);
+    }
+  }, [
+    applyDeliveryAudit,
+    deliveryAudit,
+    mergeJob,
+    mergeProject,
+    project?.projectId,
+    resolvingAuditActionId,
+    resolvingAuditBatch,
+    studioContextSourceSegmentId,
+  ]);
+
+  const clearFile = useCallback(() => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl('');
+    setSelectedFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, [previewUrl]);
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setSelectedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+  };
 
   const runStudio = useCallback(
     async (

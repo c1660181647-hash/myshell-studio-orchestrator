@@ -1357,13 +1357,18 @@ def _handoff_gaps_and_actions(
             session_id = str(session_view.get("sessionId") or "")
             for target in session_view.get("targets") or []:
                 target_status = str(target.get("status") or "pending")
-                if target_status != "error":
+                if target_status not in {"pending", "error"}:
                     continue
                 target_id = str(target.get("id") or "")
                 evidence = target.get("evidence") if isinstance(target.get("evidence"), dict) else {}
-                reason = "error"
-                action = "inspect-gap"
-                message = str(target.get("message") or evidence.get("message") or "Dispatch target needs operator review.")
+                if target_status == "pending":
+                    reason = "pending"
+                    action = "run-target"
+                    message = str(target.get("message") or evidence.get("message") or "Dispatch target is pending; run it from the Studio queue.")
+                else:
+                    reason = "error"
+                    action = "inspect-gap"
+                    message = str(target.get("message") or evidence.get("message") or "Dispatch target needs operator review.")
 
                 gap = {
                     "id": f"dispatch-session:{session_id}:{target_id}",
@@ -2170,6 +2175,31 @@ async def _resolve_studio_action(payload: dict[str, Any] | None) -> dict[str, An
             "sourceSegmentId": result.get("sourceSegmentId") or source_segment_id,
             "resultType": "coverage-verify",
             "message": f"Verified {created_count} ready target(s).",
+            "result": result,
+            "audit": audit,
+        }
+
+    if action == "run-target":
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required for run-target")
+        result = _run_dispatch_session_target(session_id, target_id)
+        resolved_session = result.get("session") if isinstance(result.get("session"), dict) else {}
+        resolved_project_id = resolved_session.get("projectId") or project_id
+        resolved_source_segment_id = resolved_session.get("sourceSegmentId") or source_segment_id
+        audit = await _studio_delivery_audit(
+            project_id=resolved_project_id,
+            source_segment_id=resolved_source_segment_id,
+        )
+        return {
+            "status": "executed",
+            "checkedAt": now_iso(),
+            "action": action,
+            "targetId": target_id,
+            "sessionId": session_id,
+            "projectId": resolved_project_id,
+            "sourceSegmentId": resolved_source_segment_id,
+            "resultType": "dispatch-target-run",
+            "message": f"Ran dispatch target {target_id}.",
             "result": result,
             "audit": audit,
         }

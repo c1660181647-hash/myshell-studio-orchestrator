@@ -667,6 +667,79 @@ class StudioApiTest(unittest.TestCase):
         self.assertNotIn("explore", {action.get("targetId") for action in body["audit"]["actions"]})
         self.assertNotIn("ai-picks", {action.get("targetId") for action in body["audit"]["actions"]})
 
+    def test_studio_action_resolve_runs_pending_dispatch_target(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={"message": "create dispatch action source image"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        meta = next(payload for name, payload in events if name == "meta")
+        execution = next(payload for name, payload in events if name == "execution_request")
+        session_response = self.client.post(
+            "/api/studio/dispatch-sessions",
+            json={
+                "project_id": meta["projectId"],
+                "source_segment_id": execution["segmentId"],
+                "page_ids": ["dreamy-miniapp"],
+                "limit": 1,
+            },
+        )
+        self.assertEqual(session_response.status_code, 200)
+        session = session_response.json()
+        target = session["nextTarget"]
+        self.assertEqual(target["status"], "pending")
+
+        audit = self.client.get(
+            "/api/studio/delivery-audit",
+            params={"project_id": meta["projectId"], "source_segment_id": execution["segmentId"]},
+        )
+        self.assertEqual(audit.status_code, 200)
+        audit_body = audit.json()
+        action_id = f"dispatch-target:run-target:{session['sessionId']}:{target['id']}"
+        action_by_id = {action["id"]: action for action in audit_body["actions"]}
+        self.assertIn(action_id, action_by_id)
+        self.assertEqual(action_by_id[action_id]["action"], "run-target")
+        self.assertEqual(action_by_id[action_id]["kind"], "dispatch_target")
+        self.assertEqual(action_by_id[action_id]["sessionId"], session["sessionId"])
+        self.assertEqual(action_by_id[action_id]["targetId"], target["id"])
+        self.assertEqual(
+            action_by_id[action_id]["uiUrl"],
+            f"/dreamy?dispatch_session_id={session['sessionId']}&target_id=dispatch%3Adreamy-miniapp",
+        )
+
+        resolved_action = self.client.post(
+            "/api/studio/actions/resolve",
+            json={
+                "action": "run-target",
+                "target_id": target["id"],
+                "session_id": session["sessionId"],
+                "project_id": meta["projectId"],
+                "source_segment_id": execution["segmentId"],
+            },
+        )
+
+        self.assertEqual(resolved_action.status_code, 200)
+        resolved_body = resolved_action.json()
+        self.assertEqual(resolved_body["status"], "executed")
+        self.assertEqual(resolved_body["action"], "run-target")
+        self.assertEqual(resolved_body["targetId"], target["id"])
+        self.assertEqual(resolved_body["sessionId"], session["sessionId"])
+        self.assertEqual(resolved_body["resultType"], "dispatch-target-run")
+        self.assertEqual(resolved_body["result"]["status"], "execution_required")
+        self.assertEqual(resolved_body["result"]["executionRequest"]["executor"], "client")
+        self.assertEqual(resolved_body["result"]["executionRequest"]["dispatchSessionId"], session["sessionId"])
+        self.assertEqual(resolved_body["result"]["executionRequest"]["dispatchTargetId"], target["id"])
+        restored_target = next(
+            item
+            for item in resolved_body["result"]["session"]["targets"]
+            if item["id"] == target["id"]
+        )
+        self.assertEqual(restored_target["status"], "visited")
+        self.assertNotIn(action_id, {action["id"] for action in resolved_body["audit"]["actions"]})
+
     def test_studio_action_resolve_explains_all_operator_action_types(self) -> None:
         action_targets = [
             ("provide-route-params", "tag-generator"),

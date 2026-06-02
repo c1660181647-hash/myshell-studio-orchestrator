@@ -575,7 +575,7 @@ export interface StudioActionResolveResult {
     targetId?: string;
     sessionId?: string;
   };
-  result?: StudioCoverageVerifyResult;
+  result?: StudioCoverageVerifyResult | StudioDispatchSessionTargetRunResult;
   audit: StudioDeliveryAudit;
 }
 

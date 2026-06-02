@@ -4,6 +4,7 @@ import {
   fetchStudioDispatchSession,
   planStudioDispatchBatch,
   retryStudioDispatchSession,
+  resolveStudioAction,
   runStudioDispatchSessionTarget,
   type StudioActionResolveResult,
   type StudioDispatchBatchPlan,
@@ -90,6 +91,12 @@ async function retryDispatchSessionContract(): Promise<StudioDispatchSession> {
 
 void retryDispatchSessionContract;
 
+function hasDispatchTargetRunResult(
+  result: StudioActionResolveResult['result'],
+): result is StudioDispatchSessionTargetRunResult {
+  return Boolean(result && typeof result === 'object' && 'session' in result && 'target' in result);
+}
+
 async function runDispatchSessionTargetContract(): Promise<StudioDispatchSessionTargetRunResult> {
   return runStudioDispatchSessionTarget({
     sessionId: 'dispatch_session_contract',
@@ -98,3 +105,16 @@ async function runDispatchSessionTargetContract(): Promise<StudioDispatchSession
 }
 
 void runDispatchSessionTargetContract;
+
+async function resolveDispatchSessionTargetActionContract(): Promise<StudioDispatchSessionTargetRunResult | undefined> {
+  const result = await resolveStudioAction({
+    action: 'run-target',
+    sessionId: 'dispatch_session_contract',
+    targetId: 'dispatch:dreamy-miniapp',
+  });
+  return result.resultType === 'dispatch-target-run' && hasDispatchTargetRunResult(result.result)
+    ? result.result
+    : undefined;
+}
+
+void resolveDispatchSessionTargetActionContract;
