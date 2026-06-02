@@ -387,6 +387,13 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(route_coverage["missingAppRoutes"], [])
         self.assertEqual(route_coverage["extraRegistryRoutes"], [])
 
+    def test_frontend_route_source_path_handles_cloud_run_backend_layout(self) -> None:
+        import studio
+
+        source_path = studio._default_frontend_app_routes_file_for_backend(Path("/app/studio.py"))
+
+        self.assertEqual(source_path, Path("/app/frontend/src/App.tsx"))
+
     def test_delivery_audit_packages_machine_readable_acceptance_evidence(self) -> None:
         with self.client.stream(
             "POST",

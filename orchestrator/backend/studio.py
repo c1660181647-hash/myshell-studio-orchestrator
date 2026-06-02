@@ -95,7 +95,24 @@ PLACEHOLDER_POSTERS = {
 }
 
 IGNORED_FRONTEND_ROUTE_PREFIXES = ("/__",)
-DEFAULT_FRONTEND_APP_ROUTES_FILE = Path(__file__).resolve().parents[2] / "frontend" / "src" / "App.tsx"
+
+
+def _default_frontend_app_routes_file_for_backend(backend_file: Path) -> Path:
+    backend_path = backend_file.resolve()
+    ancestors = list(backend_path.parents)
+    candidates: list[Path] = []
+    if len(ancestors) >= 3:
+        candidates.append(ancestors[2] / "frontend" / "src" / "App.tsx")
+    if ancestors:
+        candidates.append(ancestors[0] / "frontend" / "src" / "App.tsx")
+    candidates.append(Path("/app/frontend/src/App.tsx"))
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+DEFAULT_FRONTEND_APP_ROUTES_FILE = _default_frontend_app_routes_file_for_backend(Path(__file__))
 
 
 def _frontend_route_source_path() -> Path:
