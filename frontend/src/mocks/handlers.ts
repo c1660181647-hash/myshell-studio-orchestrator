@@ -179,12 +179,11 @@ export const handlers = [
   }),
 
   // ── Task detail ──
-  http.post(`${API}/task/detail`, () => {
-    return HttpResponse.json({
-      status: 'done',
-      taskId: 'task_001',
-      botName: 'Luna Star',
-    });
+  http.post(`${API}/task/detail`, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { task_id?: string; taskId?: string };
+    const taskId = body.task_id || body.taskId || '';
+    const task = mockLibraryItems.find((item) => item.taskId === taskId) || mockLibraryItems[0];
+    return HttpResponse.json({ task });
   }),
 
   // ── Task actions (like, retry, delete, cancel) ──

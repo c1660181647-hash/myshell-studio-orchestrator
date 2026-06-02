@@ -45,9 +45,15 @@ export interface LibraryDetailViewState {
 }
 
 type TaskDetailEnvelope = {
+  data?: unknown;
+  generate_results?: unknown;
   task?: unknown;
+  task_detail?: unknown;
   taskDetail?: unknown;
+  tasks?: unknown;
   detail?: unknown;
+  item?: unknown;
+  items?: unknown;
   result?: unknown;
   generateResults?: unknown;
 };
@@ -56,16 +62,133 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function asTaskCandidate(value: unknown): LibraryGenerateResult | null {
-  if (!isRecord(value)) return null;
-  if (
-    typeof value.taskId === 'string' ||
-    typeof value.status === 'string' ||
-    isRecord(value.result)
-  ) {
-    return value as unknown as LibraryGenerateResult;
+function parseRecord(value: unknown): Record<string, unknown> | null {
+  if (isRecord(value)) return value;
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
   }
-  return null;
+}
+
+function readValue(record: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    if (record[key] !== undefined && record[key] !== null) return record[key];
+  }
+  return undefined;
+}
+
+function readString(record: Record<string, unknown>, keys: string[]): string {
+  const value = readValue(record, keys);
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
+}
+
+function readBoolean(record: Record<string, unknown>, keys: string[]): boolean | undefined {
+  const value = readValue(record, keys);
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes'].includes(normalized)) return true;
+    if (['false', '0', 'no'].includes(normalized)) return false;
+  }
+  return undefined;
+}
+
+function readStringArray(record: Record<string, unknown>, keys: string[]): string[] {
+  const value = readValue(record, keys);
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === 'string' ? item : ''))
+      .filter(Boolean);
+  }
+  if (typeof value === 'string' && value) return [value];
+  return [];
+}
+
+function taskCandidateHasSignal(
+  record: Record<string, unknown>,
+  resultRecord: Record<string, unknown>,
+): boolean {
+  const hasTaskId = Boolean(readString(record, ['taskId', 'task_id', 'id', 'outputJobId', 'output_job_id']));
+  const hasMedia = Boolean(
+    readString(resultRecord, ['outputImg', 'output_img', 'mediaUrl', 'media_url', 'url']) ||
+      readString(record, ['outputImg', 'output_img', 'mediaUrl', 'media_url', 'url']),
+  );
+  const hasStatus = Boolean(readString(record, ['status', 'taskStatus', 'task_status']));
+  const hasTaskMetadata = Boolean(
+    readString(record, ['botName', 'bot_name', 'characterName', 'character_name']) ||
+      readString(record, ['botId', 'bot_id']) ||
+      readString(record, ['imageUrl', 'image_url', 'thumbnailUrl', 'thumbnail_url']) ||
+      readString(record, ['botType', 'bot_type', 'mediaType', 'media_type']) ||
+      readString(resultRecord, ['errMsg', 'err_msg', 'errorMessage', 'error_message']),
+  );
+  return hasTaskId || hasMedia || (hasStatus && (hasTaskMetadata || Object.keys(resultRecord).length > 0));
+}
+
+function asTaskCandidate(value: unknown): LibraryGenerateResult | null {
+  const record = parseRecord(value);
+  if (!record) return null;
+
+  const resultRecord =
+    parseRecord(record.result) ||
+    parseRecord(record.output) ||
+    parseRecord(record.media) ||
+    {};
+  if (!taskCandidateHasSignal(record, resultRecord)) return null;
+
+  const outputImg =
+    readString(resultRecord, ['outputImg', 'output_img', 'mediaUrl', 'media_url', 'url']) ||
+    readString(record, ['outputImg', 'output_img', 'mediaUrl', 'media_url', 'url']);
+  const outputPreview =
+    readString(resultRecord, ['outputPreview', 'output_preview', 'previewUrl', 'preview_url', 'thumbnailUrl', 'thumbnail_url']) ||
+    readString(record, ['outputPreview', 'output_preview', 'previewUrl', 'preview_url', 'thumbnailUrl', 'thumbnail_url']);
+  const outputPoster =
+    readString(resultRecord, ['outputPoster', 'output_poster', 'posterUrl', 'poster_url']) ||
+    readString(record, ['outputPoster', 'output_poster', 'posterUrl', 'poster_url']);
+  const inputImg = readStringArray(resultRecord, ['inputImg', 'input_img', 'inputImages', 'input_images']);
+  const topLevelInputImg = readStringArray(record, ['inputImg', 'input_img', 'inputImages', 'input_images']);
+  const status = readString(record, ['status', 'taskStatus', 'task_status']) || (outputImg ? 'done' : '');
+  const botType =
+    readString(record, ['botType', 'bot_type', 'mediaType', 'media_type']) ||
+    (/\.(mp4|webm)($|\?)/i.test(outputImg) ? 'video' : 'image');
+
+  return {
+    status,
+    result: {
+      outputImg,
+      inputImg: inputImg.length ? inputImg : topLevelInputImg,
+      width:
+        readString(resultRecord, ['width', 'w']) ||
+        readString(record, ['width', 'w']),
+      height:
+        readString(resultRecord, ['height', 'h']) ||
+        readString(record, ['height', 'h']),
+      errMsg:
+        readString(resultRecord, ['errMsg', 'err_msg', 'errorMessage', 'error_message']) ||
+        readString(record, ['errMsg', 'err_msg', 'errorMessage', 'error_message']),
+      outputPreview,
+      outputPoster,
+    },
+    botId: readString(record, ['botId', 'bot_id']),
+    slugId: readString(record, ['slugId', 'slug_id', 'slug']),
+    taskId: readString(record, ['taskId', 'task_id', 'id', 'outputJobId', 'output_job_id']),
+    startTime: readString(record, ['startTime', 'start_time', 'createdAt', 'created_at']),
+    floorUrl: readString(record, ['floorUrl', 'floor_url']),
+    botName: readString(record, ['botName', 'bot_name', 'characterName', 'character_name']),
+    imageUrl:
+      readString(record, ['imageUrl', 'image_url', 'thumbnailUrl', 'thumbnail_url']) ||
+      outputPoster ||
+      outputPreview,
+    botType,
+    likeStatus: readString(record, ['likeStatus', 'like_status']),
+    estimateTaskDuration: readString(record, ['estimateTaskDuration', 'estimate_task_duration', 'durationMs', 'duration_ms']),
+    isAiPick: readBoolean(record, ['isAiPick', 'is_ai_pick']),
+  };
 }
 
 export function normalizeLibraryTaskDetail(raw: unknown): LibraryGenerateResult | null {
@@ -76,8 +199,11 @@ export function normalizeLibraryTaskDetail(raw: unknown): LibraryGenerateResult 
   const envelope = raw as TaskDetailEnvelope;
   const nestedCandidates = [
     envelope.task,
+    envelope.task_detail,
     envelope.taskDetail,
+    envelope.data,
     envelope.detail,
+    envelope.item,
     envelope.result,
   ];
   for (const candidate of nestedCandidates) {
@@ -87,6 +213,27 @@ export function normalizeLibraryTaskDetail(raw: unknown): LibraryGenerateResult 
 
   if (Array.isArray(envelope.generateResults)) {
     for (const candidate of envelope.generateResults) {
+      const task = asTaskCandidate(candidate);
+      if (task) return task;
+    }
+  }
+
+  if (Array.isArray(envelope.generate_results)) {
+    for (const candidate of envelope.generate_results) {
+      const task = asTaskCandidate(candidate);
+      if (task) return task;
+    }
+  }
+
+  if (Array.isArray(envelope.tasks)) {
+    for (const candidate of envelope.tasks) {
+      const task = asTaskCandidate(candidate);
+      if (task) return task;
+    }
+  }
+
+  if (Array.isArray(envelope.items)) {
+    for (const candidate of envelope.items) {
       const task = asTaskCandidate(candidate);
       if (task) return task;
     }
@@ -128,8 +275,15 @@ export function resolveLibraryDetailMedia(task: LibraryGenerateResult): LibraryD
   };
 }
 
+function parseStartTimeMs(startTime: string): number {
+  const numericTimestamp = Number(startTime);
+  if (Number.isFinite(numericTimestamp) && numericTimestamp > 0) return numericTimestamp;
+  const parsedTimestamp = Date.parse(startTime);
+  return Number.isFinite(parsedTimestamp) ? parsedTimestamp : 0;
+}
+
 function formatStartTime(startTime: string): string {
-  const timestamp = Number(startTime);
+  const timestamp = parseStartTimeMs(startTime);
   if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
   try {
     return new Intl.DateTimeFormat(undefined, {
@@ -145,7 +299,7 @@ function formatStartTime(startTime: string): string {
 
 function getProgress(task: LibraryGenerateResult): number {
   const estimate = Number.parseInt(task.estimateTaskDuration || '', 10) || 300_000;
-  const start = Number.parseInt(task.startTime || '', 10);
+  const start = parseStartTimeMs(task.startTime || '');
   if (!start) return 8;
   const elapsed = Date.now() - start;
   return Math.min(Math.max((elapsed / estimate) * 100, 8), 95);
