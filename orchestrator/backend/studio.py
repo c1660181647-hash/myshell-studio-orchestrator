@@ -942,6 +942,7 @@ def _artifact(
     project_id: str | None = None,
     session_id: str | None = None,
     target_id: str | None = None,
+    ui_url: str | None = None,
     query: dict[str, Any] | None = None,
     filename: str | None = None,
 ) -> dict[str, Any]:
@@ -957,6 +958,8 @@ def _artifact(
         artifact["sessionId"] = session_id
     if target_id is not None:
         artifact["targetId"] = target_id
+    if ui_url:
+        artifact["uiUrl"] = ui_url
     clean_query = {
         key: value
         for key, value in (query or {}).items()
@@ -976,6 +979,13 @@ def _context_query(project_id: str | None = None, source_segment_id: str | None 
     if source_segment_id:
         query["source_segment_id"] = source_segment_id
     return query
+
+
+def _dispatch_session_ui_url(session_id: str, target_id: str | None = None) -> str:
+    query = {"dispatch_session_id": session_id}
+    if target_id:
+        query["target_id"] = target_id
+    return f"/dreamy?{urlencode(query)}"
 
 
 def _handoff_artifacts(project_id: str | None, source_segment_id: str | None = None) -> list[dict[str, Any]]:
@@ -1027,6 +1037,7 @@ def _delivery_bundle_artifacts(
                 "/api/studio/dispatch-sessions/{session_id}",
                 project_id=project_id,
                 session_id=session_id,
+                ui_url=_dispatch_session_ui_url(session_id),
             )
         )
         for target in session.get("targets") or []:
@@ -1041,6 +1052,7 @@ def _delivery_bundle_artifacts(
                     project_id=project_id,
                     session_id=session_id,
                     target_id=target_id,
+                    ui_url=_dispatch_session_ui_url(session_id, target_id),
                     query={"target_id": target_id},
                 )
             )

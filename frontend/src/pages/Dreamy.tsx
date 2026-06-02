@@ -594,6 +594,10 @@ function StudioReadinessStrip({ readiness }: { readiness: StudioReadiness | null
 }
 
 function artifactHref(artifact: StudioHandoffArtifact): string {
+  if (artifact.uiUrl) {
+    if (/^https?:\/\//i.test(artifact.uiUrl)) return artifact.uiUrl;
+    return artifact.uiUrl.startsWith('/') ? artifact.uiUrl : `/${artifact.uiUrl}`;
+  }
   return getStudioRootEndpoint(artifact.url || artifact.endpoint);
 }
 
@@ -629,7 +633,7 @@ function StudioArtifactLinks({
           href={artifactHref(artifact)}
           target="_blank"
           rel="noreferrer"
-          title={artifact.url || artifact.endpoint}
+          title={artifact.uiUrl || artifact.url || artifact.endpoint}
           className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2 hover:bg-Cr-beta-white-8-v2"
         >
           <ExternalLink size={12} className="text-Cr-text-subtlest-v2" />

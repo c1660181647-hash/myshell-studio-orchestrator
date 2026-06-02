@@ -1829,6 +1829,8 @@ class StudioApiTest(unittest.TestCase):
             artifact_urls[f"dispatch-session:{session['sessionId']}"],
             f"/api/studio/dispatch-sessions/{session['sessionId']}",
         )
+        session_artifact = next(artifact for artifact in body["artifacts"] if artifact["id"] == f"dispatch-session:{session['sessionId']}")
+        self.assertEqual(session_artifact["uiUrl"], f"/dreamy?dispatch_session_id={session['sessionId']}")
         target_artifact_id = f"dispatch-target:{session['sessionId']}:{target['id']}"
         self.assertEqual(
             artifact_urls[target_artifact_id],
@@ -1837,6 +1839,10 @@ class StudioApiTest(unittest.TestCase):
         target_artifact = next(artifact for artifact in body["artifacts"] if artifact["id"] == target_artifact_id)
         self.assertEqual(target_artifact["targetId"], target["id"])
         self.assertEqual(target_artifact["sessionId"], session["sessionId"])
+        self.assertEqual(
+            target_artifact["uiUrl"],
+            f"/dreamy?dispatch_session_id={session['sessionId']}&target_id=dispatch%3Aexplore",
+        )
         self.assertNotIn("{session_id}", str(artifact_urls))
 
         download = self.client.get(
