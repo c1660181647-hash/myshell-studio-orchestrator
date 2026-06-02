@@ -757,6 +757,195 @@ function StudioArtifactLinks({
   );
 }
 
+function StudioDeliveryCommandCenter({
+  audit,
+  coverage,
+  snapshot,
+  bundle,
+  matrix,
+  plan,
+  session,
+  overview,
+  refreshingAudit,
+  verifyingCoverage,
+  planningDispatch,
+  sessionRunning,
+  bundling,
+  onRefreshAudit,
+  onVerifyCoverage,
+  onPlanRemaining,
+  onStartQueue,
+  onBundle,
+}: {
+  audit: StudioDeliveryAudit | null;
+  coverage: StudioCoverageReport | null;
+  snapshot: StudioHandoffSnapshot | null;
+  bundle: StudioDeliveryBundle | null;
+  matrix: StudioDispatchMatrix | null;
+  plan: StudioDispatchBatchPlan | null;
+  session: StudioDispatchSession | null;
+  overview: StudioOverview | null;
+  refreshingAudit: boolean;
+  verifyingCoverage: boolean;
+  planningDispatch: boolean;
+  sessionRunning: boolean;
+  bundling: boolean;
+  onRefreshAudit: () => void;
+  onVerifyCoverage: () => void;
+  onPlanRemaining: () => void;
+  onStartQueue: () => void;
+  onBundle: () => void;
+}) {
+  const coverageSummary = coverage?.summary;
+  const matrixSummary = matrix?.summary;
+  const snapshotSummary = snapshot?.summary;
+  const sessionSummary = session?.summary;
+  const totalPages =
+    coverageSummary?.total ||
+    matrixSummary?.total ||
+    snapshotSummary?.pages ||
+    audit?.summary?.pages ||
+    overview?.totals?.pages ||
+    0;
+  const coveredPages = coverageSummary?.covered || snapshotSummary?.covered || 0;
+  const readyTargets = matrixSummary?.ready || audit?.summary?.readyTargets || 0;
+  const pendingTargets = sessionSummary?.pending ?? plan?.summary?.planned ?? 0;
+  const visitedTargets = sessionSummary?.visited || bundle?.summary?.visitedTargets || 0;
+  const actionCount = audit?.summary?.actions ?? snapshotSummary?.unresolvedActions ?? bundle?.summary?.actions ?? 0;
+  const issueCount =
+    (coverageSummary?.blocked || 0) +
+    (coverageSummary?.issues || 0) +
+    (overview?.totals?.issues || 0) +
+    (bundle?.summary?.errorTargets || 0);
+  const coveragePercent = totalPages ? Math.round((coveredPages / totalPages) * 100) : 0;
+  const readyPercent = totalPages ? Math.round((readyTargets / totalPages) * 100) : 0;
+  const canVerify = Boolean(coverageSummary?.readyUnverified);
+  const canStartQueue = Boolean(plan && !sessionRunning);
+
+  return (
+    <section
+      data-testid="delivery-command-center"
+      className="grid gap-3 border-b border-Cr-border-default-v2 bg-[#0d1018] p-3"
+      aria-label="Delivery Command Center"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold text-Cr-text-default-v2">
+            <SlidersHorizontal size={15} className="text-dreamy-brand-hot-v2" />
+            Delivery Command Center
+          </div>
+          <div className="text-[11px] text-Cr-text-subtler-v2">
+            {`${totalPages || 0} pages / ${readyTargets} ready / ${actionCount} actions`}
+          </div>
+        </div>
+        <div className="flex max-w-full gap-2 overflow-x-auto [-webkit-overflow-scrolling:touch]">
+          <button
+            type="button"
+            disabled={refreshingAudit}
+            onClick={onRefreshAudit}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md-v2 border border-white/10 bg-white/[0.05] px-2.5 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:opacity-50"
+          >
+            <RefreshCcw size={12} className={refreshingAudit ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+          <button
+            type="button"
+            disabled={!canVerify || verifyingCoverage}
+            onClick={onVerifyCoverage}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md-v2 border border-white/10 bg-white/[0.05] px-2.5 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:opacity-50"
+          >
+            <CheckCircle2 size={12} className={verifyingCoverage ? 'animate-pulse' : ''} />
+            Verify Ready
+          </button>
+          <button
+            type="button"
+            disabled={planningDispatch}
+            onClick={onPlanRemaining}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md-v2 border border-white/10 bg-white/[0.05] px-2.5 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:opacity-50"
+          >
+            <GitBranch size={12} className={planningDispatch ? 'animate-pulse' : ''} />
+            Plan Remaining
+          </button>
+          <button
+            type="button"
+            disabled={!canStartQueue}
+            onClick={onStartQueue}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md-v2 border border-dreamy-brand-hot-v2/50 bg-dreamy-brand-hot-v2/15 px-2.5 text-[11px] font-semibold text-dreamy-brand-hot-v2 disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-Cr-text-subtlest-v2"
+          >
+            <Play size={12} />
+            Start Queue
+          </button>
+          <button
+            type="button"
+            disabled={bundling}
+            onClick={onBundle}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md-v2 border border-white/10 bg-white/[0.05] px-2.5 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:opacity-50"
+          >
+            <Download size={12} className={bundling ? 'animate-pulse' : ''} />
+            Bundle
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">Delivery</span>
+            <Pill tone={handoffPillTone(snapshot?.status || audit?.status)}>{snapshot?.status || audit?.status || 'checking'}</Pill>
+          </div>
+          <div className="text-2xl font-semibold text-Cr-text-default-v2">{coveragePercent}%</div>
+          <div className="text-[11px] text-Cr-text-subtler-v2">{`${coveredPages}/${totalPages || 0} pages covered`}</div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+            <div className="h-full rounded-full bg-Cr-text-success-default-v2" style={{ width: `${Math.min(100, coveragePercent)}%` }} />
+          </div>
+        </div>
+
+        <div className="grid gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">Dispatch Matrix</span>
+            <Pill tone={readyTargets === totalPages && totalPages ? 'success' : 'hot'}>{`${readyTargets}/${totalPages || 0}`}</Pill>
+          </div>
+          <div className="text-2xl font-semibold text-Cr-text-default-v2">{readyPercent}%</div>
+          <div className="text-[11px] text-Cr-text-subtler-v2">{`${matrixSummary?.navigation || 0} nav / ${matrixSummary?.client || 0} client / ${matrixSummary?.server || 0} server`}</div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+            <div className="h-full rounded-full bg-dreamy-brand-hot-v2" style={{ width: `${Math.min(100, readyPercent)}%` }} />
+          </div>
+        </div>
+
+        <div className="grid gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">Queue</span>
+            <Pill tone={session?.status === 'active' ? 'success' : plan ? 'hot' : 'default'}>{session?.status || plan?.status || 'idle'}</Pill>
+          </div>
+          <div className="text-2xl font-semibold text-Cr-text-default-v2">{pendingTargets}</div>
+          <div className="text-[11px] text-Cr-text-subtler-v2">{`${visitedTargets} visited / ${sessionSummary?.completed || bundle?.summary?.completedTargets || 0} done`}</div>
+          <div className="flex gap-1">
+            <Pill tone={sessionSummary?.targetErrors || bundle?.summary?.errorTargets ? 'danger' : 'default'}>
+              {`${sessionSummary?.targetErrors || bundle?.summary?.errorTargets || 0} errors`}
+            </Pill>
+            <Pill tone={sessionSummary?.targetSkipped || bundle?.summary?.skippedTargets ? 'hot' : 'default'}>
+              {`${sessionSummary?.targetSkipped || bundle?.summary?.skippedTargets || 0} skipped`}
+            </Pill>
+          </div>
+        </div>
+
+        <div className="grid gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">Operator Actions</span>
+            <Pill tone={issueCount ? 'danger' : actionCount ? 'hot' : 'success'}>{issueCount ? `${issueCount} issues` : `${actionCount} actions`}</Pill>
+          </div>
+          <div className="text-2xl font-semibold text-Cr-text-default-v2">{actionCount}</div>
+          <div className="text-[11px] text-Cr-text-subtler-v2">{`${audit?.summary?.artifacts || snapshot?.artifacts.length || bundle?.summary?.artifacts || 0} artifacts ready`}</div>
+          <div className="flex gap-1">
+            <Pill tone={snapshot?.readyForDelivery ? 'success' : 'default'}>{snapshot?.readyForDelivery ? 'deliverable' : 'review'}</Pill>
+            <Pill tone={bundle?.readyForDelivery ? 'success' : 'default'}>{bundle ? `bundle ${bundle.status}` : 'bundle pending'}</Pill>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function StudioDeliveryAuditStrip({
   audit,
   refreshing,
@@ -4573,6 +4762,26 @@ export default function Dreamy() {
             <div className="min-h-0 flex-1 overflow-y-auto">
               <StudioHealthStrip health={studioHealth} />
               <StudioReadinessStrip readiness={studioReadiness} />
+              <StudioDeliveryCommandCenter
+                audit={deliveryAudit}
+                coverage={coverageReport}
+                snapshot={handoffSnapshot}
+                bundle={deliveryBundle}
+                matrix={dispatchMatrix}
+                plan={dispatchBatchPlan}
+                session={dispatchSession}
+                overview={studioOverview}
+                refreshingAudit={deliveryAuditRefreshing}
+                verifyingCoverage={coverageVerifyRunning}
+                planningDispatch={dispatchBatchPlanning}
+                sessionRunning={dispatchSessionRunning}
+                bundling={deliveryBundleLoading}
+                onRefreshAudit={() => void refreshDeliveryAudit({ interactive: true })}
+                onVerifyCoverage={() => void runCoverageVerification()}
+                onPlanRemaining={() => void planDispatchBatch({ excludeCovered: true })}
+                onStartQueue={() => void startDispatchSession()}
+                onBundle={() => void refreshDeliveryBundle()}
+              />
               <StudioDeliveryAuditStrip
                 audit={deliveryAudit}
                 refreshing={deliveryAuditRefreshing}

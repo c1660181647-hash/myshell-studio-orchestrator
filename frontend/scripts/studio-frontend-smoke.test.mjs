@@ -7,6 +7,7 @@ import {
   createSmokeSummary,
   normalizeFrontendBaseUrl,
   REQUIRED_STUDIO_CHECK_IDS,
+  runStudioFrontendSmoke,
 } from './studio-frontend-smoke.mjs';
 
 test('buildStudioSmokeUrl opens the Dreamy test route from a bare dev server URL', () => {
@@ -84,4 +85,9 @@ test('createSmokeSummary fails when required dispatch queue interaction checks a
     summary.failures.map((failure) => failure.id),
     requiredDispatchChecks,
   );
+});
+
+test('runStudioFrontendSmoke records the delivery command center surface', () => {
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('delivery-command-center'));
+  assert.match(runStudioFrontendSmoke.toString(), /delivery-command-center/);
 });

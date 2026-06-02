@@ -36,6 +36,7 @@ export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'dispatch-target-visited',
   'open-evidence-drawer',
   'delivery-evidence',
+  'delivery-command-center',
   'page-selector',
   'agent-selector',
   'page-registry',
@@ -319,6 +320,7 @@ export async function runStudioFrontendSmoke(options = {}) {
 
     await clickVisible(checks, page, 'open-evidence-drawer', 'Open evidence drawer', page.getByRole('button', { name: /evidence/i }), timeoutMs);
     await checkVisible(checks, page, 'delivery-evidence', 'Delivery Evidence drawer', page.getByText('Delivery Evidence'), timeoutMs);
+    await checkVisible(checks, page, 'delivery-command-center', 'Delivery command center', page.getByTestId('delivery-command-center'), timeoutMs);
     await clickVisible(
       checks,
       page,
