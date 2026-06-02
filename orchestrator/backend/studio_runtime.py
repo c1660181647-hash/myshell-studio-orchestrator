@@ -12,6 +12,8 @@ import httpx
 DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 DEFAULT_COOKIE_INJECTION_STATUS_PATH = os.path.join(os.path.dirname(__file__), ".studio", "cookie-injection-status.json")
 COOKIE_FILE_NAMES = ("myshell-cookies.json", "myshell_cookies_embedded.json")
+DREAMY_INIT_DATA_ENV_NAMES = ("DREAMY_TELEGRAM_INIT_DATA", "MYSHELL_DREAMY_INIT_DATA")
+DREAMY_DEFAULT_API_BASE_URL = "https://api.myshell.fun"
 
 
 def cdp_url() -> str:
@@ -90,6 +92,36 @@ def cookie_source_status() -> dict[str, Any]:
 
 def cookies_available() -> bool:
     return cookie_source_status().get("status") == "ready"
+
+
+def dreamy_init_data() -> str:
+    for env_name in DREAMY_INIT_DATA_ENV_NAMES:
+        value = os.environ.get(env_name)
+        if value and value.strip():
+            return value.strip()
+    return ""
+
+
+def dreamy_api_base_url() -> str:
+    return (os.environ.get("DREAMY_API_BASE_URL") or DREAMY_DEFAULT_API_BASE_URL).rstrip("/")
+
+
+def dreamy_api_auth_status() -> dict[str, Any]:
+    configured_env = next((name for name in DREAMY_INIT_DATA_ENV_NAMES if os.environ.get(name)), "")
+    if dreamy_init_data():
+        return {
+            "status": "ready",
+            "mode": "server-telegram-init-data",
+            "message": "Server-side Dreamy init data is configured; Studio can run Dreamy generation from the backend.",
+            "source": configured_env,
+            "baseUrl": dreamy_api_base_url(),
+        }
+    return {
+        "status": "client_delegated",
+        "mode": "telegram-init-data",
+        "message": "Uses the authenticated Telegram miniapp browser session",
+        "baseUrl": dreamy_api_base_url(),
+    }
 
 
 def ffmpeg_status() -> dict[str, Any]:
@@ -192,7 +224,6 @@ async def runtime_health(store_path: str) -> dict[str, Any]:
     cookie_source = cookie_source_status()
     has_cookies = cookie_source.get("status") == "ready"
     cdp_ready = await chrome_cdp_ready()
-    dreamy_auth = "client_delegated"
     art_auth = "ready" if has_cookies else "auth_missing"
     injection_status = cookie_injection_status(has_cookies, cookie_source)
     media_export_status = ffmpeg_status()
@@ -212,7 +243,7 @@ async def runtime_health(store_path: str) -> dict[str, Any]:
             "chromeCdp": {"status": "ok" if cdp_ready else "unavailable", "url": cdp_url()},
             "myshellCookies": {**cookie_source, "status": "ready" if has_cookies else cookie_source.get("status", art_auth)},
             "cookieInjection": injection_status,
-            "dreamyApiAuth": {"status": dreamy_auth, "mode": "telegram-init-data"},
+            "dreamyApiAuth": dreamy_api_auth_status(),
             "ffmpeg": media_export_status,
         },
     }
@@ -249,6 +280,8 @@ def adapter_auth_status(page_id: str) -> dict[str, Any]:
             "cdpUrl": cdp_status.get("url", ""),
             "statusPath": injection_status.get("statusPath", ""),
         }
+    if page_id == "dreamy-miniapp":
+        return dreamy_api_auth_status()
     return {
         "status": "client_delegated",
         "mode": "telegram-init-data",

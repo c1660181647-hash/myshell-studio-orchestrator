@@ -8,19 +8,21 @@ import subprocess
 import tempfile
 import uuid
 import base64
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from urllib.request import urlretrieve
 
+import httpx
 from fastapi import Body, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from bot_catalog import MYSHELL_BOTS, get_bot_by_slug
 from studio_registry import get_page, list_studio_agents, list_studio_pages, page_for_dispatch
-from studio_runtime import adapter_auth_status, runtime_health
+from studio_runtime import adapter_auth_status, dreamy_api_base_url, dreamy_init_data, runtime_health
 from studio_store import STUDIO_STORE
 
 try:
@@ -322,8 +324,12 @@ def _page_with_runtime_status(page: dict[str, Any]) -> dict[str, Any]:
     auth_state = str(auth_status.get("status") or "unknown")
     dispatch_ready = auth_state in READY_AUTH_STATUSES
     dispatch_status = "ready" if dispatch_ready else auth_state
+    executor = "server" if page["id"] == "dreamy-miniapp" and auth_state == "ready" else page.get("executor", "")
+    dispatch_mode = "execute-server" if executor == "server" else page.get("dispatchMode", "")
     return {
         **page,
+        "executor": executor,
+        "dispatchMode": dispatch_mode,
         "authStatus": auth_status,
         "dispatchReady": dispatch_ready,
         "dispatchStatus": dispatch_status,
@@ -429,9 +435,9 @@ def _dispatch_matrix_entry(
         "pageId": page["id"],
         "pageName": page["name"],
         "kind": page.get("kind", ""),
-        "executor": page.get("executor", ""),
+        "executor": runtime_page.get("executor", page.get("executor", "")),
         "agentId": _agent_id_for_page(page),
-        "recommendedAction": _recommended_action_for_page(page),
+        "recommendedAction": _recommended_action_for_page(runtime_page),
         "dispatchReady": dispatch_ready,
         "dispatchStatus": dispatch_status,
         "dispatchMessage": "Missing route parameters: " + ", ".join(missing_params)
@@ -3433,6 +3439,216 @@ def _create_timeline_export(project: StudioProject, segment_ids: list[str] | Non
     return export
 
 
+DREAMY_API_PREFIX = "/v1/telegram/miniapp/dreamy"
+
+
+def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 100) -> int:
+    try:
+        value = int(os.environ.get(name) or default)
+    except ValueError:
+        return default
+    return max(minimum, min(value, maximum))
+
+
+def _env_float(name: str, default: float, *, minimum: float = 0.0, maximum: float = 60.0) -> float:
+    try:
+        value = float(os.environ.get(name) or default)
+    except ValueError:
+        return default
+    return max(minimum, min(value, maximum))
+
+
+async def _dreamy_api_request(endpoint: str, body: dict[str, Any], init_data: str) -> dict[str, Any]:
+    timeout = _env_float("DREAMY_API_TIMEOUT_SECONDS", 30.0, minimum=1.0, maximum=120.0)
+    url = f"{dreamy_api_base_url()}{endpoint}"
+    headers = {
+        "Content-Type": "application/json",
+        "myshell-service-name": "organics-api",
+        "X-Telegram-Init-Data": init_data,
+        "Accept-Language": os.environ.get("DREAMY_ACCEPT_LANGUAGE") or "en",
+    }
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(url, headers=headers, json=body)
+    text = response.text
+    if response.status_code >= 400:
+        message = text[:500] if text else response.reason_phrase
+        raise RuntimeError(f"Dreamy API {response.status_code} {endpoint}: {message}")
+    if not text.strip():
+        return {}
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise RuntimeError(f"Dreamy API returned invalid JSON for {endpoint}: {exc}") from exc
+    return payload if isinstance(payload, dict) else {"data": payload}
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _dreamy_task_media(result: dict[str, Any], output_job_id: str = "") -> dict[str, str]:
+    tasks = result.get("tasks") if isinstance(result.get("tasks"), list) else []
+    task = tasks[0] if tasks and isinstance(tasks[0], dict) else {}
+    parsed_result = _json_object(task.get("result"))
+    media_url = (
+        parsed_result.get("outputImg")
+        or parsed_result.get("output_img")
+        or parsed_result.get("outputPreview")
+        or parsed_result.get("output_preview")
+        or parsed_result.get("mediaUrl")
+        or parsed_result.get("media_url")
+        or parsed_result.get("url")
+        or ""
+    )
+    poster_url = (
+        parsed_result.get("outputPoster")
+        or parsed_result.get("output_poster")
+        or parsed_result.get("outputPreview")
+        or parsed_result.get("output_preview")
+        or media_url
+        or ""
+    )
+    return {
+        "status": str(task.get("status") or result.get("status") or ""),
+        "taskId": str(task.get("jobId") or task.get("taskId") or output_job_id or ""),
+        "mediaUrl": str(media_url or ""),
+        "posterUrl": str(poster_url or ""),
+    }
+
+
+def _dreamy_input_images(prompt: str, source_segment: StudioSegment | None) -> list[str]:
+    source_url = _accepted_source_media_url(source_segment)
+    return [source_url, prompt] if source_url else [prompt]
+
+
+async def _run_dreamy_server_adapter(
+    *,
+    project: StudioProject,
+    segment: StudioSegment,
+    job: dict[str, Any],
+    route: dict[str, Any],
+    prompt: str,
+    source_segment: StudioSegment | None,
+) -> dict[str, Any]:
+    init_data = dreamy_init_data()
+    auth_status = adapter_auth_status("dreamy-miniapp")
+    if not init_data or auth_status.get("status") != "ready":
+        segment["status"] = "auth_missing"
+        segment["authStatus"] = auth_status
+        segment["evidence"] = _evidence(
+            "auth_missing",
+            "dreamy-miniapp",
+            message="Dreamy server execution needs DREAMY_TELEGRAM_INIT_DATA; no external generation request was sent.",
+        )
+        segment["updatedAt"] = now_iso()
+        job = _update_job(job, status="auth_missing", authStatus=auth_status, evidence=segment["evidence"])
+        _set_graph_status(project, route, segment)
+        _save_project(project)
+        _sync_project_jobs(project)
+        return job
+
+    segment["status"] = "running"
+    segment["authStatus"] = auth_status
+    segment["updatedAt"] = now_iso()
+    running_evidence = _evidence(
+        "running",
+        "dreamy-miniapp",
+        message="Server-side Dreamy generation submitted from Studio.",
+    )
+    job = _update_job(job, status="running", authStatus=auth_status, evidence=running_evidence)
+    _set_graph_status(project, route, segment)
+    _save_project(project)
+    _sync_project_jobs(project)
+
+    slug = route["bot"]["slug"]
+    detail = await _dreamy_api_request(f"{DREAMY_API_PREFIX}/get-by-slug", {"slug_id": slug}, init_data)
+    info = detail.get("info") if isinstance(detail.get("info"), dict) else {}
+    bot_id = str(info.get("botId") or info.get("bot_id") or slug)
+    article_id = str(info.get("slugId") or info.get("slug_id") or slug)
+    generate_body = {
+        "bot_id": bot_id,
+        "input_img": _dreamy_input_images(prompt, source_segment),
+        "article_id": article_id,
+    }
+    response = await _dreamy_api_request(f"{DREAMY_API_PREFIX}/generate", generate_body, init_data)
+    output_job_id = str(response.get("outputJobId") or response.get("output_job_id") or "")
+    if not output_job_id:
+        raise RuntimeError("Dreamy generate response did not include outputJobId")
+
+    poll_attempts = _env_int("DREAMY_SERVER_POLL_ATTEMPTS", 3, minimum=1, maximum=20)
+    poll_interval = _env_float("DREAMY_SERVER_POLL_INTERVAL_SECONDS", 0.75, minimum=0.0, maximum=10.0)
+    media: dict[str, str] = {"status": "running", "taskId": output_job_id, "mediaUrl": "", "posterUrl": ""}
+    for attempt in range(poll_attempts):
+        if attempt and poll_interval:
+            await asyncio.sleep(poll_interval)
+        result = await _dreamy_api_request(
+            f"{DREAMY_API_PREFIX}/generate/result",
+            {"output_job_id": output_job_id},
+            init_data,
+        )
+        media = _dreamy_task_media(result, output_job_id)
+        if media.get("mediaUrl") and media.get("status") in {"completed", "success", "done"}:
+            break
+
+    task_status = media.get("status") or "running"
+    media_url = media.get("mediaUrl") or ""
+    poster_url = media.get("posterUrl") or segment.get("posterUrl") or media_url
+    if media_url and task_status in {"completed", "success", "done"}:
+        segment["status"] = "done"
+        segment["url"] = media_url
+        segment["posterUrl"] = poster_url
+        segment["taskId"] = output_job_id
+        segment["evidence"] = _evidence(
+            "done",
+            "dreamy-miniapp",
+            accepted=True,
+            media_url=media_url,
+            task_id=output_job_id,
+            message="Fresh Dreamy task media accepted from server-side generation.",
+        )
+        job = _update_job(
+            job,
+            status="done",
+            taskId=output_job_id,
+            mediaUrl=media_url,
+            posterUrl=poster_url,
+            authStatus=auth_status,
+            evidence=segment["evidence"],
+        )
+    else:
+        segment["status"] = "running"
+        segment["taskId"] = output_job_id
+        segment["posterUrl"] = poster_url
+        segment["evidence"] = _evidence(
+            "running",
+            "dreamy-miniapp",
+            task_id=output_job_id,
+            message=f"Dreamy task {output_job_id} is {task_status or 'running'}; poll result for final media.",
+        )
+        job = _update_job(
+            job,
+            status="running",
+            taskId=output_job_id,
+            posterUrl=poster_url,
+            authStatus=auth_status,
+            evidence=segment["evidence"],
+        )
+
+    segment["updatedAt"] = now_iso()
+    _set_graph_status(project, route, segment)
+    _save_project(project)
+    _sync_project_jobs(project)
+    return job
+
+
 def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dict[str, Any]:
     page = get_page(job.get("pageId"))
     segment = _find_segment(project, job.get("segmentId")) or {
@@ -3831,6 +4047,12 @@ def register_studio_routes(app) -> None:
 
             route = await choose_route(prompt, has_image, normalized_action, source_segment)
             page = page_for_dispatch(route["bot"], page_id, prompt)
+            if page["id"] == "dreamy-miniapp" and adapter_auth_status("dreamy-miniapp").get("status") == "ready":
+                page = {
+                    **page,
+                    "executor": "server",
+                    "dispatchMode": "execute-server",
+                }
             route["action"] = normalized_action
             route["sourceSegmentId"] = resolved_source_segment_id
             route["sourceSummary"] = (
@@ -3903,6 +4125,34 @@ def register_studio_routes(app) -> None:
                 },
             )
             yield _event("job", {"job": job})
+
+            if page["id"] == "dreamy-miniapp" and page["executor"] == "server":
+                yield _event(
+                    "progress",
+                    {
+                        "step": "dreamy-server",
+                        "message": "Running Dreamy generation from the Studio backend",
+                        "progress": 45,
+                    },
+                )
+                try:
+                    job = await _run_dreamy_server_adapter(
+                        project=project,
+                        segment=segment,
+                        job=job,
+                        route=route,
+                        prompt=route.get("optimizedPrompt") or prompt,
+                        source_segment=source_segment,
+                    )
+                except Exception as exc:
+                    segment["status"] = "error"
+                    segment["evidence"] = _evidence("error", "dreamy-miniapp", message=str(exc))
+                    segment["updatedAt"] = now_iso()
+                    job = _update_job(job, status="error", evidence=segment["evidence"])
+                    _set_graph_status(project, route, segment)
+                    _save_project(project)
+                    _sync_project_jobs(project)
+                yield _event("job", {"job": STUDIO_STORE.get_job(job["jobId"])})
 
             if page["executor"] == "navigation":
                 if missing_route_params:

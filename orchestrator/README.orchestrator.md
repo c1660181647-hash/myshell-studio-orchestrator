@@ -4,11 +4,11 @@ The backend exposes the Studio API for MyShell page and agent dispatch. It keeps
 
 ## Core Surfaces
 
-- `GET /api/health` reports backend, SQLite storage, Chrome CDP, MyShell cookie, cookie injection result evidence, and Dreamy delegated-auth state.
+- `GET /api/health` reports backend, SQLite storage, Chrome CDP, MyShell cookie, cookie injection result evidence, Dreamy API auth state, and FFmpeg media export readiness.
 - `GET /api/pages` lists registered page adapters and miniapp navigation surfaces, including `dreamy-miniapp`, `myshell-art`, Explore, AI Picks, Bot Detail, Upload, Tag Generator, Library, Library Detail, Energy, Energy History, Earn, Share Invite, Settings, Profile, and Checkin.
 - `GET /api/studio/readiness` includes a `page-registry` route coverage evidence block that compares registered `appRoute` values with the frontend `<Route>` paths when the App source is available. Missing or extra production routes block readiness; missing source is reported as `source_unavailable` without blocking runtime startup.
 - `GET /api/agents` lists the dispatch graph agents.
-- `POST /api/studio/run` routes a prompt, creates a persisted job, and streams Studio SSE events.
+- `POST /api/studio/run` routes a prompt, creates a persisted job, and streams Studio SSE events. Dreamy jobs use the authenticated browser miniapp session by default; when `DREAMY_TELEGRAM_INIT_DATA` is configured, the backend submits Dreamy `get-by-slug` -> `generate` -> `generate/result` directly and updates the segment/job with accepted media or explicit running/error evidence.
 - `GET /api/studio/delivery-audit` returns machine-readable acceptance status, requirements, de-duplicated operator `actions` from both readiness fixes and handoff gaps, artifacts, and embedded reports for deployment handoff. Pending dispatch session targets are promoted as executable `run-target` actions, cancelled dispatch targets are promoted as safe `retry-queue` actions, and dispatch targets marked `visited` or `error` are promoted into handoff/audit operator actions with Studio `uiUrl` values for exact `/dreamy` restore. Manual and retry actions include a materialized `next` instruction with concrete operator `url`/`retryUrl`/`cancelUrl`/`uiUrl` values where applicable. Artifacts include both stable template `endpoint` values and concrete `url` values with project/session/source context filled in. Add `download=1` to receive `myshell-studio-audit-{project_id|current}.json` as a JSON attachment.
 - `POST /api/studio/actions/resolve` executes safe audit actions such as targeted `verify-ready` and dispatch-session `run-target`, or returns explicit `manual_required` instructions with concrete `url`/`retryUrl`/`cancelUrl` values for every handoff/audit operator action. Dispatch target actions can include `session_id`, which resolves to the exact dispatch session API `url` plus `target_id` and a Studio `uiUrl` for `/dreamy` target restore.
 - `POST /api/studio/actions/resolve-batch` executes multiple safe audit actions, including `verify-ready` coverage checks, dispatch-session `run-target` actions, and cancelled-session `retry-queue` actions, preserves every manual operator action with instructions, and returns a refreshed audit. Batch `run-target` entries include the dispatch target run result so the Studio UI can continue into client execution requests.
@@ -50,6 +50,19 @@ export MYSHELL_COOKIES='[{"name":"...","value":"...","domain":".myshell.ai"}]'
 ```
 
 The Cloud Run startup script writes the latest cookie injection result to `.studio/cookie-injection-status.json` by default; set `MYSHELL_COOKIE_INJECTION_STATUS_PATH` to use a different path. Without cookies, MyShell Art jobs are visible in Studio but stop as `auth_missing`. If cookies exist but injection fails, health/readiness report degraded cookie-injection evidence instead of marking the adapter ready. If cookie injection succeeded but the current Chrome CDP endpoint is unavailable, the Art adapter still reports `auth_missing` with CDP evidence so stale status files cannot masquerade as a live browser session.
+
+## Dreamy Server Execution
+
+To let Cloud Run execute Dreamy generation without waiting for a Telegram webview client, provide server-side miniapp init data:
+
+```bash
+export DREAMY_TELEGRAM_INIT_DATA='query_id=...&user=...&auth_date=...&hash=...'
+export DREAMY_API_BASE_URL=https://api.myshell.fun
+export DREAMY_SERVER_POLL_ATTEMPTS=3
+export DREAMY_SERVER_POLL_INTERVAL_SECONDS=0.75
+```
+
+With this configured, `dreamy-miniapp` auth reports `ready` and `/api/studio/run` emits `executor: "server"` for Dreamy jobs. The backend accepts only fresh `generate/result` media as `done`; unfinished tasks remain `running` with the Dreamy task id so the operator can poll, retry, or cancel from the Studio job queue.
 
 ## Tests
 

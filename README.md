@@ -146,10 +146,15 @@ Important backend settings:
 - `STUDIO_STORE_PATH` - SQLite path for project/job/evidence persistence. Defaults to `orchestrator/backend/.studio/studio.sqlite3`.
 - `STUDIO_PAGES_MANIFEST` - Optional path to a JSON manifest that extends or replaces registered MyShell miniapp pages.
 - `STUDIO_FRONTEND_APP_ROUTES_FILE` - Optional path to the frontend App route source used for readiness route coverage. Defaults to `frontend/src/App.tsx` when present.
+- `DREAMY_TELEGRAM_INIT_DATA` - Optional Telegram miniapp init data for server-side Dreamy execution. If set, `/api/studio/run` can submit Dreamy generate/result jobs from the backend; if omitted, Dreamy remains `client_delegated` and the browser miniapp session runs jobs.
+- `DREAMY_API_BASE_URL` - Dreamy API origin, default `https://api.myshell.fun`.
+- `DREAMY_SERVER_POLL_ATTEMPTS` / `DREAMY_SERVER_POLL_INTERVAL_SECONDS` - Fast server polling controls after Dreamy submit. Running jobs stay recoverable instead of being marked successful without media.
 - `MYSHELL_COOKIES` - JSON cookie array for MyShell Art CDP execution. If omitted, MyShell Art jobs report `auth_missing`.
 - `MYSHELL_CDP_URL` - Chrome DevTools endpoint, default `http://127.0.0.1:9222`.
 - `MYSHELL_COOKIE_INJECTION_STATUS_PATH` - Optional path for the Chrome cookie injection result JSON. Defaults to backend `.studio/cookie-injection-status.json`.
 - `STUDIO_ROUTER_MODE=local|gemini` - local catalog matching by default; Gemini requires `GEMINI_API_KEY`.
+
+Dreamy is marked `ready` when server init data is configured, otherwise it is still dispatch-ready as `client_delegated` so the authenticated Telegram browser can execute it. In both modes, placeholder posters are not accepted as completion evidence.
 
 MyShell Art is marked ready only when cookies are configured, cookie injection succeeded, and the current Chrome CDP endpoint is reachable. A stale success file with an offline CDP is reported as `auth_missing` with CDP evidence instead of a successful adapter.
 

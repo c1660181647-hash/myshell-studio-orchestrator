@@ -520,6 +520,90 @@ class StudioApiTest(unittest.TestCase):
             self.assertIn(component_id, components)
             self.assertIn("status", components[component_id])
 
+    def test_dreamy_server_auth_status_uses_configured_init_data(self) -> None:
+        with patch.dict(os.environ, {"DREAMY_TELEGRAM_INIT_DATA": "query_id=server-auth"}, clear=False):
+            health = self.client.get("/api/health")
+            pages = self.client.get("/api/pages")
+
+        self.assertEqual(health.status_code, 200)
+        dreamy_auth = health.json()["components"]["dreamyApiAuth"]
+        self.assertEqual(dreamy_auth["status"], "ready")
+        self.assertEqual(dreamy_auth["mode"], "server-telegram-init-data")
+        self.assertIn("server", dreamy_auth["message"].lower())
+
+        page_by_id = {page["id"]: page for page in pages.json()["pages"]}
+        dreamy_page = page_by_id["dreamy-miniapp"]
+        self.assertEqual(dreamy_page["authStatus"]["status"], "ready")
+        self.assertEqual(dreamy_page["authStatus"]["mode"], "server-telegram-init-data")
+        self.assertEqual(dreamy_page["executor"], "server")
+        self.assertEqual(dreamy_page["dispatchMode"], "execute-server")
+        self.assertTrue(dreamy_page["dispatchReady"])
+
+    def test_run_stream_executes_dreamy_server_adapter_when_init_data_is_configured(self) -> None:
+        import studio
+
+        calls: list[tuple[str, dict]] = []
+
+        async def fake_dreamy_request(endpoint: str, body: dict, init_data: str) -> dict:
+            calls.append((endpoint, body))
+            self.assertEqual(init_data, "query_id=server-auth")
+            if endpoint.endswith("/get-by-slug"):
+                return {"info": {"botId": "bot_neon_art", "slugId": "neon-art-generator"}}
+            if endpoint.endswith("/generate"):
+                return {"outputJobId": "dreamy_job_123", "queuePosition": 0}
+            if endpoint.endswith("/generate/result"):
+                return {
+                    "tasks": [
+                        {
+                            "status": "done",
+                            "jobId": "dreamy_job_123",
+                            "result": json.dumps(
+                                {
+                                    "outputImg": "https://cdn.example.test/generated.mp4",
+                                    "outputPreview": "https://cdn.example.test/generated-poster.jpg",
+                                }
+                            ),
+                        }
+                    ]
+                }
+            raise AssertionError(endpoint)
+
+        with (
+            patch.dict(os.environ, {"DREAMY_TELEGRAM_INIT_DATA": "query_id=server-auth"}, clear=False),
+            patch.object(studio, "_dreamy_api_request", side_effect=fake_dreamy_request),
+            self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={
+                    "message": "generate a neon cyberpunk video clip",
+                    "action": "extend",
+                    "page_id": "dreamy-miniapp",
+                },
+            ) as response,
+        ):
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        execution = next(payload for name, payload in events if name == "execution_request")
+        self.assertEqual(execution["executor"], "server")
+        self.assertEqual(execution["authStatus"]["status"], "ready")
+
+        final_job = [payload["job"] for name, payload in events if name == "job"][-1]
+        self.assertEqual(final_job["status"], "done")
+        self.assertEqual(final_job["taskId"], "dreamy_job_123")
+        self.assertEqual(final_job["mediaUrl"], "https://cdn.example.test/generated.mp4")
+        self.assertTrue(final_job["evidence"]["accepted"])
+        self.assertEqual(final_job["evidence"]["source"], "dreamy-miniapp")
+
+        project = next(payload["project"] for name, payload in events if name == "project")
+        self.assertEqual(project["segments"][0]["status"], "done")
+        self.assertEqual(project["segments"][0]["url"], "https://cdn.example.test/generated.mp4")
+        self.assertEqual(project["segments"][0]["posterUrl"], "https://cdn.example.test/generated-poster.jpg")
+        self.assertEqual(calls[0][0], "/v1/telegram/miniapp/dreamy/get-by-slug")
+        self.assertEqual(calls[1][0], "/v1/telegram/miniapp/dreamy/generate")
+        self.assertEqual(calls[2][0], "/v1/telegram/miniapp/dreamy/generate/result")
+        self.assertEqual(calls[1][1]["input_img"], ["generate a neon cyberpunk video clip"])
+
     def test_health_reports_cookie_injection_result_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             status_path = Path(tmp_dir) / "cookie-injection-status.json"
