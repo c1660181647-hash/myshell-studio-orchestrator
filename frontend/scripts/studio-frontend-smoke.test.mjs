@@ -30,9 +30,16 @@ test('createSmokeSummary records checked UI surfaces and console errors', () => 
     ],
     consoleErrors: ['boom'],
     screenshotPath: '/tmp/dreamy.png',
+    workspaceScreenshotPath: '/tmp/dreamy-workspace.png',
+    evidenceScreenshotPath: '/tmp/dreamy-evidence.png',
   });
 
   assert.equal(summary.status, 'failed');
+  assert.equal(summary.screenshotPath, '/tmp/dreamy-evidence.png');
+  assert.deepEqual(summary.screenshots, {
+    workspace: '/tmp/dreamy-workspace.png',
+    evidence: '/tmp/dreamy-evidence.png',
+  });
   assert.equal(summary.summary.total, 2);
   assert.equal(summary.summary.passed, 1);
   assert.equal(summary.summary.failed, 1);

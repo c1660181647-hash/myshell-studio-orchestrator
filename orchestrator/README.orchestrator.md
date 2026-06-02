@@ -73,7 +73,7 @@ From the repository root, the full local handoff can also be checked with one co
 python scripts/studio_delivery_check.py
 ```
 
-It starts a temporary backend on a free port, builds the frontend with that backend URL, serves the production build through `npm run preview`, runs backend and frontend smoke checks, writes `.studio-delivery-check/summary.json` with log/screenshot paths, emits the same JSON summary, and cleans up its own processes. Pass `--frontend-mode dev` for a faster development-server check.
+It starts a temporary backend on a free port, builds the frontend with that backend URL, serves the production build through `npm run preview`, runs backend and frontend smoke checks, writes `.studio-delivery-check/summary.json` with log paths plus Canvas workspace and Delivery Evidence drawer screenshot paths, emits the same JSON summary, and cleans up its own processes. Pass `--frontend-mode dev` for a faster development-server check.
 
 For the full operator handoff surface, also start the frontend against this backend and run:
 

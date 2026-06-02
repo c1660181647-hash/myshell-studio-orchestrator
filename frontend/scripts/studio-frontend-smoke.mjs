@@ -49,15 +49,23 @@ export function createSmokeSummary({
   checks = [],
   consoleErrors = [],
   screenshotPath = '',
+  workspaceScreenshotPath = '',
+  evidenceScreenshotPath = '',
   allowConsoleErrors = false,
 }) {
   const failures = checks.filter((check) => !check.ok);
   const blockingConsoleErrors = allowConsoleErrors ? [] : consoleErrors;
+  const evidenceScreenshot = evidenceScreenshotPath || screenshotPath;
+  const workspaceScreenshot = workspaceScreenshotPath || '';
   return {
     status: failures.length || blockingConsoleErrors.length ? 'failed' : 'ok',
     checkedAt,
     frontendUrl,
-    screenshotPath,
+    screenshotPath: evidenceScreenshot || workspaceScreenshot || screenshotPath,
+    screenshots: {
+      workspace: workspaceScreenshot,
+      evidence: evidenceScreenshot,
+    },
     summary: {
       total: checks.length,
       passed: checks.filter((check) => check.ok).length,
@@ -71,10 +79,14 @@ export function createSmokeSummary({
 }
 
 function parseArgs(argv) {
+  const defaultScreenshotDir = path.join(frontendRoot, '.studio-smoke');
+  const defaultEvidenceScreenshot = path.join(defaultScreenshotDir, 'dreamy-evidence.png');
   const args = {
     frontendUrl: process.env.STUDIO_FRONTEND_URL || DEFAULT_FRONTEND_URL,
     timeoutMs: DEFAULT_TIMEOUT_MS,
-    screenshotPath: path.join(frontendRoot, '.studio-smoke', 'dreamy.png'),
+    screenshotPath: defaultEvidenceScreenshot,
+    workspaceScreenshotPath: path.join(defaultScreenshotDir, 'dreamy-workspace.png'),
+    evidenceScreenshotPath: defaultEvidenceScreenshot,
     allowConsoleErrors: false,
     headed: false,
   };
@@ -90,9 +102,19 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg === '--screenshot') {
       args.screenshotPath = next;
+      args.evidenceScreenshotPath = next;
+      index += 1;
+    } else if (arg === '--workspace-screenshot') {
+      args.workspaceScreenshotPath = next;
+      index += 1;
+    } else if (arg === '--evidence-screenshot') {
+      args.evidenceScreenshotPath = next;
+      args.screenshotPath = next;
       index += 1;
     } else if (arg === '--no-screenshot') {
       args.screenshotPath = '';
+      args.workspaceScreenshotPath = '';
+      args.evidenceScreenshotPath = '';
     } else if (arg === '--allow-console-errors') {
       args.allowConsoleErrors = true;
     } else if (arg === '--headed') {
@@ -117,7 +139,9 @@ function usage() {
     'Options:',
     '  --url, --frontend-url <url>   Frontend dev/preview URL. Default: STUDIO_FRONTEND_URL or http://127.0.0.1:5174',
     '  --timeout-ms <ms>             Per-check timeout. Default: 15000',
-    '  --screenshot <path>           Screenshot path. Default: frontend/.studio-smoke/dreamy.png',
+    '  --screenshot <path>           Legacy alias for --evidence-screenshot',
+    '  --workspace-screenshot <path> Canvas workspace screenshot path',
+    '  --evidence-screenshot <path>  Delivery Evidence drawer screenshot path',
     '  --no-screenshot               Skip screenshot capture',
     '  --allow-console-errors        Record console errors without failing the smoke',
     '  --headed                      Launch a visible browser',
@@ -153,10 +177,27 @@ async function clickVisible(checks, page, id, label, locator, timeoutMs) {
   }
 }
 
+async function captureScreenshot(page, screenshotPath) {
+  if (!screenshotPath) return;
+  await fs.mkdir(path.dirname(screenshotPath), { recursive: true });
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+}
+
+function resolveScreenshotPaths(options) {
+  const evidenceScreenshotPath = options.evidenceScreenshotPath || options.screenshotPath || '';
+  const workspaceScreenshotPath = options.workspaceScreenshotPath || '';
+  return {
+    workspaceScreenshotPath,
+    evidenceScreenshotPath,
+    screenshotPath: evidenceScreenshotPath || workspaceScreenshotPath || options.screenshotPath || '',
+  };
+}
+
 export async function runStudioFrontendSmoke(options = {}) {
   const frontendUrl = options.frontendUrl || DEFAULT_FRONTEND_URL;
   const smokeUrl = buildStudioSmokeUrl(frontendUrl);
   const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
+  const screenshotPaths = resolveScreenshotPaths(options);
   const checks = [];
   const consoleErrors = [];
   const browser = await chromium.launch({ headless: !options.headed });
@@ -188,6 +229,7 @@ export async function runStudioFrontendSmoke(options = {}) {
     await checkVisible(checks, page, 'footer-evidence', 'Evidence footer control', page.getByRole('button', { name: /evidence/i }), timeoutMs);
     await checkVisible(checks, page, 'footer-plan-remaining', 'Plan remaining footer control', page.getByRole('button', { name: /plan remaining/i }), timeoutMs);
     await checkVisible(checks, page, 'footer-start-queue', 'Start queue footer control', page.getByRole('button', { name: /start queue/i }), timeoutMs);
+    await captureScreenshot(page, screenshotPaths.workspaceScreenshotPath);
 
     await clickVisible(checks, page, 'open-evidence-drawer', 'Open evidence drawer', page.getByRole('button', { name: /evidence/i }), timeoutMs);
     await checkVisible(checks, page, 'delivery-evidence', 'Delivery Evidence drawer', page.getByText('Delivery Evidence'), timeoutMs);
@@ -206,10 +248,7 @@ export async function runStudioFrontendSmoke(options = {}) {
       message: (await errorBoundary.count()) === 0 ? undefined : 'React error boundary is visible',
     });
 
-    if (options.screenshotPath) {
-      await fs.mkdir(path.dirname(options.screenshotPath), { recursive: true });
-      await page.screenshot({ path: options.screenshotPath, fullPage: true });
-    }
+    await captureScreenshot(page, screenshotPaths.evidenceScreenshotPath);
   } finally {
     await browser.close();
   }
@@ -218,7 +257,9 @@ export async function runStudioFrontendSmoke(options = {}) {
     frontendUrl: smokeUrl,
     checks,
     consoleErrors,
-    screenshotPath: options.screenshotPath || '',
+    screenshotPath: screenshotPaths.screenshotPath,
+    workspaceScreenshotPath: screenshotPaths.workspaceScreenshotPath,
+    evidenceScreenshotPath: screenshotPaths.evidenceScreenshotPath,
     allowConsoleErrors: options.allowConsoleErrors,
   });
 }

@@ -110,7 +110,8 @@ def build_delivery_plan(
     repo_root: Path,
     backend_port: int,
     frontend_port: int,
-    screenshot_path: Path,
+    workspace_screenshot_path: Path,
+    evidence_screenshot_path: Path,
     frontend_mode: str = DEFAULT_FRONTEND_MODE,
 ) -> DeliveryPlan:
     backend_url = f"http://127.0.0.1:{backend_port}"
@@ -166,8 +167,10 @@ def build_delivery_plan(
                 "run",
                 "smoke:studio",
                 "--",
-                "--screenshot",
-                str(screenshot_path),
+                "--workspace-screenshot",
+                str(workspace_screenshot_path),
+                "--evidence-screenshot",
+                str(evidence_screenshot_path),
             ],
             env={"STUDIO_FRONTEND_URL": frontend_url},
         ),
@@ -308,7 +311,8 @@ def create_delivery_summary(
     backend_port: int,
     frontend_port: int,
     artifacts_dir: Path,
-    screenshot_path: Path,
+    workspace_screenshot_path: Path,
+    evidence_screenshot_path: Path,
     report_path: Path,
     steps: list[StepResult],
     frontend_mode: str = DEFAULT_FRONTEND_MODE,
@@ -324,7 +328,9 @@ def create_delivery_summary(
         "artifacts": {
             "directory": str(artifacts_dir),
             "report": str(report_path),
-            "screenshot": str(screenshot_path),
+            "screenshot": str(evidence_screenshot_path),
+            "workspaceScreenshot": str(workspace_screenshot_path),
+            "evidenceScreenshot": str(evidence_screenshot_path),
             "backendLog": str(artifacts_dir / "backend.log"),
             "frontendLog": str(artifacts_dir / "frontend.log"),
         },
@@ -348,13 +354,23 @@ def run_delivery_check(args: argparse.Namespace) -> dict[str, Any]:
     backend_port = args.backend_port or find_free_port(DEFAULT_BACKEND_PORT)
     frontend_port = args.frontend_port or find_free_port(DEFAULT_FRONTEND_PORT)
     artifacts_dir = Path(args.artifacts_dir).resolve() if args.artifacts_dir else repo_root / ".studio-delivery-check"
-    screenshot_path = Path(args.screenshot).resolve() if args.screenshot else artifacts_dir / "dreamy.png"
+    workspace_screenshot_path = (
+        Path(args.workspace_screenshot).resolve()
+        if args.workspace_screenshot
+        else artifacts_dir / "dreamy-workspace.png"
+    )
+    evidence_screenshot_path = (
+        Path(args.evidence_screenshot or args.screenshot).resolve()
+        if args.evidence_screenshot or args.screenshot
+        else artifacts_dir / "dreamy-evidence.png"
+    )
     report_path = Path(args.report).resolve() if args.report else artifacts_dir / "summary.json"
     plan = build_delivery_plan(
         repo_root=repo_root,
         backend_port=backend_port,
         frontend_port=frontend_port,
-        screenshot_path=screenshot_path,
+        workspace_screenshot_path=workspace_screenshot_path,
+        evidence_screenshot_path=evidence_screenshot_path,
         frontend_mode=args.frontend_mode,
     )
 
@@ -366,7 +382,8 @@ def run_delivery_check(args: argparse.Namespace) -> dict[str, Any]:
             backend_port=backend_port,
             frontend_port=frontend_port,
             artifacts_dir=artifacts_dir,
-            screenshot_path=screenshot_path,
+            workspace_screenshot_path=workspace_screenshot_path,
+            evidence_screenshot_path=evidence_screenshot_path,
             report_path=report_path,
             steps=steps,
             frontend_mode=plan.frontend_mode,
@@ -417,7 +434,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--artifacts-dir", default="", help="Directory for logs, screenshots, and summary JSON.")
     parser.add_argument("--report", default="", help="Path for the delivery summary JSON.")
-    parser.add_argument("--screenshot", default="")
+    parser.add_argument("--screenshot", default="", help="Legacy alias for --evidence-screenshot.")
+    parser.add_argument("--workspace-screenshot", default="", help="Canvas workspace screenshot path.")
+    parser.add_argument("--evidence-screenshot", default="", help="Delivery Evidence drawer screenshot path.")
     parser.add_argument("--stop-on-failure", action="store_true")
     return parser.parse_args(argv)
 

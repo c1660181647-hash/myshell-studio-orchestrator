@@ -54,7 +54,8 @@ class StudioDeliveryCheckTest(unittest.TestCase):
             repo_root=repo_root,
             backend_port=19090,
             frontend_port=15174,
-            screenshot_path=repo_root / "tmp" / "dreamy.png",
+            workspace_screenshot_path=repo_root / "tmp" / "dreamy-workspace.png",
+            evidence_screenshot_path=repo_root / "tmp" / "dreamy-evidence.png",
         )
 
         self.assertEqual(plan.backend.cwd, repo_root / "orchestrator" / "backend")
@@ -71,6 +72,10 @@ class StudioDeliveryCheckTest(unittest.TestCase):
         self.assertIn("15174", plan.frontend.command)
         self.assertIn("studio_smoke", " ".join(plan.backend_smoke.command))
         self.assertIn("smoke:studio", plan.frontend_smoke.command)
+        self.assertIn("--workspace-screenshot", plan.frontend_smoke.command)
+        self.assertIn("/repo/tmp/dreamy-workspace.png", plan.frontend_smoke.command)
+        self.assertIn("--evidence-screenshot", plan.frontend_smoke.command)
+        self.assertIn("/repo/tmp/dreamy-evidence.png", plan.frontend_smoke.command)
 
     def test_dev_frontend_mode_skips_build_and_uses_vite_dev_server(self) -> None:
         repo_root = Path("/repo")
@@ -78,7 +83,8 @@ class StudioDeliveryCheckTest(unittest.TestCase):
             repo_root=repo_root,
             backend_port=19090,
             frontend_port=15174,
-            screenshot_path=repo_root / "tmp" / "dreamy.png",
+            workspace_screenshot_path=repo_root / "tmp" / "dreamy-workspace.png",
+            evidence_screenshot_path=repo_root / "tmp" / "dreamy-evidence.png",
             frontend_mode="dev",
         )
 
@@ -92,7 +98,8 @@ class StudioDeliveryCheckTest(unittest.TestCase):
             backend_port=19090,
             frontend_port=15174,
             artifacts_dir=Path("/repo/.studio-delivery-check"),
-            screenshot_path=Path("/repo/.studio-delivery-check/dreamy.png"),
+            workspace_screenshot_path=Path("/repo/.studio-delivery-check/dreamy-workspace.png"),
+            evidence_screenshot_path=Path("/repo/.studio-delivery-check/dreamy-evidence.png"),
             report_path=Path("/repo/.studio-delivery-check/summary.json"),
             steps=[
                 studio_delivery_check.StepResult(id="backend-smoke", ok=True, duration_seconds=1.2),
@@ -105,7 +112,9 @@ class StudioDeliveryCheckTest(unittest.TestCase):
         self.assertEqual(summary["summary"]["failed"], 1)
         self.assertEqual(summary["failures"][0]["id"], "frontend-smoke")
         self.assertEqual(summary["artifacts"]["report"], "/repo/.studio-delivery-check/summary.json")
-        self.assertEqual(summary["artifacts"]["screenshot"], "/repo/.studio-delivery-check/dreamy.png")
+        self.assertEqual(summary["artifacts"]["workspaceScreenshot"], "/repo/.studio-delivery-check/dreamy-workspace.png")
+        self.assertEqual(summary["artifacts"]["evidenceScreenshot"], "/repo/.studio-delivery-check/dreamy-evidence.png")
+        self.assertEqual(summary["artifacts"]["screenshot"], "/repo/.studio-delivery-check/dreamy-evidence.png")
 
     def test_write_delivery_summary_creates_report_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
