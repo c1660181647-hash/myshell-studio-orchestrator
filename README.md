@@ -160,6 +160,7 @@ Frontend:
 ```bash
 cd frontend
 npm run build
+npm run test:studio-smoke
 ```
 
 Backend:
@@ -177,6 +178,15 @@ python -m studio_smoke --base-url http://127.0.0.1:8090
 ```
 
 The smoke checks `/api/health`, `/api/pages`, `/api/agents`, readiness, dispatch matrix, coverage, and delivery audit. It fails if required MyShell pages or agents are missing, required readiness gates are blocked, or delivery artifacts are not exposed.
+
+Running frontend browser smoke after backend and frontend dev servers start:
+
+```bash
+cd frontend
+STUDIO_FRONTEND_URL=http://127.0.0.1:5174 npm run smoke:studio
+```
+
+The frontend smoke opens `/?test_route=dreamy`, forces Canvas mode, verifies the Dreamy Studio title, Layers & Agents, Inspector, footer queue controls, Evidence drawer, Page/Agent selectors, Page Registry, Dispatch Matrix, Dispatch Queue, and Audit JSON action, then captures a screenshot under `frontend/.studio-smoke/`.
 
 Cloud Run build from repository root:
 

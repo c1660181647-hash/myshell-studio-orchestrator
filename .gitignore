@@ -17,3 +17,4 @@ orchestrator/backend/myshell_cookies_embedded.json
 orchestrator/backend/chrome-data/
 orchestrator/backend/.studio/
 frontend/.wrangler/
+frontend/.studio-smoke/

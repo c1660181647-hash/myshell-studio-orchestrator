@@ -66,3 +66,12 @@ python -m studio_smoke --base-url http://127.0.0.1:8090
 ```
 
 The smoke validates health, page registry, agent registry, required readiness gates, dispatch matrix coverage, coverage summary, and delivery audit artifacts.
+
+For the full operator handoff surface, also start the frontend against this backend and run:
+
+```bash
+cd ../frontend
+STUDIO_FRONTEND_URL=http://127.0.0.1:5174 npm run smoke:studio
+```
+
+That browser smoke opens `/dreamy`, checks the Canvas workspace and Evidence drawer controls, and writes its screenshot to `frontend/.studio-smoke/`.
