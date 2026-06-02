@@ -1169,6 +1169,7 @@ def _handoff_gaps_and_actions(
                         "message": message,
                         "pageId": target.get("pageId"),
                         "sessionId": session_id,
+                        "uiUrl": _dispatch_session_ui_url(session_id, target_id),
                     }
                 )
     return gaps, actions

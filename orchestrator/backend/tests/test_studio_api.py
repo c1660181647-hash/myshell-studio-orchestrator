@@ -2074,12 +2074,15 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(handoff_gap_by_id[expected_gap_id]["message"], "operator saw broken target")
         handoff_action_by_id = {action["id"]: action for action in handoff_body["actions"]}
         expected_action_id = f"dispatch-target:inspect-gap:{session['sessionId']}:{error_target['id']}"
+        expected_ui_url = f"/dreamy?dispatch_session_id={session['sessionId']}&target_id=dispatch%3Aexplore"
         self.assertIn(expected_action_id, handoff_action_by_id)
         self.assertEqual(handoff_action_by_id[expected_action_id]["action"], "inspect-gap")
+        self.assertEqual(handoff_action_by_id[expected_action_id]["uiUrl"], expected_ui_url)
 
         self.assertEqual(audit.status_code, 200)
-        audit_action_ids = {action["id"] for action in audit.json()["actions"]}
-        self.assertIn(expected_action_id, audit_action_ids)
+        audit_action_by_id = {action["id"]: action for action in audit.json()["actions"]}
+        self.assertIn(expected_action_id, audit_action_by_id)
+        self.assertEqual(audit_action_by_id[expected_action_id]["uiUrl"], expected_ui_url)
 
         self.assertEqual(resolved_action.status_code, 200)
         resolved_body = resolved_action.json()

@@ -3,6 +3,7 @@ import {
   type StudioActionResolveResult,
   type StudioDispatchSession,
   type StudioHandoffArtifact,
+  type StudioHandoffAction,
 } from './dreamyUnified';
 
 async function dispatchSessionRestoreContract(): Promise<StudioDispatchSession> {
@@ -35,3 +36,17 @@ const dispatchTargetActionContract: Pick<StudioActionResolveResult, 'next'> = {
 };
 
 void dispatchTargetActionContract;
+
+const dispatchTargetHandoffActionContract: StudioHandoffAction = {
+  id: 'dispatch-target:inspect-gap:dispatch_session_contract:dispatch:explore',
+  action: 'inspect-gap',
+  kind: 'dispatch_target',
+  targetId: 'dispatch:explore',
+  targetName: 'Explore',
+  status: 'error',
+  reason: 'error',
+  sessionId: 'dispatch_session_contract',
+  uiUrl: '/dreamy?dispatch_session_id=dispatch_session_contract&target_id=dispatch%3Aexplore',
+};
+
+void dispatchTargetHandoffActionContract;

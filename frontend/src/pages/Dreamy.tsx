@@ -602,6 +602,12 @@ function artifactHref(artifact: StudioHandoffArtifact): string {
   return getStudioRootEndpoint(artifact.url || artifact.endpoint);
 }
 
+function actionUiHref(action: StudioHandoffAction): string {
+  if (!action.uiUrl) return '';
+  if (/^https?:\/\//i.test(action.uiUrl)) return action.uiUrl;
+  return action.uiUrl.startsWith('/') ? action.uiUrl : `/${action.uiUrl}`;
+}
+
 function readDispatchSessionRestoreParams(): { sessionId?: string; targetId?: string } {
   if (typeof window === 'undefined') return {};
   try {
@@ -716,23 +722,41 @@ function StudioDeliveryAuditStrip({
       )}
       {visibleActions.map((action) => {
         const resolving = resolvingActionId === action.id;
+        const uiHref = actionUiHref(action);
         return (
-          <button
-            type="button"
+          <span
             key={action.id}
-            title={action.message || action.reason || action.action}
-            disabled={Boolean(resolvingActionId) || resolvingBatch}
-            onClick={() => onResolveAction(action)}
-            className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2 disabled:opacity-60"
+            className="inline-flex h-6 shrink-0 items-center gap-1"
           >
-            {resolving ? (
-              <Loader2 size={12} className="animate-spin text-dreamy-brand-hot-v2" />
-            ) : (
-              <GitBranch size={12} className="text-dreamy-brand-hot-v2" />
+            <button
+              type="button"
+              title={action.message || action.reason || action.action}
+              disabled={Boolean(resolvingActionId) || resolvingBatch}
+              onClick={() => onResolveAction(action)}
+              className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2 disabled:opacity-60"
+            >
+              {resolving ? (
+                <Loader2 size={12} className="animate-spin text-dreamy-brand-hot-v2" />
+              ) : (
+                <GitBranch size={12} className="text-dreamy-brand-hot-v2" />
+              )}
+              <span className="max-w-[130px] truncate">{action.targetName || action.targetId || action.kind}</span>
+              <span className="text-Cr-text-subtlest-v2">{action.action}</span>
+            </button>
+            {uiHref && (
+              <a
+                data-testid="studio-action-ui-link"
+                href={uiHref}
+                target="_blank"
+                rel="noreferrer"
+                title={action.uiUrl}
+                className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-1.5 text-[11px] font-semibold text-Cr-text-subtler-v2 hover:bg-Cr-beta-white-8-v2"
+              >
+                <ExternalLink size={12} className="text-Cr-text-subtlest-v2" />
+                Open
+              </a>
             )}
-            <span className="max-w-[130px] truncate">{action.targetName || action.targetId || action.kind}</span>
-            <span className="text-Cr-text-subtlest-v2">{action.action}</span>
-          </button>
+          </span>
         );
       })}
       {gaps.slice(0, 5).map((item) => {
@@ -936,17 +960,37 @@ function StudioHandoffSnapshotStrip({
           <span className="text-Cr-text-subtlest-v2">{gap.reason}</span>
         </span>
       ))}
-      {visibleActions.map((action) => (
-        <span
-          key={action.id}
-          title={action.message || action.reason || action.action}
-          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2"
-        >
-          <GitBranch size={12} className="text-dreamy-brand-hot-v2" />
-          <span className="max-w-[130px] truncate">{action.targetName || action.targetId || action.kind}</span>
-          <span className="text-Cr-text-subtlest-v2">{action.action}</span>
-        </span>
-      ))}
+      {visibleActions.map((action) => {
+        const uiHref = actionUiHref(action);
+        return (
+          <span
+            key={action.id}
+            className="inline-flex h-6 shrink-0 items-center gap-1"
+          >
+            <span
+              title={action.message || action.reason || action.action}
+              className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-2 text-[11px] font-semibold text-Cr-text-subtler-v2"
+            >
+              <GitBranch size={12} className="text-dreamy-brand-hot-v2" />
+              <span className="max-w-[130px] truncate">{action.targetName || action.targetId || action.kind}</span>
+              <span className="text-Cr-text-subtlest-v2">{action.action}</span>
+            </span>
+            {uiHref && (
+              <a
+                data-testid="studio-action-ui-link"
+                href={uiHref}
+                target="_blank"
+                rel="noreferrer"
+                title={action.uiUrl}
+                className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-1.5 text-[11px] font-semibold text-Cr-text-subtler-v2 hover:bg-Cr-beta-white-8-v2"
+              >
+                <ExternalLink size={12} className="text-Cr-text-subtlest-v2" />
+                Open
+              </a>
+            )}
+          </span>
+        );
+      })}
     </div>
   );
 }

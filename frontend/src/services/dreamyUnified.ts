@@ -371,6 +371,7 @@ export interface StudioHandoffAction {
   segmentId?: string;
   jobId?: string;
   sessionId?: string;
+  uiUrl?: string;
 }
 
 export interface StudioHandoffArtifact {
