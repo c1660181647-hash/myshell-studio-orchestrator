@@ -667,6 +667,67 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertTrue(any("generate|create|start" in expression for expression in eval_expressions))
 
+    def test_bridge_worker_rejects_stale_art_media_after_generation(self) -> None:
+        import bridge_worker
+
+        old_url = "https://www.myshellstatic.com/image/chat/embed_obj_old.png"
+        image_reads = 0
+
+        class FakeResponse:
+            def json(self) -> list[dict]:
+                return [{"url": "https://art.myshell.ai", "webSocketDebuggerUrl": "ws://fake"}]
+
+        class FakeAsyncClient:
+            async def get(self, url: str) -> FakeResponse:
+                return FakeResponse()
+
+        class FakeWebSocket:
+            def __init__(self) -> None:
+                self.last_message: dict = {}
+
+            async def send(self, message: str) -> None:
+                self.last_message = json.loads(message)
+
+            async def recv(self) -> str:
+                nonlocal image_reads
+                message_id = self.last_message["id"]
+                method = self.last_message["method"]
+                if method == "Runtime.evaluate":
+                    expression = self.last_message.get("params", {}).get("expression", "")
+                    if "generate|create|start" in expression:
+                        value = "fb"
+                    elif "Your image is ready" in expression:
+                        value = json.dumps({"pct": None, "cancel": False, "ready": True})
+                    elif "querySelectorAll('img')" in expression:
+                        image_reads += 1
+                        value = json.dumps([old_url])
+                    else:
+                        value = ""
+                    return json.dumps({"id": message_id, "result": {"result": {"value": value}}})
+                return json.dumps({"id": message_id, "result": {}})
+
+        class FakeConnect:
+            async def __aenter__(self) -> FakeWebSocket:
+                return FakeWebSocket()
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                return None
+
+        async def fake_sleep(_seconds: float) -> None:
+            return None
+
+        with (
+            patch.object(bridge_worker.httpx, "AsyncClient", return_value=FakeAsyncClient()),
+            patch.object(bridge_worker.websockets, "connect", lambda *args, **kwargs: FakeConnect()),
+            patch.object(bridge_worker.asyncio, "sleep", fake_sleep),
+        ):
+            result = asyncio.run(bridge_worker.generate("seedream-multi-chart", "", "", "cinematic skyline"))
+
+        self.assertGreaterEqual(image_reads, 2)
+        self.assertEqual(result["status"], "error")
+        self.assertNotEqual(result.get("output_url"), old_url)
+        self.assertIn("fresh", result["message"].lower())
+
     def test_studio_readiness_reports_delivery_gates(self) -> None:
         readiness = self.client.get("/api/studio/readiness")
 

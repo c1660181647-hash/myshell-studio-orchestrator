@@ -170,25 +170,7 @@ async def generate(bot_slug, gen_button, image_b64, prompt=""):
                             url = f"https://www.myshellstatic.com/image/chat/{parts[1]}"
                     return {"status": "done", "output_url": url}
                 
-                # If no new images found, try to get the first large one (fallback)
-                result2 = await ev("""
-                    JSON.stringify(
-                        Array.from(document.querySelectorAll('img'))
-                            .filter(i => i.src.includes('embed_obj') && i.naturalWidth > 300)
-                            .map(i => i.src)
-                            .slice(0, 1)
-                    )
-                """)
-                fallback = json.loads(result2) if result2 else []
-                if fallback:
-                    url = fallback[0]
-                    if '/cdn-cgi/image/' in url:
-                        parts = url.split('/image/chat/')
-                        if len(parts) > 1:
-                            url = f"https://www.myshellstatic.com/image/chat/{parts[1]}"
-                    return {"status": "done", "output_url": url}
-                
-                return {"status": "error", "message": "Generation completed but no result image found"}
+                return {"status": "error", "message": "Generation completed but no fresh result image found"}
         
         return {"status": "error", "message": "Generation timed out (660s)"}
 
