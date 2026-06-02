@@ -94,12 +94,34 @@ test('runStudioFrontendSmoke records the delivery command center surface', () =>
 
 test('runStudioFrontendSmoke records starter presets and direct preset generation', () => {
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-presets'));
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('ai-recommendation-agent'));
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('ai-recommendation-run'));
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-visual-recommendations'));
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-bot-preview-image'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-preset-direct-generate'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-preset-prompt-ready'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-preset-result-visible'));
   assert.match(runStudioFrontendSmoke.toString(), /starter-presets/);
+  assert.match(runStudioFrontendSmoke.toString(), /ai-recommendation-agent/);
+  assert.match(runStudioFrontendSmoke.toString(), /ai-recommendation-run/);
+  assert.match(runStudioFrontendSmoke.toString(), /starter-visual-recommendations/);
+  assert.match(runStudioFrontendSmoke.toString(), /starter-bot-preview-image/);
   assert.match(runStudioFrontendSmoke.toString(), /starter-preset-direct-generate/);
   assert.match(runStudioFrontendSmoke.toString(), /starter-preset-prompt-ready/);
   assert.match(runStudioFrontendSmoke.toString(), /starter-preset-result-visible/);
   assert.doesNotMatch(runStudioFrontendSmoke.toString(), /getByDisplayValue/);
+});
+
+test('runStudioFrontendSmoke records canvas flow and segment export controls', () => {
+  const newWorkflowChecks = [
+    'preview-segment-rerun',
+    'preview-export-all-segments',
+    'video-fast-status',
+    'canvas-auto-flow-presets',
+    'canvas-material-flow-ready',
+  ];
+  for (const id of newWorkflowChecks) {
+    assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes(id), `${id} should be required`);
+    assert.match(runStudioFrontendSmoke.toString(), new RegExp(id));
+  }
 });

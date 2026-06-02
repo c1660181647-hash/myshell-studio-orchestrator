@@ -17,11 +17,20 @@ const currentFile = fileURLToPath(import.meta.url);
 
 export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'studio-title',
+  'ai-recommendation-agent',
+  'ai-recommendation-run',
   'starter-presets',
+  'starter-visual-recommendations',
+  'starter-bot-preview-image',
   'starter-preset-direct-generate',
   'starter-preset-prompt-ready',
   'starter-preset-result-visible',
+  'preview-segment-rerun',
+  'preview-export-all-segments',
+  'video-fast-status',
   'canvas-mode',
+  'canvas-auto-flow-presets',
+  'canvas-material-flow-ready',
   'layers-panel',
   'inspector-panel',
   'canvas-generate',
@@ -310,7 +319,39 @@ export async function runStudioFrontendSmoke(options = {}) {
     await page.waitForLoadState('networkidle', { timeout: Math.min(timeoutMs, 5000) }).catch(() => undefined);
 
     await checkVisible(checks, page, 'studio-title', 'Dreamy Studio title', page.getByText('Dreamy Studio').first(), timeoutMs);
+    await checkVisible(
+      checks,
+      page,
+      'ai-recommendation-agent',
+      'AI recommendation agent',
+      page.getByTestId('ai-recommendation-agent'),
+      timeoutMs,
+    );
+    await checkEnabled(
+      checks,
+      page,
+      'ai-recommendation-run',
+      'AI recommendation can run directly',
+      page.getByTestId('ai-recommendation-run'),
+      timeoutMs,
+    );
     await checkVisible(checks, page, 'starter-presets', 'Starter presets', page.getByTestId('starter-presets'), timeoutMs);
+    await checkVisible(
+      checks,
+      page,
+      'starter-visual-recommendations',
+      'Visual bot recommendations',
+      page.getByTestId('starter-visual-recommendations'),
+      timeoutMs,
+    );
+    await checkVisible(
+      checks,
+      page,
+      'starter-bot-preview-image',
+      'Starter bot preview images',
+      page.getByTestId('starter-bot-preview-image').first(),
+      timeoutMs,
+    );
     await clickEnabled(
       checks,
       page,
@@ -336,6 +377,30 @@ export async function runStudioFrontendSmoke(options = {}) {
       chatLog.getByText(/Segment is running in Dreamy|Segment is ready|client execution needs attention|Dreamy Miniapp needs Telegram auth/i),
       timeoutMs,
     );
+    await checkVisible(
+      checks,
+      page,
+      'preview-segment-rerun',
+      'Single segment rerun control',
+      page.getByTestId('preview-segment-rerun'),
+      timeoutMs,
+    );
+    await checkVisible(
+      checks,
+      page,
+      'preview-export-all-segments',
+      'Export all segments control',
+      page.getByTestId('preview-export-all-segments'),
+      timeoutMs,
+    );
+    await checkVisible(
+      checks,
+      page,
+      'video-fast-status',
+      'Fast video handoff status',
+      page.getByTestId('video-fast-status'),
+      timeoutMs,
+    );
 
     const canvasButton = page.getByRole('button', { name: /switch studio mode to canvas/i });
     if (await canvasButton.count()) {
@@ -343,6 +408,22 @@ export async function runStudioFrontendSmoke(options = {}) {
     }
 
     await checkVisible(checks, page, 'canvas-mode', 'Canvas mode indicator', page.getByText('Canvas').first(), timeoutMs);
+    await checkVisible(
+      checks,
+      page,
+      'canvas-auto-flow-presets',
+      'Canvas auto flow presets',
+      page.getByTestId('canvas-auto-flow-presets'),
+      timeoutMs,
+    );
+    await checkVisible(
+      checks,
+      page,
+      'canvas-material-flow-ready',
+      'Canvas material flow ready state',
+      page.getByTestId('canvas-material-flow-ready'),
+      timeoutMs,
+    );
     await checkVisible(checks, page, 'layers-panel', 'Layers & Agents panel', page.getByText('Layers & Agents'), timeoutMs);
     await checkVisible(checks, page, 'inspector-panel', 'Inspector panel', page.getByText('Inspector'), timeoutMs);
     await checkVisible(checks, page, 'canvas-generate', 'Canvas generate control', page.getByRole('button', { name: /generate/i }), timeoutMs);

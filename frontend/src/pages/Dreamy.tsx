@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import exampleGood from '../assets/example-good.png';
 import exampleMultiple from '../assets/example-multiple.png';
+import exampleSmall from '../assets/example-small.png';
 import { useEnergy } from '../contexts/EnergyContext';
 import { fetchGenerateResult, hasTelegramInitData } from '../services/api';
 import {
@@ -194,6 +195,21 @@ interface StudioStarterPreset {
   pageId: StudioApi | string;
   pageName: string;
   agentId: string;
+  recommendation: string;
+  visualUrl: string;
+  workflow: string;
+  steps: string[];
+  estimatedWaitSeconds: number;
+}
+
+interface CanvasFlowPreset {
+  id: string;
+  title: string;
+  summary: string;
+  action: StudioAction;
+  prompt: string;
+  nodes: CanvasNode[];
+  connections: CanvasConnection[];
 }
 
 const DEFAULT_DREAMY_SLUG = 'ai-porn-generator';
@@ -207,6 +223,11 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
     pageId: 'dreamy-miniapp',
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
+    recommendation: 'Best first move for a strong source image before video.',
+    visualUrl: exampleGood,
+    workflow: 'Text to image',
+    steps: ['Prompt', 'Image source', 'Timeline slot'],
+    estimatedWaitSeconds: 10,
   },
   {
     id: 'character-scene',
@@ -215,6 +236,11 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
     pageId: 'dreamy-miniapp',
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
+    recommendation: 'Good when the next step is image-to-video motion.',
+    visualUrl: exampleMultiple,
+    workflow: 'Text to image to video',
+    steps: ['Prompt', 'Character image', 'Video segment'],
+    estimatedWaitSeconds: 12,
   },
   {
     id: 'style-poster',
@@ -223,6 +249,114 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
     pageId: 'dreamy-miniapp',
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
+    recommendation: 'Useful for restyle passes and cover frames.',
+    visualUrl: exampleSmall,
+    workflow: 'Reference image to style',
+    steps: ['Prompt', 'Poster frame', 'Restyle'],
+    estimatedWaitSeconds: 8,
+  },
+];
+
+const CANVAS_FLOW_PRESETS: CanvasFlowPreset[] = [
+  {
+    id: 'text-image-video',
+    title: 'Text -> Image -> Video',
+    summary: 'Create a source frame first, animate it, then stage the clip on the timeline.',
+    action: 'generate',
+    prompt: 'Build a neon rainy city source image, then turn the selected image into a five second cinematic video segment.',
+    nodes: [
+      {
+        id: 'flow-text-image',
+        kind: 'agent',
+        title: 'Flow 01 Text to Image',
+        subtitle: 'Generate the source frame from the user prompt',
+        x: 260,
+        y: 178,
+        width: 250,
+        height: 112,
+        status: 'ready',
+        action: 'generate',
+        prompt: 'Generate the strongest source image for this scene.',
+        botName: 'Dreamy Image Agent',
+        botSlug: DEFAULT_DREAMY_SLUG,
+      },
+      {
+        id: 'flow-image-video',
+        kind: 'agent',
+        title: 'Flow 02 Image to Video',
+        subtitle: 'Animate the selected source image into a short clip',
+        x: 580,
+        y: 178,
+        width: 260,
+        height: 112,
+        status: 'queued',
+        action: 'extend',
+        prompt: 'Use the selected image as the source and create a five second motion shot.',
+        botName: 'Video Agent',
+        botSlug: 'image-to-video-generator',
+      },
+      {
+        id: 'flow-timeline-video',
+        kind: 'segment',
+        title: 'Flow 03 Video Segment',
+        subtitle: 'Review, rerun, or extend the produced video clip',
+        x: 900,
+        y: 178,
+        width: 260,
+        height: 124,
+        status: 'idle',
+        action: 'extend',
+        prompt: 'Extend this shot into the next clip with matching lighting and character continuity.',
+        botName: 'Dreamy Video Segment',
+        botSlug: 'sora-video-generator',
+      },
+    ],
+    connections: [
+      { id: 'flow-root-to-text-image', from: 'prompt-root', to: 'flow-text-image', label: 'prompt' },
+      { id: 'flow-text-image-to-image-video', from: 'flow-text-image', to: 'flow-image-video', label: 'source image' },
+      { id: 'flow-image-video-to-timeline-video', from: 'flow-image-video', to: 'flow-timeline-video', label: 'motion' },
+      { id: 'flow-timeline-video-to-output', from: 'flow-timeline-video', to: 'timeline-output', label: 'sequence' },
+    ],
+  },
+  {
+    id: 'segment-rerun-long-video',
+    title: 'Segment Rerun -> Long Video',
+    summary: 'Regenerate weak clips, keep accepted clips, then export the whole sequence.',
+    action: 'retry-agent',
+    prompt: 'Rerun only the selected weak segment with the same character and lighting, then keep the timeline ready for a long video export.',
+    nodes: [
+      {
+        id: 'flow-rerun-segment',
+        kind: 'agent',
+        title: 'Flow 01 Rerun Segment',
+        subtitle: 'Repeat production for the selected clip without touching accepted clips',
+        x: 274,
+        y: 350,
+        width: 276,
+        height: 112,
+        status: 'ready',
+        action: 'retry-agent',
+        prompt: 'Rerun the selected clip and preserve the surrounding timeline.',
+        botName: 'Segment Retry Agent',
+        botSlug: DEFAULT_DREAMY_SLUG,
+      },
+      {
+        id: 'flow-export-long',
+        kind: 'output',
+        title: 'Flow 02 Long Video Export',
+        subtitle: 'Collect every accepted segment into one export manifest',
+        x: 646,
+        y: 350,
+        width: 306,
+        height: 112,
+        status: 'ready',
+      },
+    ],
+    connections: [
+      { id: 'flow-root-to-rerun-segment', from: 'prompt-root', to: 'flow-rerun-segment', label: 'selected clip' },
+      { id: 'flow-rerun-segment-to-export-long', from: 'flow-rerun-segment', to: 'flow-export-long', label: 'approved' },
+      { id: 'flow-export-long-to-output', from: 'flow-export-long', to: 'timeline-output', label: 'export all' },
+    ],
   },
 ];
 const QUEUE_STATUS_OPTIONS: Array<StudioStatus | 'all'> = [
@@ -348,8 +482,17 @@ function defaultAgentIdForPage(page?: StudioPageAdapter | null): string {
   return DEFAULT_STUDIO_AGENT_ID;
 }
 
+function resolveStudioDisplayAssetUrl(url?: string): string {
+  if (!url) return '';
+  if (url.startsWith('/gallery/video')) return exampleMultiple;
+  if (url.startsWith('/gallery/style')) return exampleSmall;
+  if (url.startsWith('/gallery/')) return exampleGood;
+  if (url.startsWith('/assets/') || url.startsWith('/src/')) return url;
+  return resolveStudioAssetUrl(url);
+}
+
 function getSegmentMedia(segment?: StudioSegment | null): string {
-  return resolveStudioAssetUrl(segment?.url || segment?.posterUrl);
+  return resolveStudioDisplayAssetUrl(segment?.url || segment?.posterUrl);
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -1919,6 +2062,7 @@ function PreviewPanel({
   onCancelJob,
   onRetryJob,
   onAction,
+  onExportAllSegments,
   submitting,
 }: {
   project: StudioProject | null;
@@ -1931,6 +2075,7 @@ function PreviewPanel({
   onCancelJob: (jobId: string) => void;
   onRetryJob: (jobId: string) => void;
   onAction: (action: StudioAction, prompt?: string, source?: StudioSegment | null) => void;
+  onExportAllSegments: () => void;
   submitting: boolean;
 }) {
   const media = getSegmentMedia(selectedSegment);
@@ -1970,8 +2115,8 @@ function PreviewPanel({
         <div className="relative flex min-h-[260px] flex-1 items-center justify-center overflow-hidden rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2">
           {selectedSegment?.type === 'video' && selectedSegment.url ? (
             <video
-              src={resolveStudioAssetUrl(selectedSegment.url)}
-              poster={resolveStudioAssetUrl(selectedSegment.posterUrl)}
+              src={resolveStudioDisplayAssetUrl(selectedSegment.url)}
+              poster={resolveStudioDisplayAssetUrl(selectedSegment.posterUrl)}
               className="h-full w-full object-contain"
               controls
               playsInline
@@ -2010,14 +2155,48 @@ function PreviewPanel({
               {segments.length ? `${segments.length * 5}s` : '0s'}
             </span>
           </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              data-testid="preview-segment-rerun"
+              disabled={!selectedSegment || submitting}
+              onClick={() => onAction('retry-agent', 'Rerun this selected segment with stronger continuity and keep it in the timeline.', selectedSegment)}
+              className="inline-flex h-11 items-center gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-3 text-xs font-semibold text-Cr-text-default-v2 disabled:text-Cr-text-subtlest-v2"
+            >
+              <RefreshCcw size={14} />
+              Rerun segment
+            </button>
+            <button
+              type="button"
+              disabled={!selectedSegment || submitting}
+              onClick={() => onAction('extend', 'Extend this into the next shot', selectedSegment)}
+              className="inline-flex h-11 items-center gap-2 rounded-lg-v2 bg-dreamy-brand-hot-v2 px-3 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+            >
+              <Clapperboard size={14} />
+              Extend
+            </button>
+          </div>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+          <div
+            data-testid="video-fast-status"
+            className="flex min-w-0 items-center gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-3 py-2 text-xs text-Cr-text-subtle-v2"
+          >
+            <Clock3 size={14} className="shrink-0 text-dreamy-brand-hot-v2" />
+            <span className="min-w-0 truncate">
+              {submitting ? 'Fast handoff active: queued locally while media arrives.' : 'Fast handoff ready for short video segments.'}
+            </span>
+          </div>
           <button
             type="button"
-            disabled={!selectedSegment || submitting}
-            onClick={() => onAction('extend', 'Extend this into the next shot', selectedSegment)}
-            className="inline-flex h-11 items-center gap-2 rounded-lg-v2 bg-dreamy-brand-hot-v2 px-3 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+            data-testid="preview-export-all-segments"
+            disabled={!segments.length}
+            onClick={onExportAllSegments}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-3 text-xs font-semibold text-Cr-text-default-v2 disabled:text-Cr-text-subtlest-v2"
           >
-            <Clapperboard size={14} />
-            Extend
+            <Download size={14} />
+            Export all segments
           </button>
         </div>
 
@@ -2147,12 +2326,15 @@ function CanvasWorkspace({
   const [initialView] = useState(getInitialCanvasView);
   const [zoom, setZoom] = useState(initialView.zoom);
   const [pan, setPan] = useState(initialView.pan);
-  const [selectedNodeId, setSelectedNodeId] = useState('prompt-root');
+  const [activeFlowPresetId, setActiveFlowPresetId] = useState(CANVAS_FLOW_PRESETS[0]?.id || '');
+  const [selectedNodeId, setSelectedNodeId] = useState(CANVAS_FLOW_PRESETS[0]?.nodes[0]?.id || 'prompt-root');
   const [canvasAction, setCanvasAction] = useState<StudioAction>('generate');
   const [canvasCommand, setCanvasCommand] = useState('');
   const [positionOverrides, setPositionOverrides] = useState<Record<string, { x: number; y: number }>>({});
-  const [customNodes, setCustomNodes] = useState<CanvasNode[]>([]);
-  const [customConnections, setCustomConnections] = useState<CanvasConnection[]>([]);
+  const [customNodes, setCustomNodes] = useState<CanvasNode[]>(() => CANVAS_FLOW_PRESETS[0]?.nodes.map((node) => ({ ...node })) || []);
+  const [customConnections, setCustomConnections] = useState<CanvasConnection[]>(
+    () => CANVAS_FLOW_PRESETS[0]?.connections.map((connection) => ({ ...connection })) || [],
+  );
   const [copied, setCopied] = useState(false);
   const [dragState, setDragState] = useState<{
     id: string;
@@ -2180,6 +2362,7 @@ function CanvasWorkspace({
     ? project?.segments.find((segment) => segment.id === selectedNode.segmentId) || null
     : selectedSegment || null;
   const isCustomSelected = Boolean(selectedNode && customNodes.some((node) => node.id === selectedNode.id));
+  const activeFlowPreset = CANVAS_FLOW_PRESETS.find((preset) => preset.id === activeFlowPresetId) || CANVAS_FLOW_PRESETS[0];
 
   useEffect(() => {
     if (nodes.length && !nodes.some((node) => node.id === selectedNodeId)) {
@@ -2297,6 +2480,16 @@ function CanvasWorkspace({
       setCustomConnections((prev) => [...prev, { id: `${anchor.id}-to-${id}`, from: anchor.id, to: id, label: 'manual' }]);
     }
     setSelectedNodeId(id);
+  };
+
+  const applyFlowPreset = (preset: CanvasFlowPreset) => {
+    setActiveFlowPresetId(preset.id);
+    setCustomNodes(preset.nodes.map((node) => ({ ...node })));
+    setCustomConnections(preset.connections.map((connection) => ({ ...connection })));
+    setCanvasAction(preset.action);
+    setCanvasCommand(preset.prompt);
+    setSelectedNodeId(preset.nodes[0]?.id || 'prompt-root');
+    setPositionOverrides({});
   };
 
   const duplicateSelected = () => {
@@ -2591,13 +2784,39 @@ function CanvasWorkspace({
             </div>
           </div>
 
-          <div className="absolute bottom-6 left-5 right-5 z-20 flex flex-wrap items-center gap-2 md:left-[70px] md:right-[70px]">
+          <div className="absolute bottom-6 left-5 right-5 z-20 grid gap-2 md:left-[70px] md:right-[70px]">
+            <div
+              data-testid="canvas-auto-flow-presets"
+              className="flex flex-wrap items-center gap-2 rounded-md-v2 border border-white/10 bg-[#171821]/95 p-2 shadow-xl"
+            >
+              <div data-testid="canvas-material-flow-ready" className="mr-1 inline-flex min-w-0 items-center gap-2 rounded-md-v2 bg-white/[0.06] px-2 py-1 text-[11px] font-semibold text-Cr-text-subtle-v2">
+                <Link2 size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
+                <span className="truncate">{activeFlowPreset?.summary || 'Material flow ready'}</span>
+              </div>
+              {CANVAS_FLOW_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => applyFlowPreset(preset)}
+                  aria-pressed={activeFlowPresetId === preset.id}
+                  className={`inline-flex h-8 items-center gap-1.5 rounded-md-v2 px-2 text-[11px] font-semibold ${
+                    activeFlowPresetId === preset.id
+                      ? 'bg-dreamy-brand-hot-v2 text-white'
+                      : 'bg-white/[0.06] text-Cr-text-subtler-v2 active:bg-white/10'
+                  }`}
+                >
+                  <Wand2 size={13} />
+                  {preset.title}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
             <div className="flex min-w-[260px] flex-1 items-center gap-2 rounded-md-v2 border border-white/10 bg-[#171821]/95 p-2 shadow-xl">
               <input
                 value={canvasCommand}
                 onChange={(event) => setCanvasCommand(event.target.value)}
                 className="min-w-0 flex-1 bg-transparent px-2 text-sm outline-none placeholder:text-Cr-text-subtlest-v2"
-                placeholder="Describe what you want to create, extend, or restyle..."
+                placeholder="Modify this material flow: text to image, image to video, extend, or restyle..."
               />
               <button
                 type="button"
@@ -2619,6 +2838,7 @@ function CanvasWorkspace({
               <button type="button" onClick={() => setZoom((value) => clamp(value + 0.08, 0.48, 1.4))} className="flex h-8 w-8 items-center justify-center rounded-md-v2 active:bg-white/[0.08]" aria-label="Zoom in">
                 <ZoomIn size={15} />
               </button>
+            </div>
             </div>
           </div>
         </div>
@@ -2719,6 +2939,60 @@ function CanvasWorkspace({
   );
 }
 
+function RecommendationAgentPanel({
+  preset,
+  submitting,
+  onRunPreset,
+}: {
+  preset?: StudioStarterPreset;
+  submitting: boolean;
+  onRunPreset?: (preset: StudioStarterPreset) => void;
+}) {
+  if (!preset) return null;
+
+  return (
+    <div
+      data-testid="ai-recommendation-agent"
+      className="mb-3 grid gap-3 rounded-lg-v2 border border-dreamy-brand-hot-v2/35 bg-dreamy-brand-hot-v2/10 p-3 sm:grid-cols-[112px_minmax(0,1fr)_auto]"
+    >
+      <div className="relative h-[84px] overflow-hidden rounded-md-v2 border border-white/10 bg-black/30">
+        <img src={preset.visualUrl} alt="" className="h-full w-full object-cover" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+        <div className="absolute -left-6 top-0 h-full w-12 rotate-12 animate-pulse bg-white/20 blur-sm" />
+        <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+          <Bot size={10} />
+          AI pick
+        </div>
+      </div>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold text-Cr-text-default-v2">{preset.title}</span>
+          <Pill tone="hot">{preset.workflow}</Pill>
+          <Pill>{`${preset.estimatedWaitSeconds}s target`}</Pill>
+        </div>
+        <div className="mt-1 text-xs leading-5 text-Cr-text-subtle-v2">{preset.recommendation}</div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {preset.steps.map((step) => (
+            <span key={step} className="rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 py-1 text-[10px] font-semibold text-Cr-text-subtler-v2">
+              {step}
+            </span>
+          ))}
+        </div>
+      </div>
+      <button
+        type="button"
+        data-testid="ai-recommendation-run"
+        disabled={submitting}
+        onClick={() => onRunPreset?.(preset)}
+        className="inline-flex h-9 items-center justify-center gap-2 rounded-md-v2 bg-dreamy-brand-hot-v2 px-3 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2 sm:self-center"
+      >
+        <Sparkles size={14} />
+        Run AI pick
+      </button>
+    </div>
+  );
+}
+
 function Composer({
   mode,
   prompt,
@@ -2755,6 +3029,7 @@ function Composer({
   onStop: () => void;
 }) {
   const visiblePresets = showStarterPresets ? starterPresets || [] : [];
+  const recommendedPreset = visiblePresets[0];
 
   return (
     <div className="shrink-0 border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-3">
@@ -2763,13 +3038,14 @@ function Composer({
         <Pill>{mode === 'canvas' ? 'Canvas chain' : 'Player loop'}</Pill>
       </div>
       <div className="rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-3">
+        <RecommendationAgentPanel preset={recommendedPreset} submitting={submitting} onRunPreset={onRunPreset} />
         {!!visiblePresets.length && (
           <div data-testid="starter-presets" className="mb-3 grid gap-2">
             <div className="flex items-center gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
               <Sparkles size={13} className="text-dreamy-brand-hot-v2" />
-              Start Presets
+              Bot previews
             </div>
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div data-testid="starter-visual-recommendations" className="grid gap-2 sm:grid-cols-3">
               {visiblePresets.map((preset) => (
                 <button
                   key={preset.id}
@@ -2779,22 +3055,37 @@ function Composer({
                   aria-pressed={selectedStarterPresetId === preset.id}
                   disabled={submitting}
                   onClick={() => onRunPreset?.(preset)}
-                  className={`grid min-h-[92px] gap-2 rounded-lg-v2 border p-3 text-left transition-colors active:bg-Cr-beta-white-8-v2 disabled:opacity-50 ${
+                  className={`group grid min-h-[148px] overflow-hidden rounded-lg-v2 border text-left transition-colors active:bg-Cr-beta-white-8-v2 disabled:opacity-50 ${
                     selectedStarterPresetId === preset.id
                       ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
                       : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2'
                   }`}
                 >
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate text-xs font-semibold text-Cr-text-default-v2">{preset.title}</span>
-                    {selectedStarterPresetId === preset.id ? (
-                      <CheckCircle2 size={13} className="shrink-0 text-Cr-text-success-default-v2" />
-                    ) : (
-                      <Send size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
-                    )}
+                  <span className="relative block h-[74px] overflow-hidden border-b border-Cr-border-default-v2 bg-black/25">
+                    <img
+                      data-testid="starter-bot-preview-image"
+                      src={preset.visualUrl}
+                      alt=""
+                      className="h-full w-full object-cover transition-transform duration-500 group-active:scale-105"
+                    />
+                    <span className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-black/10" />
+                    <span className="absolute left-2 top-2 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                      GIF preview
+                    </span>
+                    <span className="absolute bottom-0 left-0 h-0.5 w-2/3 animate-pulse rounded-r bg-dreamy-brand-hot-v2" />
                   </span>
-                  <span className="line-clamp-2 text-[11px] leading-4 text-Cr-text-subtler-v2">{preset.prompt}</span>
-                  <span className="text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2">{preset.pageName}</span>
+                  <span className="grid gap-1.5 p-3">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate text-xs font-semibold text-Cr-text-default-v2">{preset.title}</span>
+                      {selectedStarterPresetId === preset.id ? (
+                        <CheckCircle2 size={13} className="shrink-0 text-Cr-text-success-default-v2" />
+                      ) : (
+                        <Send size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
+                      )}
+                    </span>
+                    <span className="line-clamp-2 text-[11px] leading-4 text-Cr-text-subtler-v2">{preset.recommendation}</span>
+                    <span className="text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2">{preset.workflow}</span>
+                  </span>
                 </button>
               ))}
             </div>
@@ -3820,6 +4111,16 @@ export default function Dreamy() {
         dispatchSessionId: request.dispatchSessionId,
         dispatchTargetId: request.dispatchTargetId,
       }).then((result) => mergeProject(result.project));
+      appendAssistantStep(assistantId, {
+        step: 'handoff',
+        message: 'Queued locally; media result will attach when ready',
+        progress: 38,
+      });
+      updateAssistant(assistantId, {
+        pending: true,
+        segmentId: request.segmentId,
+        content: 'Segment accepted locally; Dreamy media is being prepared.',
+      });
 
       if (!hasTelegramInitData()) {
         const authStatus = {
@@ -4580,6 +4881,49 @@ export default function Dreamy() {
     });
   };
 
+  const exportAllSegments = useCallback(() => {
+    if (!project?.segments.length) return;
+    const exportedAt = nowIso();
+    const segments = project.segments.map((segment, index) => ({
+      index: index + 1,
+      segmentId: segment.id,
+      type: segment.type,
+      status: segment.status,
+      prompt: segment.prompt,
+      action: segment.action,
+      botName: segment.botName,
+      botSlug: segment.botSlug,
+      taskId: segment.taskId,
+      mediaUrl: resolveStudioDisplayAssetUrl(segment.url),
+      posterUrl: resolveStudioDisplayAssetUrl(segment.posterUrl),
+      evidence: segment.evidence,
+    }));
+    const readySegments = segments.filter((segment) => Boolean(segment.mediaUrl || segment.posterUrl));
+    const payload = {
+      kind: 'dreamy-long-video-sequence',
+      projectId: project.projectId,
+      conversationId: project.conversationId,
+      exportedAt,
+      totalSegments: segments.length,
+      readySegments: readySegments.length,
+      estimatedDurationSeconds: segments.length * 5,
+      exportMode: 'concat-timeline',
+      segments,
+    };
+    const filename = `dreamy-long-video-${project.projectId || 'sequence'}.json`;
+    downloadJsonPayload(payload, filename);
+    setActiveTab('preview');
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: makeId('assistant'),
+        role: 'assistant',
+        content: `Exported ${segments.length} segment${segments.length === 1 ? '' : 's'} as a long-video sequence manifest.`,
+        createdAt: exportedAt,
+      },
+    ]);
+  }, [project]);
+
   const resetProject = async () => {
     const projectId = project?.projectId;
     setProject(null);
@@ -5292,6 +5636,7 @@ export default function Dreamy() {
               onCancelJob={(jobId) => void cancelJob(jobId)}
               onRetryJob={(jobId) => void retryJob(jobId)}
               onAction={runStudio}
+              onExportAllSegments={exportAllSegments}
               submitting={submitting}
             />
           )}
