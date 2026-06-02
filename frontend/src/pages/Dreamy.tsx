@@ -38,7 +38,7 @@ import {
 import exampleGood from '../assets/example-good.png';
 import exampleMultiple from '../assets/example-multiple.png';
 import { useEnergy } from '../contexts/EnergyContext';
-import { fetchGenerateResult } from '../services/api';
+import { fetchGenerateResult, hasTelegramInitData } from '../services/api';
 import {
   bulkStudioJobs,
   cancelStudioDispatchSession,
@@ -184,6 +184,7 @@ interface StudioDispatchRunOverride {
   agentId?: string;
   pageName?: string;
   executor?: StudioExecutor;
+  mode?: StudioMode;
 }
 
 interface StudioStarterPreset {
@@ -2730,7 +2731,7 @@ function Composer({
   submitting,
   onModeChange,
   onPromptChange,
-  onSelectPreset,
+  onRunPreset,
   onSubmit,
   onPickFile,
   onClearFile,
@@ -2747,7 +2748,7 @@ function Composer({
   submitting: boolean;
   onModeChange: (mode: StudioMode) => void;
   onPromptChange: (value: string) => void;
-  onSelectPreset?: (preset: StudioStarterPreset) => void;
+  onRunPreset?: (preset: StudioStarterPreset) => void;
   onSubmit: () => void;
   onPickFile: () => void;
   onClearFile: () => void;
@@ -2774,10 +2775,10 @@ function Composer({
                   key={preset.id}
                   type="button"
                   data-testid={`starter-preset-${preset.id}`}
-                  aria-label={`Use ${preset.title} preset`}
+                  aria-label={`Generate ${preset.title} preset`}
                   aria-pressed={selectedStarterPresetId === preset.id}
                   disabled={submitting}
-                  onClick={() => onSelectPreset?.(preset)}
+                  onClick={() => onRunPreset?.(preset)}
                   className={`grid min-h-[92px] gap-2 rounded-lg-v2 border p-3 text-left transition-colors active:bg-Cr-beta-white-8-v2 disabled:opacity-50 ${
                     selectedStarterPresetId === preset.id
                       ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
@@ -3820,6 +3821,45 @@ export default function Dreamy() {
         dispatchTargetId: request.dispatchTargetId,
       }).then((result) => mergeProject(result.project));
 
+      if (!hasTelegramInitData()) {
+        const authStatus = {
+          status: 'auth_missing',
+          mode: 'telegram-init-data',
+          message: 'Open Dreamy inside Telegram or provide init data before running the miniapp.',
+        };
+        const update = await postStudioClientResult(projectId, {
+          segmentId: request.segmentId,
+          jobId: request.jobId,
+          status: 'auth_missing',
+          type: expectedType,
+          prompt: request.prompt,
+          botSlug: request.botSlug,
+          botName: request.botName,
+          action: request.action,
+          parentSegmentId: request.sourceSegment?.id,
+          posterUrl: request.segment.posterUrl,
+          authStatus,
+          evidence: {
+            status: 'auth_missing',
+            source: request.api,
+            accepted: false,
+            message: 'Dreamy Miniapp auth is missing; no external generation request was sent.',
+            checkedAt: nowIso(),
+          },
+          source: request.api,
+          dispatchSessionId: request.dispatchSessionId,
+          dispatchTargetId: request.dispatchTargetId,
+        });
+        mergeProject(update.project);
+        updateAssistant(assistantId, {
+          pending: false,
+          segmentId: request.segmentId,
+          content: 'Dreamy Miniapp needs Telegram auth before it can run.',
+          error: authStatus.message,
+        });
+        return;
+      }
+
       try {
         appendAssistantStep(assistantId, {
           step: 'miniapp',
@@ -4166,6 +4206,7 @@ export default function Dreamy() {
     ) => {
       if (submitting) return;
       const text = (overridePrompt || prompt).trim();
+      const targetMode = dispatchOverride?.mode || mode;
       const targetPage = dispatchOverride?.pageId
         ? pages.find((page) => page.id === dispatchOverride.pageId) || selectedPage
         : selectedPage;
@@ -4197,7 +4238,7 @@ export default function Dreamy() {
       setActiveTab('chat');
       trackEvent('dreamy_studio_run', {
         action,
-        mode,
+        mode: targetMode,
         page_id: targetPageId,
         agent_id: targetAgentId,
         has_image: Boolean(fileForRequest),
@@ -4211,7 +4252,7 @@ export default function Dreamy() {
       try {
         await streamStudioRun({
           message: runPrompt,
-          mode,
+          mode: targetMode,
           action,
           projectId: project?.projectId,
           sourceSegmentId: sourceSegment?.id,
@@ -4335,7 +4376,7 @@ export default function Dreamy() {
         if (controller.signal.aborted) {
           updateAssistant(assistantId, { pending: false, content: 'Stopped.' });
         } else {
-          const fallback = createLocalProject(mode, runPrompt, action, sourceSegment || undefined);
+          const fallback = createLocalProject(targetMode, runPrompt, action, sourceSegment || undefined);
           mergeProject(fallback);
           updateAssistant(assistantId, {
             pending: false,
@@ -4378,14 +4419,21 @@ export default function Dreamy() {
     setSubmitting(false);
   };
 
-  const selectStarterPreset = useCallback((preset: StudioStarterPreset) => {
+  const runStarterPreset = useCallback((preset: StudioStarterPreset) => {
     setMode('player');
     setActiveTab('chat');
     setSelectedStarterPresetId(preset.id);
     setSelectedPageId(preset.pageId);
     setSelectedAgentId(preset.agentId);
     setPrompt(preset.prompt);
-  }, []);
+    void runStudio('generate', preset.prompt, selectedSegment, {
+      pageId: preset.pageId,
+      agentId: preset.agentId,
+      pageName: preset.pageName,
+      executor: 'client',
+      mode: 'player',
+    });
+  }, [runStudio, selectedSegment]);
 
   const runMatrixEntry = useCallback((entry: StudioDispatchMatrixEntry) => {
     changePage(entry.pageId);
@@ -5190,7 +5238,7 @@ export default function Dreamy() {
             <Pill tone={submitting ? 'hot' : 'default'}>{submitting ? 'Running' : mode}</Pill>
           </div>
 
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 [-webkit-overflow-scrolling:touch]">
+          <div data-testid="studio-chat-log" className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 [-webkit-overflow-scrolling:touch]">
             {messages.map((item) => (
               <ChatMessage
                 key={item.id}
@@ -5214,7 +5262,7 @@ export default function Dreamy() {
             submitting={submitting}
             onModeChange={setMode}
             onPromptChange={setPrompt}
-            onSelectPreset={selectStarterPreset}
+            onRunPreset={runStarterPreset}
             onPickFile={() => fileInputRef.current?.click()}
             onClearFile={clearFile}
             onSubmit={() => void runStudio('generate')}

@@ -20,6 +20,7 @@ export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'starter-presets',
   'starter-preset-direct-generate',
   'starter-preset-prompt-ready',
+  'starter-preset-result-visible',
   'canvas-mode',
   'layers-panel',
   'inspector-panel',
@@ -250,30 +251,6 @@ async function checkEnabled(checks, page, id, label, locator, timeoutMs) {
   }
 }
 
-async function checkTextareaValue(checks, page, id, label, pattern, timeoutMs) {
-  const target = page.locator('textarea').first();
-  const started = Date.now();
-  try {
-    await target.waitFor({ state: 'visible', timeout: timeoutMs });
-    while (Date.now() - started < timeoutMs) {
-      const value = await target.evaluate((node) => node.value).catch(() => '');
-      if (pattern.test(String(value || ''))) {
-        checks.push({ id, label, ok: true });
-        return;
-      }
-      await page.waitForTimeout(100);
-    }
-    checks.push({ id, label, ok: false, message: 'Textarea value did not match expected preset prompt' });
-  } catch (error) {
-    checks.push({
-      id,
-      label,
-      ok: false,
-      message: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
 async function clickEnabled(checks, page, id, label, locator, timeoutMs) {
   const target = locator.first();
   try {
@@ -338,16 +315,25 @@ export async function runStudioFrontendSmoke(options = {}) {
       checks,
       page,
       'starter-preset-direct-generate',
-      'Select starter preset for direct generate',
-      page.getByRole('button', { name: /use cinematic portrait preset/i }),
+      'Run starter preset directly',
+      page.getByRole('button', { name: /generate cinematic portrait preset/i }),
       timeoutMs,
     );
-    await checkTextareaValue(
+    const chatLog = page.getByTestId('studio-chat-log');
+    await checkVisible(
       checks,
       page,
       'starter-preset-prompt-ready',
-      'Starter preset prompt is ready',
-      /cinematic neon rain portrait/i,
+      'Starter preset prompt is sent',
+      chatLog.getByText(/cinematic neon rain portrait/i),
+      timeoutMs,
+    );
+    await checkVisible(
+      checks,
+      page,
+      'starter-preset-result-visible',
+      'Starter preset generation returns a Studio result',
+      chatLog.getByText(/Segment is running in Dreamy|Segment is ready|client execution needs attention|Dreamy Miniapp needs Telegram auth/i),
       timeoutMs,
     );
 

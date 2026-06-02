@@ -96,8 +96,10 @@ test('runStudioFrontendSmoke records starter presets and direct preset generatio
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-presets'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-preset-direct-generate'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-preset-prompt-ready'));
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-preset-result-visible'));
   assert.match(runStudioFrontendSmoke.toString(), /starter-presets/);
   assert.match(runStudioFrontendSmoke.toString(), /starter-preset-direct-generate/);
   assert.match(runStudioFrontendSmoke.toString(), /starter-preset-prompt-ready/);
+  assert.match(runStudioFrontendSmoke.toString(), /starter-preset-result-visible/);
   assert.doesNotMatch(runStudioFrontendSmoke.toString(), /getByDisplayValue/);
 });

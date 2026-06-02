@@ -33,7 +33,7 @@ function getInitData(): string {
 }
 
 function shouldFlushTracking(): boolean {
-  return !(import.meta.env.DEV && !getInitData());
+  return Boolean(getInitData());
 }
 
 /** RFC4122 UUID v4. Falls back to a math-random variant if crypto is unavailable. */
