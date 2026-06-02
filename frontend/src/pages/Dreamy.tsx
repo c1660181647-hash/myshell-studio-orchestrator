@@ -1001,6 +1001,7 @@ function StudioDispatchBatchStrip({
   planning,
   sessionRunning,
   onPlan,
+  onPlanRemaining,
   onStartSession,
   onOpenTarget,
   onCompleteTarget,
@@ -1012,6 +1013,7 @@ function StudioDispatchBatchStrip({
   planning: boolean;
   sessionRunning: boolean;
   onPlan: () => void;
+  onPlanRemaining: () => void;
   onStartSession: () => void;
   onOpenTarget: (target: StudioDispatchBatchTarget | StudioDispatchSessionTarget) => void;
   onCompleteTarget: (target: StudioDispatchSessionTarget) => void;
@@ -1047,6 +1049,15 @@ function StudioDispatchBatchStrip({
       >
         <RefreshCcw size={12} className={planning ? 'animate-spin' : ''} />
         Plan All
+      </button>
+      <button
+        type="button"
+        disabled={planning}
+        onClick={onPlanRemaining}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+      >
+        <RotateCcw size={12} className={planning ? 'animate-spin' : ''} />
+        Plan Remaining
       </button>
       <button
         type="button"
@@ -1101,6 +1112,7 @@ function StudioDispatchBatchStrip({
           <Pill>{`${summary.server} server`}</Pill>
           <Pill tone={summary.skipped ? 'hot' : 'default'}>{`${summary.skipped} skipped`}</Pill>
           <Pill tone={summary.missingParams ? 'hot' : 'default'}>{`${summary.missingParams} missing params`}</Pill>
+          {!!summary.coveredSkipped && <Pill tone="success">{`${summary.coveredSkipped} covered skipped`}</Pill>}
         </>
       )}
       {sessionSummary && (
@@ -2594,7 +2606,7 @@ export default function Dreamy() {
     }
   }, [applyHandoffSnapshot, deliveryBundleLoading, project?.projectId, studioContextSourceSegmentId]);
 
-  const planDispatchBatch = useCallback(async () => {
+  const planDispatchBatch = useCallback(async (options: { excludeCovered?: boolean } = {}) => {
     if (dispatchBatchPlanning) return;
     setDispatchBatchPlanning(true);
     try {
@@ -2603,6 +2615,7 @@ export default function Dreamy() {
         projectId,
         sourceSegmentId: studioContextSourceSegmentId,
         limit: 50,
+        excludeCovered: options.excludeCovered,
       });
       setDispatchBatchPlan(plan);
       applyHandoffSnapshot(plan.handoffSnapshot);
@@ -2611,7 +2624,7 @@ export default function Dreamy() {
         {
           id: makeId('assistant'),
           role: 'assistant',
-          content: `Batch dispatch planned ${plan.summary.planned} target${plan.summary.planned === 1 ? '' : 's'}; skipped ${plan.summary.skipped}.`,
+          content: `${options.excludeCovered ? 'Remaining batch' : 'Batch dispatch'} planned ${plan.summary.planned} target${plan.summary.planned === 1 ? '' : 's'}; skipped ${plan.summary.skipped}.`,
           createdAt: nowIso(),
         },
       ]);
@@ -2640,6 +2653,7 @@ export default function Dreamy() {
         projectId,
         sourceSegmentId: studioContextSourceSegmentId,
         limit: 50,
+        excludeCovered: Boolean(dispatchBatchPlan?.excludeCovered),
       });
       applyDispatchSession(session);
       setMessages((prev) => [
@@ -2665,7 +2679,7 @@ export default function Dreamy() {
     } finally {
       setDispatchSessionRunning(false);
     }
-  }, [applyDispatchSession, dispatchSessionRunning, project?.projectId, studioContextSourceSegmentId]);
+  }, [applyDispatchSession, dispatchBatchPlan?.excludeCovered, dispatchSessionRunning, project?.projectId, studioContextSourceSegmentId]);
 
   const completeDispatchSessionTarget = useCallback(
     async (target: StudioDispatchSessionTarget) => {
@@ -3840,6 +3854,7 @@ export default function Dreamy() {
         planning={dispatchBatchPlanning}
         sessionRunning={dispatchSessionRunning}
         onPlan={() => void planDispatchBatch()}
+        onPlanRemaining={() => void planDispatchBatch({ excludeCovered: true })}
         onStartSession={() => void startDispatchSession()}
         onOpenTarget={(target) => void openDispatchBatchTarget(target)}
         onCompleteTarget={(target) => void completeDispatchSessionTarget(target)}

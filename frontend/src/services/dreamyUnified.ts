@@ -631,7 +631,9 @@ export interface StudioDispatchBatchPlan {
     server: number;
     missingParams: number;
     blocked: number;
+    coveredSkipped?: number;
   };
+  excludeCovered?: boolean;
   targets: StudioDispatchBatchTarget[];
   skippedTargets: StudioDispatchBatchSkip[];
   matrix: StudioDispatchMatrix;
@@ -1165,6 +1167,7 @@ export async function planStudioDispatchBatch(options: {
   sourceSegmentId?: string;
   pageIds?: Array<StudioApi | string>;
   limit?: number;
+  excludeCovered?: boolean;
 } = {}): Promise<StudioDispatchBatchPlan> {
   const response = await fetch(getStudioRootEndpoint('/api/studio/dispatch-batch'), {
     method: 'POST',
@@ -1174,6 +1177,7 @@ export async function planStudioDispatchBatch(options: {
       source_segment_id: options.sourceSegmentId,
       page_ids: options.pageIds,
       limit: options.limit || 50,
+      exclude_covered: Boolean(options.excludeCovered),
     }),
   });
   if (!response.ok) throw new Error(`Studio dispatch batch ${response.status}: ${response.statusText}`);
@@ -1185,6 +1189,7 @@ export async function createStudioDispatchSession(options: {
   sourceSegmentId?: string;
   pageIds?: Array<StudioApi | string>;
   limit?: number;
+  excludeCovered?: boolean;
 } = {}): Promise<StudioDispatchSession> {
   const response = await fetch(getStudioRootEndpoint('/api/studio/dispatch-sessions'), {
     method: 'POST',
@@ -1194,6 +1199,7 @@ export async function createStudioDispatchSession(options: {
       source_segment_id: options.sourceSegmentId,
       page_ids: options.pageIds,
       limit: options.limit || 50,
+      exclude_covered: Boolean(options.excludeCovered),
     }),
   });
   if (!response.ok) throw new Error(`Studio dispatch session ${response.status}: ${response.statusText}`);

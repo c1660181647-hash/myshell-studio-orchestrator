@@ -220,6 +220,14 @@ def _status_counts(jobs: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
+def _payload_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def _page_agent_ids(page: dict[str, Any], page_jobs: list[dict[str, Any]], agents: list[dict[str, Any]]) -> list[str]:
     agent_ids = {
         agent["id"]
@@ -653,11 +661,19 @@ async def _studio_dispatch_batch_plan(
     source_segment_id: str | None = None,
     page_ids: list[str] | None = None,
     limit: int = 50,
+    exclude_covered: bool = False,
 ) -> dict[str, Any]:
     if project_id and not _get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
 
     matrix = _dispatch_matrix(project_id=project_id, source_segment_id=source_segment_id)
+    coverage_by_page: dict[str, dict[str, Any]] = {}
+    if exclude_covered:
+        coverage = _studio_coverage(
+            project_id=matrix.get("projectId") or project_id,
+            source_segment_id=matrix.get("sourceSegmentId") or source_segment_id,
+        )
+        coverage_by_page = {page["pageId"]: page for page in coverage.get("pages") or []}
     requested_page_ids = {page_id for page_id in (page_ids or []) if page_id}
     max_targets = max(1, min(limit, 100))
     selected_entries = [
@@ -667,6 +683,13 @@ async def _studio_dispatch_batch_plan(
     skipped_targets: list[dict[str, Any]] = []
 
     for entry in selected_entries:
+        coverage_entry = coverage_by_page.get(str(entry.get("pageId") or ""))
+        if exclude_covered and coverage_entry and coverage_entry.get("coverageStatus") == "covered":
+            skipped = _dispatch_skip(entry, "already_covered", "Accepted coverage evidence already exists.")
+            skipped["coverageStatus"] = "covered"
+            skipped["latestEvidence"] = coverage_entry.get("latestEvidence") or {}
+            skipped_targets.append(skipped)
+            continue
         if len(targets) >= max_targets:
             skipped_targets.append(_dispatch_skip(entry, "limit_reached", "Dispatch batch limit reached."))
             continue
@@ -687,6 +710,7 @@ async def _studio_dispatch_batch_plan(
         "server": sum(1 for target in targets if target.get("executor") == "server"),
         "missingParams": sum(1 for target in skipped_targets if target.get("reason") == "missing_params"),
         "blocked": sum(1 for target in skipped_targets if target.get("reason") in {"auth_missing", "error", "not_ready"}),
+        "coveredSkipped": sum(1 for target in skipped_targets if target.get("reason") == "already_covered"),
     }
     handoff = await _studio_handoff_snapshot(
         project_id=matrix.get("projectId") or project_id,
@@ -699,6 +723,7 @@ async def _studio_dispatch_batch_plan(
         "projectId": matrix.get("projectId"),
         "sourceSegmentId": matrix.get("sourceSegmentId"),
         "sourceMediaUrl": matrix.get("sourceMediaUrl", ""),
+        "excludeCovered": exclude_covered,
         "summary": summary,
         "targets": targets,
         "skippedTargets": skipped_targets,
@@ -763,12 +788,14 @@ async def _create_dispatch_session(
     source_segment_id: str | None = None,
     page_ids: list[str] | None = None,
     limit: int = 50,
+    exclude_covered: bool = False,
 ) -> dict[str, Any]:
     plan = await _studio_dispatch_batch_plan(
         project_id=project_id,
         source_segment_id=source_segment_id,
         page_ids=page_ids,
         limit=limit,
+        exclude_covered=exclude_covered,
     )
     now = now_iso()
     targets = [{**target, "status": "pending", "evidence": {}} for target in plan.get("targets", [])]
@@ -781,6 +808,7 @@ async def _create_dispatch_session(
         "projectId": plan.get("projectId"),
         "sourceSegmentId": plan.get("sourceSegmentId"),
         "sourceMediaUrl": plan.get("sourceMediaUrl", ""),
+        "excludeCovered": bool(plan.get("excludeCovered")),
         "summary": plan.get("summary") or {},
         "targets": targets,
         "skippedTargets": plan.get("skippedTargets") or [],
@@ -2910,6 +2938,7 @@ def register_studio_routes(app) -> None:
             source_segment_id=body.get("source_segment_id") or body.get("sourceSegmentId"),
             page_ids=[str(page_id) for page_id in page_ids],
             limit=max(1, min(int(body.get("limit") or 50), 100)),
+            exclude_covered=_payload_bool(body.get("exclude_covered", body.get("excludeCovered", False))),
         )
 
     @app.post("/api/studio/dispatch-sessions")
@@ -2925,6 +2954,7 @@ def register_studio_routes(app) -> None:
             source_segment_id=body.get("source_segment_id") or body.get("sourceSegmentId"),
             page_ids=[str(page_id) for page_id in page_ids],
             limit=max(1, min(int(body.get("limit") or 50), 100)),
+            exclude_covered=_payload_bool(body.get("exclude_covered", body.get("excludeCovered", False))),
         )
 
     @app.get("/api/studio/dispatch-sessions")

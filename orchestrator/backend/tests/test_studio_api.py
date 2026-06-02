@@ -1440,6 +1440,69 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(body["handoffSnapshot"]["status"], "blocked")
         self.assertEqual(body["handoffSnapshot"]["summary"]["readyUnverified"], 14)
 
+    def test_dispatch_batch_can_exclude_already_covered_pages_for_resume(self) -> None:
+        def fake_auth_status(page_id: str) -> dict:
+            if page_id == "myshell-art":
+                return {"status": "auth_missing", "mode": "browser-cookies", "message": "Missing MyShell cookies"}
+            return {"status": "client_delegated", "mode": "telegram-init-data", "message": "Client delegated"}
+
+        with patch("studio.adapter_auth_status", side_effect=fake_auth_status):
+            with self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={"message": "create remaining dispatch source image"},
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                source_events = _sse_events("".join(response.iter_text()))
+
+            source_meta = next(payload for name, payload in source_events if name == "meta")
+            source_execution = next(payload for name, payload in source_events if name == "execution_request")
+            update = self.client.post(
+                f"/api/studio/projects/{source_meta['projectId']}/client-result",
+                json={
+                    "segmentId": source_execution["segmentId"],
+                    "jobId": source_execution["jobId"],
+                    "status": "done",
+                    "taskId": "task_remaining_dispatch_source",
+                    "url": "https://example.com/remaining-dispatch-source.png",
+                    "posterUrl": "https://example.com/remaining-dispatch-source.png",
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            verified = self.client.post(
+                "/api/studio/coverage/verify",
+                json={
+                    "project_id": source_meta["projectId"],
+                    "source_segment_id": source_execution["segmentId"],
+                    "page_ids": ["explore", "ai-picks"],
+                },
+            )
+            self.assertEqual(verified.status_code, 200)
+
+            planned = self.client.post(
+                "/api/studio/dispatch-batch",
+                json={
+                    "project_id": source_meta["projectId"],
+                    "source_segment_id": source_execution["segmentId"],
+                    "exclude_covered": True,
+                    "limit": 50,
+                },
+            )
+
+        self.assertEqual(planned.status_code, 200)
+        body = planned.json()
+        target_by_page = {target["pageId"]: target for target in body["targets"]}
+        self.assertNotIn("explore", target_by_page)
+        self.assertNotIn("ai-picks", target_by_page)
+
+        skipped_by_page = {target["pageId"]: target for target in body["skippedTargets"]}
+        self.assertEqual(skipped_by_page["explore"]["reason"], "already_covered")
+        self.assertEqual(skipped_by_page["ai-picks"]["reason"], "already_covered")
+        self.assertEqual(skipped_by_page["explore"]["coverageStatus"], "covered")
+        self.assertGreaterEqual(body["summary"]["coveredSkipped"], 2)
+        self.assertEqual(body["excludeCovered"], True)
+
     def test_dispatch_session_persists_next_target_and_completion(self) -> None:
         def fake_auth_status(page_id: str) -> dict:
             if page_id == "myshell-art":

@@ -1,6 +1,9 @@
 import {
+  createStudioDispatchSession,
   fetchStudioDispatchSession,
+  planStudioDispatchBatch,
   type StudioActionResolveResult,
+  type StudioDispatchBatchPlan,
   type StudioDispatchSession,
   type StudioHandoffArtifact,
   type StudioHandoffAction,
@@ -50,3 +53,23 @@ const dispatchTargetHandoffActionContract: StudioHandoffAction = {
 };
 
 void dispatchTargetHandoffActionContract;
+
+async function remainingDispatchBatchContract(): Promise<StudioDispatchBatchPlan> {
+  return planStudioDispatchBatch({
+    projectId: 'project_contract',
+    sourceSegmentId: 'segment_contract',
+    excludeCovered: true,
+  });
+}
+
+void remainingDispatchBatchContract;
+
+async function remainingDispatchSessionContract(): Promise<StudioDispatchSession> {
+  return createStudioDispatchSession({
+    projectId: 'project_contract',
+    sourceSegmentId: 'segment_contract',
+    excludeCovered: true,
+  });
+}
+
+void remainingDispatchSessionContract;
