@@ -800,6 +800,18 @@ def _get_dispatch_session_or_404(session_id: str) -> dict[str, Any]:
     return _dispatch_session_view(session)
 
 
+def _dispatch_session_with_focused_target(session: dict[str, Any], target_id: str | None = None) -> dict[str, Any]:
+    view = dict(session)
+    if not target_id:
+        return view
+    targets = view.get("targets") or []
+    focused_index = next((index for index, target in enumerate(targets) if target.get("id") == target_id), -1)
+    view["focusedTargetId"] = target_id
+    view["focusedTargetIndex"] = focused_index
+    view["focusedTarget"] = targets[focused_index] if focused_index >= 0 else None
+    return view
+
+
 def _record_dispatch_session_target_completion(
     session: dict[str, Any],
     target: dict[str, Any],
@@ -2892,8 +2904,11 @@ def register_studio_routes(app) -> None:
         return {"sessions": sessions, "count": len(sessions)}
 
     @app.get("/api/studio/dispatch-sessions/{session_id}")
-    async def get_studio_dispatch_session(session_id: str):
-        return _get_dispatch_session_or_404(session_id)
+    async def get_studio_dispatch_session(
+        session_id: str,
+        target_id: Optional[str] = Query(None),
+    ):
+        return _dispatch_session_with_focused_target(_get_dispatch_session_or_404(session_id), target_id)
 
     @app.post("/api/studio/dispatch-sessions/{session_id}/targets/{target_id}")
     async def update_studio_dispatch_session_target(session_id: str, target_id: str, payload: dict[str, Any] = Body(...)):

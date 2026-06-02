@@ -1551,6 +1551,20 @@ class StudioApiTest(unittest.TestCase):
         skipped_by_page = {target["pageId"]: target for target in restored_body["skippedTargets"]}
         self.assertEqual(skipped_by_page["myshell-art"]["reason"], "auth_missing")
 
+        focused = self.client.get(
+            f"/api/studio/dispatch-sessions/{session['sessionId']}",
+            params={"target_id": first_target_id},
+        )
+        self.assertEqual(focused.status_code, 200)
+        focused_body = focused.json()
+        expected_focus_index = next(
+            index for index, target in enumerate(restored_body["targets"]) if target["id"] == first_target_id
+        )
+        self.assertEqual(focused_body["focusedTargetId"], first_target_id)
+        self.assertEqual(focused_body["focusedTarget"]["id"], first_target_id)
+        self.assertEqual(focused_body["focusedTarget"]["status"], "completed")
+        self.assertEqual(focused_body["focusedTargetIndex"], expected_focus_index)
+
     def test_run_stream_preserves_selected_agent_id_through_retry(self) -> None:
         with self.client.stream(
             "POST",

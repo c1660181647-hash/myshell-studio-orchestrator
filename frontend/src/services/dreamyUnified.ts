@@ -662,6 +662,9 @@ export interface StudioDispatchSession extends Omit<StudioDispatchBatchPlan, 'st
   };
   targets: StudioDispatchSessionTarget[];
   nextTarget?: StudioDispatchSessionTarget | null;
+  focusedTargetId?: string;
+  focusedTargetIndex?: number;
+  focusedTarget?: StudioDispatchSessionTarget | null;
 }
 
 export interface StudioAgentCapability {
