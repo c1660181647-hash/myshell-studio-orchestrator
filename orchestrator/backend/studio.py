@@ -3213,6 +3213,11 @@ def _evidence(
     }
 
 
+def _exception_message(exc: Exception) -> str:
+    detail = str(exc)
+    return f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
+
+
 def _sync_project_jobs(project: StudioProject) -> None:
     segment_order = {str(segment.get("id") or ""): index for index, segment in enumerate(project.get("segments", []))}
     jobs = [_job_with_evidence(job) for job in STUDIO_STORE.list_jobs(project["projectId"])]
@@ -4711,7 +4716,7 @@ async def _execute_generation_smoke(prompt: str) -> dict[str, Any]:
         )
     except Exception as exc:
         segment["status"] = "error"
-        segment["evidence"] = _evidence("error", "dreamy-miniapp", message=str(exc))
+        segment["evidence"] = _evidence("error", "dreamy-miniapp", message=_exception_message(exc))
         segment["updatedAt"] = now_iso()
         job = _update_job(job, status="error", evidence=segment["evidence"])
         _set_graph_status(project, route, segment)
@@ -4824,7 +4829,7 @@ async def _execute_dreamy_workshop_smoke(prompt: str, limit: int | None = None) 
             )
         except Exception as exc:
             segment["status"] = "error"
-            segment["evidence"] = _evidence("error", "dreamy-miniapp", message=str(exc))
+            segment["evidence"] = _evidence("error", "dreamy-miniapp", message=_exception_message(exc))
             segment["updatedAt"] = now_iso()
             job = _update_job(job, status="error", evidence=segment["evidence"])
             _set_graph_status(project, route, segment)
@@ -5409,7 +5414,7 @@ def register_studio_routes(app) -> None:
                             )
                         except Exception as exc:
                             segment["status"] = "error"
-                            segment["evidence"] = _evidence("error", "dreamy-miniapp", message=str(exc))
+                            segment["evidence"] = _evidence("error", "dreamy-miniapp", message=_exception_message(exc))
                             segment["updatedAt"] = now_iso()
                             job = _update_job(job, status="error", evidence=segment["evidence"])
                             _set_graph_status(project, route, segment)
@@ -5553,7 +5558,7 @@ def register_studio_routes(app) -> None:
                     )
                 except Exception as exc:
                     segment["status"] = "error"
-                    segment["evidence"] = _evidence("error", "dreamy-miniapp", message=str(exc))
+                    segment["evidence"] = _evidence("error", "dreamy-miniapp", message=_exception_message(exc))
                     segment["updatedAt"] = now_iso()
                     job = _update_job(job, status="error", evidence=segment["evidence"])
                     _set_graph_status(project, route, segment)
@@ -5693,7 +5698,7 @@ def register_studio_routes(app) -> None:
                             _update_job(job, status=status, evidence=segment["evidence"])
                     except Exception as exc:
                         segment["status"] = "error"
-                        segment["evidence"] = _evidence("error", "myshell-art", message=str(exc))
+                        segment["evidence"] = _evidence("error", "myshell-art", message=_exception_message(exc))
                         _update_job(job, status="error", evidence=segment["evidence"])
                     segment["updatedAt"] = now_iso()
                     _set_graph_status(project, route, segment)
