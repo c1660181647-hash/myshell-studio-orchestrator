@@ -114,10 +114,12 @@ def post_json(path: str, body: dict[str, Any], cookies: list[dict[str, Any]], ti
 
 
 def safe_probe_summary(payload: dict[str, Any]) -> dict[str, Any]:
-    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    reason = payload.get("reason") or payload.get("msg") or payload.get("message") or ""
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    explicit_success = payload.get("success")
     return {
-        "success": bool(payload.get("success")),
-        "reason": payload.get("reason") or payload.get("msg") or payload.get("message") or "",
+        "success": bool(explicit_success) if explicit_success is not None else bool(payload) and not reason,
+        "reason": reason,
         "dataKeys": sorted(str(key) for key in data.keys()),
     }
 

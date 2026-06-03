@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -54,12 +55,21 @@ def _unpad(value: bytes) -> bytes:
     return value[:-padding]
 
 
-def _decrypt_cookie_value(encrypted_value: bytes, key: bytes) -> str:
+def _strip_chrome_host_key_prefix(decrypted: bytes, host_key: str) -> bytes:
+    if not host_key or len(decrypted) <= 32:
+        return decrypted
+    digest = hashlib.sha256(host_key.encode("utf-8")).digest()
+    if decrypted.startswith(digest):
+        return decrypted[32:]
+    return decrypted
+
+
+def _decrypt_cookie_value(encrypted_value: bytes, key: bytes, host_key: str = "") -> str:
     if not encrypted_value:
         return ""
     payload = encrypted_value[3:] if encrypted_value.startswith(b"v10") or encrypted_value.startswith(b"v11") else encrypted_value
     decryptor = Cipher(algorithms.AES(key), modes.CBC(b" " * 16)).decryptor()
-    decrypted = _unpad(decryptor.update(payload) + decryptor.finalize())
+    decrypted = _strip_chrome_host_key_prefix(_unpad(decryptor.update(payload) + decryptor.finalize()), host_key)
     return decrypted.decode("utf-8", errors="replace")
 
 
@@ -98,7 +108,7 @@ def _read_profile_cookies(profile_dir: Path, key: bytes, host_patterns: tuple[st
 
     cookies: list[dict[str, Any]] = []
     for host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, samesite in rows:
-        cookie_value = value or _decrypt_cookie_value(encrypted_value, key)
+        cookie_value = value or _decrypt_cookie_value(encrypted_value, key, str(host_key or ""))
         if not cookie_value:
             continue
         cookie: dict[str, Any] = {

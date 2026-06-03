@@ -10,6 +10,12 @@ import myshell_art_api  # noqa: E402
 
 
 class MyShellArtApiTest(unittest.IsolatedAsyncioTestCase):
+    def test_safe_probe_summary_accepts_current_top_level_payloads(self) -> None:
+        summary = myshell_art_api._safe_probe_summary({"httpStatus": 200, "payload": {"running": []}})
+
+        self.assertTrue(summary["success"])
+        self.assertEqual(summary["dataKeys"], ["running"])
+
     async def test_generate_via_art_api_submits_input_values_and_extracts_media(self) -> None:
         calls = []
 

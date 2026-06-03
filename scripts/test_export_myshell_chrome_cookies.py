@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import unittest
 from pathlib import Path
 
@@ -11,6 +12,12 @@ spec.loader.exec_module(exporter)
 
 
 class ExportMyShellChromeCookiesTest(unittest.TestCase):
+    def test_decrypted_cookie_value_strips_chrome_host_key_prefix(self) -> None:
+        host_key = ".myshell.ai"
+        plaintext = hashlib.sha256(host_key.encode("utf-8")).digest() + b"token-value"
+
+        self.assertEqual(exporter._strip_chrome_host_key_prefix(plaintext, host_key), b"token-value")
+
     def test_summary_reports_cookie_names_without_values(self) -> None:
         summary = exporter._summary_from_export_result(
             {

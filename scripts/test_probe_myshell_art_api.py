@@ -30,6 +30,12 @@ class ProbeMyShellArtApiTest(unittest.TestCase):
         self.assertNotIn("secret-token", str(summary))
         self.assertEqual(summary["dataKeys"], ["nickname", "token", "userId"])
 
+    def test_safe_probe_summary_accepts_current_top_level_payloads(self) -> None:
+        summary = probe.safe_probe_summary({"userDetail": {"summary": {"id": "user-1"}}})
+
+        self.assertTrue(summary["success"])
+        self.assertEqual(summary["dataKeys"], ["userDetail"])
+
     def test_generate_body_omits_empty_article_id(self) -> None:
         body = probe.generate_body("1751532766", [], "")
 

@@ -120,11 +120,13 @@ def _payload_reason(response: dict[str, Any]) -> str:
 
 def _safe_probe_summary(response: dict[str, Any]) -> dict[str, Any]:
     payload = response.get("payload") if isinstance(response.get("payload"), dict) else {}
-    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    reason = payload.get("reason") or payload.get("msg") or payload.get("message") or ""
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    explicit_success = payload.get("success")
     return {
         "httpStatus": response.get("httpStatus"),
-        "success": bool(payload.get("success")),
-        "reason": payload.get("reason") or payload.get("msg") or payload.get("message") or "",
+        "success": bool(explicit_success) if explicit_success is not None else bool(payload) and not reason,
+        "reason": reason,
         "dataKeys": sorted(str(key) for key in data.keys()),
     }
 
