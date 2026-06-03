@@ -1,0 +1,164 @@
+import importlib.util
+import unittest
+from pathlib import Path
+
+
+MODULE_PATH = Path(__file__).with_name("generation_chain_check.py")
+spec = importlib.util.spec_from_file_location("generation_chain_check", MODULE_PATH)
+generation_chain_check = importlib.util.module_from_spec(spec)
+assert spec and spec.loader
+spec.loader.exec_module(generation_chain_check)
+
+
+def _fake_fetch(payloads):
+    def fetcher(_base_url, path, _timeout):
+        return payloads[path]
+
+    return fetcher
+
+
+def _fake_runner(existing_secrets=True, cloud_run_ready=True):
+    def runner(command):
+        text = " ".join(command)
+        if "secrets describe" in text:
+            return (0, "secret-name", "") if existing_secrets else (1, "", "NOT_FOUND")
+        if "run services describe" in text:
+            if not cloud_run_ready:
+                return 1, "", "service missing"
+            return (
+                0,
+                '{"status":{"url":"https://studio.example","latestReadyRevisionName":"rev-ready","traffic":[{"revisionName":"rev-ready","percent":100}]}}',
+                "",
+            )
+        return 0, "", ""
+
+    return runner
+
+
+class GenerationChainCheckTest(unittest.TestCase):
+    def test_report_blocks_when_live_generation_credentials_are_missing(self) -> None:
+        report = generation_chain_check.build_generation_chain_report(
+            base_url="https://studio.example",
+            project="project",
+            require_live=True,
+            fetcher=_fake_fetch(
+                {
+                    "/api/health": {
+                        "status": "degraded",
+                        "components": {
+                            "dreamyApiAuth": {"status": "client_delegated"},
+                            "myshellCookies": {"status": "auth_missing"},
+                            "cookieInjection": {"status": "auth_missing"},
+                            "chromeCdp": {"status": "ok"},
+                        },
+                    },
+                    "/api/studio/bot-previews": {"summary": {"ready": 40, "total": 40, "botSpecific": 6, "targetBotExecuted": 0}},
+                    "/api/studio/generation-smoke": {"status": "needs_configuration", "latest": {"accepted": False}},
+                }
+            ),
+            runner=_fake_runner(existing_secrets=False),
+        )
+
+        self.assertEqual(report["status"], "blocked")
+        self.assertEqual(report["summary"]["previewReady"], 40)
+        self.assertEqual(report["summary"]["previewBotSpecific"], 6)
+        blocking_ids = {item["id"] for item in report["blocking"]}
+        self.assertIn("bot-previews", blocking_ids)
+        self.assertIn("secret-manager", blocking_ids)
+        self.assertIn("dreamy-server-auth", blocking_ids)
+        self.assertIn("myshell-art-auth", blocking_ids)
+        self.assertIn("live-generation-smoke", blocking_ids)
+
+    def test_report_ready_when_generation_media_is_accepted(self) -> None:
+        report = generation_chain_check.build_generation_chain_report(
+            base_url="https://studio.example",
+            project="project",
+            require_live=True,
+            fetcher=_fake_fetch(
+                {
+                    "/api/health": {
+                        "status": "ok",
+                        "components": {
+                            "dreamyApiAuth": {"status": "ready"},
+                            "myshellCookies": {"status": "ready"},
+                            "cookieInjection": {"status": "ready"},
+                            "chromeCdp": {"status": "ok"},
+                        },
+                    },
+                    "/api/studio/bot-previews": {"summary": {"ready": 40, "total": 40, "botSpecific": 40, "targetBotExecuted": 40}},
+                    "/api/studio/generation-smoke": {
+                        "status": "done",
+                        "latest": {"accepted": True, "mediaUrl": "https://cdn.example/generated.png"},
+                    },
+                }
+            ),
+            runner=_fake_runner(existing_secrets=True),
+        )
+
+        self.assertEqual(report["status"], "ready")
+        self.assertTrue(report["readyForDelivery"])
+        self.assertEqual(report["blocking"], [])
+
+    def test_report_blocks_representative_preview_assets(self) -> None:
+        report = generation_chain_check.build_generation_chain_report(
+            base_url="https://studio.example",
+            project="project",
+            require_live=False,
+            fetcher=_fake_fetch(
+                {
+                    "/api/health": {
+                        "status": "ok",
+                        "components": {
+                            "dreamyApiAuth": {"status": "ready"},
+                            "myshellCookies": {"status": "ready"},
+                            "cookieInjection": {"status": "ready"},
+                            "chromeCdp": {"status": "ok"},
+                        },
+                    },
+                    "/api/studio/bot-previews": {"summary": {"ready": 40, "total": 40, "botSpecific": 6}},
+                    "/api/studio/generation-smoke": {
+                        "status": "done",
+                        "latest": {"accepted": True, "mediaUrl": "https://cdn.example/generated.png"},
+                    },
+                }
+            ),
+            runner=_fake_runner(existing_secrets=True),
+        )
+
+        self.assertEqual(report["status"], "degraded")
+        self.assertFalse(report["readyForDelivery"])
+        self.assertEqual(report["blocking"][0]["id"], "bot-previews")
+
+    def test_report_blocks_without_target_bot_execution_evidence(self) -> None:
+        report = generation_chain_check.build_generation_chain_report(
+            base_url="https://studio.example",
+            project="project",
+            require_live=False,
+            fetcher=_fake_fetch(
+                {
+                    "/api/health": {
+                        "status": "ok",
+                        "components": {
+                            "dreamyApiAuth": {"status": "ready"},
+                            "myshellCookies": {"status": "ready"},
+                            "cookieInjection": {"status": "ready"},
+                            "chromeCdp": {"status": "ok"},
+                        },
+                    },
+                    "/api/studio/bot-previews": {"summary": {"ready": 40, "total": 40, "botSpecific": 40, "targetBotExecuted": 0}},
+                    "/api/studio/generation-smoke": {
+                        "status": "done",
+                        "latest": {"accepted": True, "mediaUrl": "https://cdn.example/generated.png"},
+                    },
+                }
+            ),
+            runner=_fake_runner(existing_secrets=True),
+        )
+
+        self.assertEqual(report["status"], "degraded")
+        blocking_ids = {item["id"] for item in report["blocking"]}
+        self.assertIn("target-bot-preview-execution", blocking_ids)
+
+
+if __name__ == "__main__":
+    unittest.main()

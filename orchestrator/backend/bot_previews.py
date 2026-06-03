@@ -104,17 +104,26 @@ def _default_asset_id_for_bot(bot: dict[str, Any]) -> str:
     return "character-scene" if bot_type == "image-to-image" else "cinematic-neon-city"
 
 
+def _is_bot_specific_asset(bot: dict[str, Any], asset: dict[str, Any]) -> bool:
+    bot_slug = str(bot.get("slug") or "")
+    return bool(asset.get("botSpecific") or asset.get("botSlug") == bot_slug or asset.get("targetBotSlug") == bot_slug)
+
+
 def _preview_from_asset(bot: dict[str, Any], asset: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
     source_url = str(asset.get("mediaUrl") or asset.get("thumbnailUrl") or "")
     original_url = str(asset.get("originalRemoteUrl") or "")
     checked_at = str(asset.get("checkedAt") or manifest.get("generatedAt") or _now_iso())
+    bot_specific = _is_bot_specific_asset(bot, asset)
+    target_bot_executed = bool(asset.get("targetBotExecuted"))
+    preview_kind = "bot_specific_real_myshell_output" if bot_specific else "representative_real_myshell_output"
+    status = "ready" if bot_specific else "needs_generation"
     return {
         "botSlug": bot["slug"],
         "botName": bot["name"],
         "botType": bot.get("type"),
         "pageId": bot.get("pageId") or "myshell-art",
-        "status": "ready",
-        "accepted": True,
+        "status": status,
+        "accepted": bot_specific,
         "mediaUrl": source_url,
         "thumbnailUrl": source_url,
         "posterUrl": source_url,
@@ -125,15 +134,20 @@ def _preview_from_asset(bot: dict[str, Any], asset: dict[str, Any], manifest: di
         "originalRemoteUrl": original_url,
         "generatedPrompt": asset.get("prompt"),
         "checkedAt": checked_at,
-        "previewKind": "representative_real_myshell_output",
-        "botSpecific": False,
+        "previewKind": preview_kind,
+        "botSpecific": bot_specific,
+        "targetBotExecuted": target_bot_executed,
         "evidence": {
-            "status": "done",
+            "status": "done" if bot_specific else "needs_generation",
             "source": asset.get("source") or manifest.get("source") or "myshell-openapi",
-            "accepted": True,
+            "accepted": bot_specific,
             "mediaUrl": source_url,
             "checkedAt": checked_at,
-            "message": "Preview is a real MyShell OpenAPI generated image stored as a local Studio asset.",
+            "botSpecific": bot_specific,
+            "targetBotExecuted": target_bot_executed,
+            "message": "Preview is a bot-specific real MyShell generated image stored as a local Studio asset."
+            if bot_specific
+            else "Preview is a representative real MyShell generated image stored as a local Studio asset.",
         },
     }
 
@@ -152,12 +166,15 @@ def _missing_preview(bot: dict[str, Any], manifest: dict[str, Any], asset_id: st
         "checkedAt": checked_at,
         "previewKind": "missing",
         "botSpecific": False,
+        "targetBotExecuted": False,
         "message": "Run the MyShell preview refresh tool after credentials are configured.",
         "evidence": {
             "status": "auth_missing",
             "source": "missing-preview-asset",
             "accepted": False,
             "checkedAt": checked_at,
+            "botSpecific": False,
+            "targetBotExecuted": False,
             "message": "No verified MyShell preview asset is available for this bot yet.",
         },
     }
@@ -180,6 +197,20 @@ def preview_for_bot(bot: dict[str, Any], manifest: dict[str, Any] | None = None)
     preview = _preview_from_asset(bot, asset, preview_manifest)
     if isinstance(override, dict):
         preview.update({key: value for key, value in override.items() if key not in {"assetId"}})
+    preview["previewKind"] = (
+        "bot_specific_real_myshell_output" if preview.get("botSpecific") else "representative_real_myshell_output"
+    )
+    if preview.get("botSpecific") and preview.get("mediaUrl"):
+        preview["status"] = "ready"
+        preview["accepted"] = True
+    else:
+        preview["status"] = "needs_generation"
+        preview["accepted"] = False
+    if isinstance(preview.get("evidence"), dict):
+        preview["evidence"]["botSpecific"] = bool(preview.get("botSpecific"))
+        preview["evidence"]["targetBotExecuted"] = bool(preview.get("targetBotExecuted"))
+        preview["evidence"]["accepted"] = bool(preview.get("accepted"))
+        preview["evidence"]["status"] = "done" if preview.get("accepted") else "needs_generation"
     return preview
 
 
@@ -188,6 +219,10 @@ def list_bot_previews() -> dict[str, Any]:
     bots = _all_preview_bots()
     previews = [preview_for_bot(bot, manifest) for bot in bots]
     ready_count = sum(1 for preview in previews if preview.get("status") == "ready" and preview.get("accepted"))
+    bot_specific_count = sum(1 for preview in previews if preview.get("status") == "ready" and preview.get("accepted") and preview.get("botSpecific"))
+    target_executed_count = sum(
+        1 for preview in previews if preview.get("status") == "ready" and preview.get("accepted") and preview.get("targetBotExecuted")
+    )
     return {
         "version": manifest.get("version") or "missing",
         "source": manifest.get("source") or "missing-manifest",
@@ -198,6 +233,9 @@ def list_bot_previews() -> dict[str, Any]:
             "total": len(previews),
             "ready": ready_count,
             "needsGeneration": len(previews) - ready_count,
+            "botSpecific": bot_specific_count,
+            "representative": ready_count - bot_specific_count,
+            "targetBotExecuted": target_executed_count,
             "assets": len(manifest.get("assets", [])),
             "dreamyBots": len(DREAMY_BOTS),
             "artBots": len(MYSHELL_BOTS),

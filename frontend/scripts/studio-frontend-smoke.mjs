@@ -23,7 +23,7 @@ export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'starter-presets',
   'starter-visual-recommendations',
   'starter-bot-preview-image',
-  'starter-bot-preview-real',
+  'starter-bot-preview-asset',
   'all-bot-previews',
   'all-bot-preview-card',
   'all-bot-preview-image',
@@ -389,8 +389,8 @@ export async function runStudioFrontendSmoke(options = {}) {
       await previewImage.waitFor({ state: 'visible', timeout: timeoutMs });
       const previewSource = (await previewImage.getAttribute('src')) || '';
       checks.push({
-        id: 'starter-bot-preview-real',
-        label: 'Starter bot preview uses generated MyShell media',
+        id: 'starter-bot-preview-asset',
+        label: 'Starter bot preview uses generated MyShell media asset',
         ok: /\/generated\/bot-previews\//i.test(previewSource),
         message: /\/generated\/bot-previews\//i.test(previewSource)
           ? undefined
@@ -398,8 +398,8 @@ export async function runStudioFrontendSmoke(options = {}) {
       });
     } catch (error) {
       checks.push({
-        id: 'starter-bot-preview-real',
-        label: 'Starter bot preview uses generated MyShell media',
+        id: 'starter-bot-preview-asset',
+        label: 'Starter bot preview uses generated MyShell media asset',
         ok: false,
         message: error instanceof Error ? error.message : String(error),
       });

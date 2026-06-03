@@ -431,7 +431,7 @@ function hydrateStarterPresets(
     const previewSlug = manifestStarter?.botSlug || preset.botSlug;
     const preview = previewBySlug.get(previewSlug);
     const previewMedia = resolveStudioDisplayAssetUrl(preview?.thumbnailUrl || preview?.mediaUrl || preview?.posterUrl);
-    const visualUrl = preview?.status === 'ready' && preview.accepted && previewMedia ? previewMedia : preset.fallbackVisualUrl;
+    const visualUrl = previewMedia || preset.fallbackVisualUrl;
     return {
       ...preset,
       botSlug: previewSlug,
@@ -3245,8 +3245,8 @@ function Composer({
                     <Bot size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
                     <span className="truncate">Connected MyShell bots</span>
                   </span>
-                  <Pill tone={visibleBotPreviewCards.every((preview) => preview.accepted) ? 'success' : 'hot'}>
-                    {`${visibleBotPreviewCards.filter((preview) => preview.accepted).length}/${visibleBotPreviewCards.length} real`}
+                  <Pill tone={visibleBotPreviewCards.every((preview) => preview.accepted && preview.botSpecific) ? 'success' : 'hot'}>
+                    {`${visibleBotPreviewCards.filter((preview) => preview.accepted && preview.botSpecific).length}/${visibleBotPreviewCards.length} bot-specific`}
                   </Pill>
                 </div>
                 <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
@@ -3269,6 +3269,11 @@ function Composer({
                           <span className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[9px] font-semibold text-white">
                             {previewLabelFor(preview)}
                           </span>
+                          {preview.targetBotExecuted ? (
+                            <span className="absolute bottom-1.5 right-1.5 rounded bg-Cr-text-success-default-v2/90 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                              executed
+                            </span>
+                          ) : null}
                         </div>
                         <div className="grid gap-1 p-2">
                           <span className="truncate text-[11px] font-semibold text-Cr-text-default-v2">{preview.botName}</span>

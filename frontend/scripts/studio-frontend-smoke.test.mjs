@@ -106,7 +106,7 @@ test('runStudioFrontendSmoke records starter presets and direct preset generatio
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('ai-recommendation-run'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-visual-recommendations'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-bot-preview-image'));
-  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-bot-preview-real'));
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-bot-preview-asset'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('all-bot-previews'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('all-bot-preview-card'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('all-bot-preview-image'));
@@ -118,7 +118,7 @@ test('runStudioFrontendSmoke records starter presets and direct preset generatio
   assert.match(runStudioFrontendSmoke.toString(), /ai-recommendation-run/);
   assert.match(runStudioFrontendSmoke.toString(), /starter-visual-recommendations/);
   assert.match(runStudioFrontendSmoke.toString(), /starter-bot-preview-image/);
-  assert.match(runStudioFrontendSmoke.toString(), /starter-bot-preview-real/);
+  assert.match(runStudioFrontendSmoke.toString(), /starter-bot-preview-asset/);
   assert.match(runStudioFrontendSmoke.toString(), /all-bot-previews/);
   assert.match(runStudioFrontendSmoke.toString(), /all-bot-preview-card/);
   assert.match(runStudioFrontendSmoke.toString(), /all-bot-preview-image/);

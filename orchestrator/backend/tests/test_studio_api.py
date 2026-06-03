@@ -315,9 +315,11 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("seedream-multi-chart", preview_by_slug)
         self.assertEqual(preview_body["summary"]["dreamyBots"], 2)
         self.assertGreaterEqual(preview_body["summary"]["artBots"], 38)
-        self.assertEqual(preview_body["summary"]["ready"], preview_body["summary"]["total"])
+        self.assertEqual(preview_body["summary"]["total"], preview_body["summary"]["dreamyBots"] + preview_body["summary"]["artBots"])
+        self.assertIn("botSpecific", preview_body["summary"])
+        self.assertIn("representative", preview_body["summary"])
         self.assertTrue(preview_by_slug["ai-porn-generator"]["mediaUrl"].startswith("/generated/bot-previews/"))
-        self.assertTrue(preview_by_slug["seedream-multi-chart"]["accepted"])
+        self.assertIn("botSpecific", preview_by_slug["seedream-multi-chart"])
 
         bots = self.client.get("/api/bots")
         self.assertEqual(bots.status_code, 200)

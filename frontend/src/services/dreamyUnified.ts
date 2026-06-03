@@ -132,6 +132,7 @@ export interface StudioBotPreview {
   checkedAt?: string;
   previewKind?: string;
   botSpecific?: boolean;
+  targetBotExecuted?: boolean;
   message?: string;
   evidence?: StudioEvidence;
 }
@@ -146,6 +147,9 @@ export interface StudioBotPreviewsResponse {
     total: number;
     ready: number;
     needsGeneration: number;
+    botSpecific?: number;
+    representative?: number;
+    targetBotExecuted?: number;
     assets: number;
     dreamyBots: number;
     artBots: number;

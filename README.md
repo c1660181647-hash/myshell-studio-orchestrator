@@ -94,7 +94,7 @@ http://127.0.0.1:5174/?test_route=dreamy
 
 `/api/studio/overview` aggregates pages, agents, latest jobs, and status counts for the Studio command center. Page summaries include runtime readiness, related agent ids, per-status job counts, and the latest job for that page.
 
-`/api/studio/bot-previews` returns the Studio bot preview registry for Dreamy and all registered MyShell Art bots. Each preview includes `status`, `accepted`, `mediaUrl`, `source`, source widget metadata, and evidence. The checked-in manifest uses real MyShell OpenAPI image results stored under `/generated/bot-previews/`; missing future assets report `needs_generation` or `auth_missing` instead of being shown as completed previews.
+`/api/studio/bot-previews` returns the Studio bot preview registry for Dreamy and all registered MyShell Art bots. Each preview includes `status`, `accepted`, `mediaUrl`, `source`, source widget metadata, `botSpecific`, `targetBotExecuted`, and evidence. The checked-in manifest uses real MyShell OpenAPI image results stored under `/generated/bot-previews/`; representative images can still render as visual guidance, but only bot-specific generated assets are counted as `accepted`/`ready`. Missing future assets report `needs_generation` or `auth_missing` instead of being shown as completed previews.
 
 `/api/studio/dispatch-matrix` returns a full page-to-agent routing matrix for every registered MyShell surface. It includes the recommended action (`navigate`, `execute-client`, or `execute-server`), default agent id, executor, auth status, navigation path, route params, missing params, and readiness summary so operators can audit and launch dispatch targets from one panel. Pass `project_id` and optional `source_segment_id` to compute contextual routes from the current media segment, such as filling Tag Generator's required `img` parameter from an accepted image. The Studio UI exposes each navigation target with Dispatch, Open, and Copy controls so operators can either run the adapter path or open/share the exact resolved page URL.
 
@@ -196,6 +196,27 @@ python -m studio_smoke --base-url http://127.0.0.1:8090
 ```
 
 The smoke checks `/api/health`, `/api/pages`, `/api/agents`, readiness, dispatch matrix, coverage, and delivery audit. It fails if required MyShell pages or agents are missing, required readiness gates are blocked, or delivery artifacts are not exposed.
+
+Full generation-chain gate:
+
+```bash
+python scripts/generation_chain_check.py \
+  --base-url https://art-chat-orchestrator-ju35f47zeq-ew.a.run.app \
+  --project k-project-481102 \
+  --check-local-cookies \
+  --require-live
+```
+
+This check does not print secret values. It verifies Cloud Run traffic, Secret Manager presence, public health components, bot-specific generated preview coverage, target-bot execution evidence, optional local MyShell cookie availability, and the live generation smoke. It stays blocked until `/api/studio/bot-previews` reports `summary.botSpecific == summary.total` and `summary.targetBotExecuted == summary.total`, `myshell-dreamy-init-data` and `myshell-cookies` exist, Cloud Run injects them, and `/api/studio/generation-smoke` accepts fresh media.
+
+Bot-specific preview refresh workflow:
+
+```bash
+python scripts/materialize_bot_preview_manifest.py --print-worklist
+python scripts/materialize_bot_preview_manifest.py --input /path/to/generated-bot-preview-urls.json
+```
+
+The input JSON maps each `botSlug` to a real MyShell image URL or an object with `remoteUrl`, optional `prompt`, `sourceWidgetId`, `sourceWidgetName`, and `targetBotExecuted`. The script downloads the images into `frontend/public/generated/bot-previews/`, writes `manifest.json`, and marks each entry as `botSpecific`.
 
 Running frontend browser smoke after backend and frontend dev servers start:
 
