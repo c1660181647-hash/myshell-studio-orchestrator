@@ -391,7 +391,7 @@ def build_generation_chain_report(
                 )
             if target_execution["dreamyTargetBotTotal"] and target_execution["dreamyTargetBotExecuted"] < target_execution["dreamyTargetBotTotal"]:
                 next_actions.append(
-                    "Run real Dreamy target executions for the Dreamy preview bots and materialize only accepted media as targetBotExecuted."
+                    "Run real Dreamy server jobs for the Dreamy preview bots, then import accepted jobs with scripts/materialize_dreamy_target_previews.py."
                 )
             if not target_execution["artTargetBotTotal"] and not target_execution["dreamyTargetBotTotal"]:
                 next_actions.append(

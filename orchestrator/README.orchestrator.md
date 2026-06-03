@@ -158,6 +158,19 @@ python scripts/materialize_bot_preview_manifest.py \
   --merge-existing-manifest
 ```
 
+Dreamy preview bots are Studio-level abstractions. After real Dreamy server jobs have accepted media, import that persisted evidence explicitly before merging the manifest:
+
+```bash
+python scripts/materialize_dreamy_target_previews.py \
+  --base-url https://art-chat-orchestrator-ju35f47zeq-ew.a.run.app \
+  --output .studio-delivery-check/dreamy-target-preview-urls.json
+python scripts/materialize_bot_preview_manifest.py \
+  --input .studio-delivery-check/dreamy-target-preview-urls.json \
+  --merge-existing-manifest
+```
+
+The Dreamy importer does not start generation and does not read credentials; it only marks `targetBotExecuted: true` for `done` Dreamy jobs whose evidence is already accepted and has an HTTP(S) media URL.
+
 The runner prefers `--executor art-api`, which resolves public Art metadata and calls the target bot API directly with the public-page `targetBotId`. It reads cookies from `MYSHELL_COOKIES`, `MYSHELL_COOKIES_FILE`, or backend-local cookie files, and only marks `targetBotExecuted: true` after the target bot returns a fresh output URL. The default CDP executor remains available for browser-session fallback; with `--resolve-public-metadata`, the plan/report also records the exact public-page `targetBotId`, `targetSlugId`, template, and generate button text. `GET /api/studio/art-api-auth-smoke` verifies deployed Art API auth without printing secret values. Materialize partial target runs with `--merge-existing-manifest` so unchanged bot previews remain present while newly verified bots update their execution evidence. If health or runner evidence reports `captcha_required`, the browser reached a MyShell/Cloudflare challenge page after cookie injection; use a verified browser session or complete the challenge before rerunning target-bot execution.
 
 ## Tests
