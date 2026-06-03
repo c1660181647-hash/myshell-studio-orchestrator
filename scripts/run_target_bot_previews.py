@@ -9,6 +9,9 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
+from urllib.error import URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -26,8 +29,10 @@ from materialize_bot_preview_manifest import prompt_for_bot  # noqa: E402
 
 DEFAULT_OUTPUT = REPO_ROOT / ".studio-delivery-check" / "target-bot-preview-urls.json"
 DEFAULT_SOURCE_IMAGE = REPO_ROOT / "frontend" / "public" / "generated" / "bot-previews" / "ai-porn-generator.jpg"
+PUBLIC_ART_PAGE_BASE = "https://art.myshell.ai/creative"
 
 Runner = Callable[..., Awaitable[dict[str, Any]]]
+PublicMetadataResolver = Callable[[str], dict[str, Any] | None]
 
 
 class TargetBotPreviewError(RuntimeError):
@@ -55,6 +60,83 @@ def _selected_bots(slugs: list[str] | None, include_dreamy: bool) -> list[dict[s
     return [by_slug[slug] for slug in slugs]
 
 
+def _read_flight_string(segment: str, field: str) -> str:
+    token = f'\\"{field}\\":\\"'
+    start = segment.find(token)
+    if start < 0:
+        return ""
+    value_start = start + len(token)
+    i = value_start
+    while i < len(segment):
+        if segment[i] == '"':
+            backslashes = 0
+            cursor = i - 1
+            while cursor >= 0 and segment[cursor] == "\\":
+                backslashes += 1
+                cursor -= 1
+            if backslashes == 1:
+                return segment[value_start : i - backslashes]
+        i += 1
+    return ""
+
+
+def _decode_single_text(raw_value: str) -> dict[str, Any]:
+    if not raw_value or raw_value.startswith("$"):
+        return {}
+    try:
+        decoded = json.loads(f'"{raw_value}"')
+        return json.loads(decoded.replace('\\"', '"'))
+    except json.JSONDecodeError:
+        return {}
+
+
+def extract_public_art_metadata(html: str, slug: str) -> dict[str, Any]:
+    slug_token = f'\\"slugId\\":\\"{slug}\\"'
+    slug_index = html.find(slug_token)
+    if slug_index < 0:
+        return {}
+    record_start = html.rfind('\\"botId\\":\\"', 0, slug_index)
+    if record_start < 0:
+        return {}
+    segment = html[record_start : slug_index + len(slug_token) + 2000]
+    single_text = _decode_single_text(_read_flight_string(segment, "singleText"))
+    return {
+        "targetBotId": _read_flight_string(segment, "botId"),
+        "targetSlugId": _read_flight_string(segment, "slugId") or slug,
+        "template": _read_flight_string(segment, "template"),
+        "buttonText": str(single_text.get("button_text") or single_text.get("buttonText") or ""),
+    }
+
+
+def fetch_public_art_metadata(slug: str, timeout: float = 30.0) -> dict[str, Any]:
+    url = f"{PUBLIC_ART_PAGE_BASE}/{quote(slug, safe='')}"
+    request = Request(
+        url,
+        headers={
+            "Accept": "text/html,application/xhtml+xml",
+            "User-Agent": "Mozilla/5.0 (compatible; myshell-studio-orchestrator/1.0)",
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            html = response.read().decode("utf-8", errors="replace")
+    except (TimeoutError, URLError) as exc:
+        raise TargetBotPreviewError(f"Failed to fetch public metadata for {slug}: {exc}") from exc
+    metadata = extract_public_art_metadata(html, slug)
+    if not metadata:
+        raise TargetBotPreviewError(f"No public metadata found for {slug}")
+    return metadata
+
+
+def _resolve_public_metadata(slug: str, resolver: PublicMetadataResolver | None) -> dict[str, Any]:
+    if not resolver:
+        return {}
+    try:
+        return dict(resolver(slug) or {})
+    except Exception as exc:
+        return {"publicMetadataError": str(exc)}
+
+
 def _source_image_for(bot: dict[str, Any], explicit_source: Path | None) -> Path | None:
     if str(bot.get("type") or "") == "text-to-image":
         return None
@@ -71,11 +153,18 @@ def build_run_plan(
     slugs: list[str] | None = None,
     include_dreamy: bool = False,
     source_image: Path | None = None,
+    public_metadata_resolver: PublicMetadataResolver | None = None,
 ) -> list[dict[str, Any]]:
     plan: list[dict[str, Any]] = []
     for bot in _selected_bots(slugs, include_dreamy=include_dreamy):
         requires_image = str(bot.get("type") or "") in {"image-to-image", "image-to-video"}
         source = _source_image_for(bot, source_image) if requires_image else None
+        public_metadata = (
+            _resolve_public_metadata(str(bot["slug"]), public_metadata_resolver)
+            if bot.get("pageId") != "dreamy-miniapp"
+            else {}
+        )
+        gen_button = str(public_metadata.get("buttonText") or bot.get("gen_button", ""))
         plan.append(
             {
                 "botSlug": bot["slug"],
@@ -84,9 +173,15 @@ def build_run_plan(
                 "pageId": bot.get("pageId") or "myshell-art",
                 "executor": "myshell-art-cdp" if bot.get("pageId") != "dreamy-miniapp" else "dreamy-server",
                 "prompt": prompt_for_bot(bot),
-                "genButton": bot.get("gen_button", ""),
+                "genButton": gen_button,
                 "requiresImage": requires_image,
                 "sourceImage": str(source) if source else "",
+                "targetPageUrl": f"{PUBLIC_ART_PAGE_BASE}/{bot['slug']}",
+                "targetBotId": str(public_metadata.get("targetBotId") or ""),
+                "targetSlugId": str(public_metadata.get("targetSlugId") or bot["slug"]),
+                "targetTemplate": str(public_metadata.get("template") or ""),
+                "publicMetadataResolved": bool(public_metadata.get("targetBotId")),
+                "publicMetadataError": str(public_metadata.get("publicMetadataError") or ""),
             }
         )
     return plan
@@ -122,7 +217,10 @@ def _entry_from_result(plan_item: dict[str, Any], result: dict[str, Any], checke
         "execution": {
             "status": "done",
             "executor": plan_item["executor"],
-            "targetPageUrl": f"https://art.myshell.ai/creative/{plan_item['botSlug']}",
+            "targetPageUrl": plan_item.get("targetPageUrl") or f"{PUBLIC_ART_PAGE_BASE}/{plan_item['botSlug']}",
+            "targetBotId": plan_item.get("targetBotId", ""),
+            "targetSlugId": plan_item.get("targetSlugId", plan_item["botSlug"]),
+            "targetTemplate": plan_item.get("targetTemplate", ""),
             "botSlug": plan_item["botSlug"],
             "botName": plan_item.get("botName"),
             "taskId": result.get("task_id") or result.get("taskId") or "",
@@ -138,10 +236,17 @@ async def run_preview_batch(
     source_image: Path | None = None,
     runner: Runner | None = None,
     continue_on_error: bool = True,
+    resolve_public_metadata: bool = False,
 ) -> dict[str, Any]:
     checked_at = _now_iso()
     active_runner = runner or _default_runner()
-    plan = build_run_plan(slugs=slugs, include_dreamy=include_dreamy, source_image=source_image)
+    public_metadata_resolver = fetch_public_art_metadata if resolve_public_metadata else None
+    plan = build_run_plan(
+        slugs=slugs,
+        include_dreamy=include_dreamy,
+        source_image=source_image,
+        public_metadata_resolver=public_metadata_resolver,
+    )
     previews: dict[str, dict[str, Any]] = {}
     results: list[dict[str, Any]] = []
 
@@ -210,18 +315,34 @@ async def async_main(argv: list[str] | None = None) -> int:
     parser.add_argument("--plan-only", action="store_true", help="Print the execution plan without running bots.")
     parser.add_argument("--continue-on-error", action="store_true", default=True)
     parser.add_argument("--merge-existing", action="store_true", help="Merge successful runs into an existing output file.")
+    parser.add_argument("--resolve-public-metadata", action="store_true", help="Fetch each public art page and include exact target bot metadata in the plan/report.")
     args = parser.parse_args(argv)
 
     try:
         slugs = args.slug or None
         if args.plan_only:
-            print(json.dumps({"items": build_run_plan(slugs=slugs, include_dreamy=args.include_dreamy, source_image=args.source_image)}, indent=2, ensure_ascii=False))
+            public_metadata_resolver = fetch_public_art_metadata if args.resolve_public_metadata else None
+            print(
+                json.dumps(
+                    {
+                        "items": build_run_plan(
+                            slugs=slugs,
+                            include_dreamy=args.include_dreamy,
+                            source_image=args.source_image,
+                            public_metadata_resolver=public_metadata_resolver,
+                        )
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
             return 0
         report = await run_preview_batch(
             slugs=slugs,
             include_dreamy=args.include_dreamy,
             source_image=args.source_image,
             continue_on_error=args.continue_on_error,
+            resolve_public_metadata=args.resolve_public_metadata,
         )
         if args.merge_existing:
             merged = _load_existing(args.output)

@@ -44,23 +44,26 @@ def _write_status_payload(payload):
         json.dump(payload, status_file, ensure_ascii=False)
 
 
-def _classify_post_injection_state(current_url, body_text, energy_display):
+def _classify_post_injection_state(current_url, body_text, energy_display, is_login=False):
     url = str(current_url or "")
     text = str(body_text or "")
     energy = str(energy_display or "")
+    login_detected = bool(is_login)
     if "cf-captcha" in url or "connection is secure" in text.lower() or "challenge-platform" in text:
         return {
             "status": "captcha_required",
             "message": "Cloudflare captcha challenge blocked the headless browser; use a verified browser session or complete the challenge before target-bot execution.",
             "energyDisplay": energy,
             "currentUrl": url,
+            "loginDetected": login_detected,
         }
-    success = "not found" not in energy
+    success = login_detected or "not found" not in energy
     return {
         "status": "success" if success else "failed",
         "message": "Cookie injection succeeded" if success else "Cookie injection did not reveal a logged-in energy display",
         "energyDisplay": energy,
         "currentUrl": url,
+        "loginDetected": login_detected,
     }
 
 
@@ -102,6 +105,13 @@ def _load_cookies():
     
     return None
 
+
+def _select_cdp_page(pages):
+    page_targets = [page for page in pages if page.get("type") == "page" and page.get("webSocketDebuggerUrl")]
+    if not page_targets:
+        return pages[0] if pages else None
+    return next((page for page in page_targets if "art.myshell.ai" in page.get("url", "")), page_targets[0])
+
 async def inject_cookies():
     try:
         cookies = _load_cookies()
@@ -128,7 +138,12 @@ async def inject_cookies():
         _write_status("failed", "Chrome not ready after 30s", len(cookies))
         return False
     
-    ws_url = pages[0]["webSocketDebuggerUrl"]
+    page = _select_cdp_page(pages)
+    if not page:
+        print("[COOKIES] Chrome CDP returned no inspectable pages")
+        _write_status("failed", "Chrome CDP returned no inspectable pages", len(cookies))
+        return False
+    ws_url = page["webSocketDebuggerUrl"]
     
     async with websockets.connect(ws_url, max_size=10*1024*1024) as ws:
         mid = [0]
@@ -176,8 +191,9 @@ async def inject_cookies():
         energy = await ev("document.body.innerText.match(/(\\d+)\\s*\\/\\s*(\\d+)/)?.[0] || 'not found'")
         current_url = await ev("location.href")
         body_text = await ev("document.body.innerText.slice(0, 1000)")
+        is_login = await ev("Boolean(window.$global && window.$global.isLogin)")
         print(f"[COOKIES] Energy display: {energy}")
-        state = _classify_post_injection_state(current_url, body_text, energy)
+        state = _classify_post_injection_state(current_url, body_text, energy, is_login)
         _write_status_payload({**state, "cookieCount": len(cookies)})
         return state["status"] == "success"
 

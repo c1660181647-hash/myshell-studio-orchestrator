@@ -26,6 +26,13 @@ def _page_blocker_state(current_url, body_text):
         }
     return {"status": "ok", "message": "", "currentUrl": url}
 
+
+def _select_cdp_page(pages):
+    page_targets = [page for page in pages if page.get("type") == "page" and page.get("webSocketDebuggerUrl")]
+    if not page_targets:
+        return pages[0] if pages else None
+    return next((page for page in page_targets if "art.myshell.ai" in page.get("url", "")), page_targets[0])
+
 async def generate(bot_slug, gen_button, image_b64, prompt=""):
     cdp_url = _cdp_url()
     pages = (await httpx.AsyncClient().get(f"{cdp_url}/json")).json()
@@ -34,8 +41,12 @@ async def generate(bot_slug, gen_button, image_b64, prompt=""):
             "status": "error",
             "message": f"Chrome CDP returned no inspectable pages at {cdp_url}; start or refresh Chrome.",
         }
-    # Find art.myshell.ai tab or first page
-    tab = next((p for p in pages if 'art.myshell.ai' in p.get('url', '')), pages[0])
+    tab = _select_cdp_page(pages)
+    if not tab:
+        return {
+            "status": "error",
+            "message": f"Chrome CDP returned no inspectable pages at {cdp_url}; start or refresh Chrome.",
+        }
     ws_url = tab["webSocketDebuggerUrl"]
     
     async with websockets.connect(ws_url, max_size=50*1024*1024) as ws:

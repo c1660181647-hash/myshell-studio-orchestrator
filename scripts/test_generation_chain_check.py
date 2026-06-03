@@ -1,6 +1,7 @@
 import importlib.util
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 MODULE_PATH = Path(__file__).with_name("generation_chain_check.py")
@@ -186,6 +187,50 @@ class GenerationChainCheckTest(unittest.TestCase):
         )
 
         self.assertIn("captcha", " ".join(report["nextActions"]).lower())
+
+    def test_report_local_cookie_evidence_mentions_missing_ms_token(self) -> None:
+        with patch.object(
+            generation_chain_check,
+            "_local_cookie_status",
+            return_value={
+                "status": "ready",
+                "cookieCount": 2,
+                "cookieNames": ["privy-session", "privy-token"],
+                "missingCookieNames": ["ms_token"],
+                "profiles": [{"profile": "Default", "cookieCount": 2, "domains": [".myshell.ai"]}],
+            },
+        ):
+            report = generation_chain_check.build_generation_chain_report(
+                base_url="https://studio.example",
+                project="project",
+                require_live=False,
+                check_local_cookies=True,
+                fetcher=_fake_fetch(
+                    {
+                        "/api/health": {
+                            "status": "ok",
+                            "components": {
+                                "dreamyApiAuth": {"status": "ready"},
+                                "myshellCookies": {"status": "ready"},
+                                "cookieInjection": {"status": "ready"},
+                                "chromeCdp": {"status": "ok"},
+                            },
+                        },
+                        "/api/studio/bot-previews": {
+                            "summary": {"ready": 40, "total": 40, "botSpecific": 40, "targetBotExecuted": 40}
+                        },
+                        "/api/studio/generation-smoke": {
+                            "status": "done",
+                            "latest": {"accepted": True, "mediaUrl": "https://cdn.example/generated.png"},
+                        },
+                    }
+                ),
+                runner=_fake_runner(existing_secrets=True),
+            )
+
+        local = next(item for item in report["requirements"] if item["id"] == "local-cookies")
+        self.assertEqual(local["evidence"]["missingCookieNames"], ["ms_token"])
+        self.assertEqual(local["evidence"]["cookieNames"], ["privy-session", "privy-token"])
 
 
 if __name__ == "__main__":

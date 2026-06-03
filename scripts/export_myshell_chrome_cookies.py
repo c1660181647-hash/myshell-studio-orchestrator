@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 DEFAULT_CHROME_DIR = Path.home() / "Library" / "Application Support" / "Google" / "Chrome"
 DEFAULT_HOST_PATTERNS = ("%myshell.ai%", "%myshell.fun%", "%myshellstatic.com%")
+REQUIRED_MYSHELL_ART_COOKIE_NAMES = ("ms_token",)
 
 
 class CookieExportError(RuntimeError):
@@ -131,6 +132,28 @@ def _dedupe(cookies: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(deduped.values())
 
 
+def _cookie_names(cookies: list[dict[str, Any]]) -> list[str]:
+    return sorted({str(cookie.get("name") or "") for cookie in cookies if isinstance(cookie, dict) and cookie.get("name")})
+
+
+def _missing_cookie_names(cookies: list[dict[str, Any]]) -> list[str]:
+    names = set(_cookie_names(cookies))
+    return [name for name in REQUIRED_MYSHELL_ART_COOKIE_NAMES if name not in names]
+
+
+def _summary_from_export_result(result: dict[str, Any], output: str) -> dict[str, Any]:
+    cookies = [cookie for cookie in result.get("cookies", []) if isinstance(cookie, dict)]
+    return {
+        "status": result["status"],
+        "cookieCount": result["cookieCount"],
+        "cookieNames": _cookie_names(cookies),
+        "requiredCookieNames": list(REQUIRED_MYSHELL_ART_COOKIE_NAMES),
+        "missingCookieNames": _missing_cookie_names(cookies),
+        "profiles": result["profiles"],
+        "output": output,
+    }
+
+
 def export_cookies(chrome_dir: Path, profiles: list[str], host_patterns: tuple[str, ...]) -> dict[str, Any]:
     key = _chrome_key(_safe_storage_password())
     profile_results: list[dict[str, Any]] = []
@@ -141,6 +164,8 @@ def export_cookies(chrome_dir: Path, profiles: list[str], host_patterns: tuple[s
             {
                 "profile": profile_dir.name,
                 "cookieCount": len(cookies),
+                "cookieNames": _cookie_names(cookies),
+                "missingCookieNames": _missing_cookie_names(cookies),
                 "domains": sorted({str(cookie.get("domain") or "") for cookie in cookies}),
             }
         )
@@ -170,12 +195,7 @@ def main() -> int:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(result["cookies"], ensure_ascii=False), encoding="utf-8")
         os.chmod(output_path, 0o600)
-    summary = {
-        "status": result["status"],
-        "cookieCount": result["cookieCount"],
-        "profiles": result["profiles"],
-        "output": args.output or "",
-    }
+    summary = _summary_from_export_result(result, args.output or "")
     print(json.dumps(summary, indent=2, ensure_ascii=False) if args.summary_json else f"MyShell cookies: {summary['cookieCount']} ({summary['status']})")
     return 0 if result["status"] == "ready" else 1
 

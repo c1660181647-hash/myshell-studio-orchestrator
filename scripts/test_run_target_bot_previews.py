@@ -11,6 +11,39 @@ spec.loader.exec_module(run_target)
 
 
 class RunTargetBotPreviewsTest(unittest.IsolatedAsyncioTestCase):
+    def test_extracts_public_art_metadata_for_target_slug(self) -> None:
+        html = r'''
+        self.__next_f.push([1,"...\"botId\":\"1751532766\",\"template\":\"template1\",\"floorUrl\":\"creative\",\"singleText\":\"{\\\"title\\\":\\\"Create Iconic Brat Album Covers Instantly\\\",\\\"button_text\\\":\\\"Generate Brat Cover\\\",\\\"inputComponents\\\":[{\\\"type\\\":\\\"prompt\\\"}]}\",\"slugId\":\"brat-generator\",\"metaTitle\":\"Brat Generator\"..."]);
+        self.__next_f.push([1,"...\"botId\":\"1764310790\",\"template\":\"template4\",\"floorUrl\":\"creative\",\"singleText\":\"$1a\",\"slugId\":\"urban-whimsy-filter\",\"metaTitle\":\"Fisheye Lens Filter\"..."]);
+        '''
+
+        metadata = run_target.extract_public_art_metadata(html, "brat-generator")
+
+        self.assertEqual(metadata["targetBotId"], "1751532766")
+        self.assertEqual(metadata["targetSlugId"], "brat-generator")
+        self.assertEqual(metadata["template"], "template1")
+        self.assertEqual(metadata["buttonText"], "Generate Brat Cover")
+
+    def test_plan_can_include_resolved_public_metadata(self) -> None:
+        def fake_resolver(slug: str) -> dict[str, str]:
+            self.assertEqual(slug, "brat-generator")
+            return {
+                "targetBotId": "1751532766",
+                "targetSlugId": "brat-generator",
+                "template": "template1",
+                "buttonText": "Generate Brat Cover",
+            }
+
+        plan = run_target.build_run_plan(
+            slugs=["brat-generator"],
+            include_dreamy=False,
+            public_metadata_resolver=fake_resolver,
+        )
+
+        self.assertEqual(plan[0]["targetBotId"], "1751532766")
+        self.assertEqual(plan[0]["targetSlugId"], "brat-generator")
+        self.assertEqual(plan[0]["targetTemplate"], "template1")
+
     async def test_run_selected_art_bot_marks_target_execution(self) -> None:
         calls = []
 

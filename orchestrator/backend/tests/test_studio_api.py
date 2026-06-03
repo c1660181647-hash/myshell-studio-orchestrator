@@ -902,6 +902,27 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(art_auth["status"], "auth_missing")
         self.assertEqual(art_auth["injectionStatus"], "error")
 
+    def test_health_reports_missing_myshell_art_ms_token_cookie(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "MYSHELL_COOKIES": json.dumps(
+                    [
+                        {"name": "privy-token", "value": "redacted", "domain": ".myshell.ai"},
+                        {"name": "privy-session", "value": "redacted", "domain": ".myshell.ai"},
+                    ]
+                )
+            },
+        ):
+            health = self.client.get("/api/health")
+
+        self.assertEqual(health.status_code, 200)
+        myshell_cookies = health.json()["components"]["myshellCookies"]
+        self.assertEqual(myshell_cookies["status"], "ready")
+        self.assertEqual(myshell_cookies["artApiAuthCookieStatus"], "missing")
+        self.assertIn("ms_token", myshell_cookies["missingCookieNames"])
+        self.assertIn("ms_token", myshell_cookies["message"])
+
     def test_health_degrades_when_myshell_cookie_auth_is_missing(self) -> None:
         import studio_runtime
 
@@ -1194,10 +1215,37 @@ class StudioApiTest(unittest.TestCase):
             current_url="https://art.myshell.ai/cf-captcha?originHref=https://art.myshell.ai/",
             body_text="Checking if the site connection is secure",
             energy_display="not found",
+            is_login=False,
         )
 
         self.assertEqual(state["status"], "captcha_required")
         self.assertIn("headless browser", state["message"])
+
+    def test_cookie_injection_accepts_global_login_flag(self) -> None:
+        import inject_cookies
+
+        state = inject_cookies._classify_post_injection_state(
+            current_url="https://art.myshell.ai/",
+            body_text="MyShell Art",
+            energy_display="not found",
+            is_login=True,
+        )
+
+        self.assertEqual(state["status"], "success")
+        self.assertEqual(state["loginDetected"], True)
+
+    def test_cookie_injection_prefers_art_page_over_extension_target(self) -> None:
+        import inject_cookies
+
+        selected = inject_cookies._select_cdp_page(
+            [
+                {"type": "background_page", "url": "chrome-extension://abc/background.html", "webSocketDebuggerUrl": "ws://extension"},
+                {"type": "page", "url": "https://art.myshell.ai/", "webSocketDebuggerUrl": "ws://art"},
+                {"type": "page", "url": "https://example.com/", "webSocketDebuggerUrl": "ws://example"},
+            ]
+        )
+
+        self.assertEqual(selected["webSocketDebuggerUrl"], "ws://art")
 
     def test_cookie_injection_reports_invalid_cookie_source_without_throwing(self) -> None:
         import inject_cookies

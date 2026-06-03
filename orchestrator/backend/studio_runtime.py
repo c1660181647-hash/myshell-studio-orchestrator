@@ -14,6 +14,7 @@ DEFAULT_COOKIE_INJECTION_STATUS_PATH = os.path.join(os.path.dirname(__file__), "
 COOKIE_FILE_NAMES = ("myshell-cookies.json", "myshell_cookies_embedded.json")
 DREAMY_INIT_DATA_ENV_NAMES = ("DREAMY_TELEGRAM_INIT_DATA", "MYSHELL_DREAMY_INIT_DATA")
 DREAMY_DEFAULT_API_BASE_URL = "https://api.myshell.fun"
+MYSHELL_ART_REQUIRED_COOKIE_NAMES = ("ms_token",)
 SECRET_BINDINGS = (
     {
         "env": "DREAMY_TELEGRAM_INIT_DATA",
@@ -26,6 +27,17 @@ SECRET_BINDINGS = (
         "purpose": "MyShell Art browser cookie injection",
     },
 )
+
+
+def _cookie_name_status(payload: list[dict[str, Any]]) -> dict[str, Any]:
+    names = sorted({str(cookie.get("name") or "") for cookie in payload if isinstance(cookie, dict) and cookie.get("name")})
+    missing = [name for name in MYSHELL_ART_REQUIRED_COOKIE_NAMES if name not in names]
+    return {
+        "cookieNames": names,
+        "requiredCookieNames": list(MYSHELL_ART_REQUIRED_COOKIE_NAMES),
+        "missingCookieNames": missing,
+        "artApiAuthCookieStatus": "ready" if not missing else "missing",
+    }
 
 
 def cdp_url() -> str:
@@ -46,6 +58,10 @@ def _cookie_payload_status(payload: Any, *, mode: str, source: str) -> dict[str,
             "mode": mode,
             "source": source,
             "cookieCount": 0,
+            "cookieNames": [],
+            "requiredCookieNames": list(MYSHELL_ART_REQUIRED_COOKIE_NAMES),
+            "missingCookieNames": list(MYSHELL_ART_REQUIRED_COOKIE_NAMES),
+            "artApiAuthCookieStatus": "missing",
             "message": f"{source} contains no cookies",
         }
     for index, cookie in enumerate(payload):
@@ -57,12 +73,19 @@ def _cookie_payload_status(payload: Any, *, mode: str, source: str) -> dict[str,
                 "cookieCount": len(payload),
                 "message": f"{source}[{index}] must include cookie name and value",
             }
+    cookie_names = _cookie_name_status(payload)
+    message = "Cookies configured"
+    if cookie_names["missingCookieNames"]:
+        message = (
+            "Cookies configured, but ms_token is missing; MyShell Art API auth may remain logged out after injection."
+        )
     return {
         "status": "ready",
         "mode": mode,
         "source": source,
         "cookieCount": len(payload),
-        "message": "Cookies configured",
+        **cookie_names,
+        "message": message,
     }
 
 

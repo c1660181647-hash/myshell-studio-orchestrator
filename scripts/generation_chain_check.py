@@ -250,10 +250,15 @@ def build_generation_chain_report(
                 "evidence": {
                     "status": local_cookies.get("status"),
                     "cookieCount": local_cookies.get("cookieCount"),
+                    "cookieNames": local_cookies.get("cookieNames", []),
+                    "requiredCookieNames": local_cookies.get("requiredCookieNames", []),
+                    "missingCookieNames": local_cookies.get("missingCookieNames", []),
                     "profiles": [
                         {
                             "profile": profile.get("profile"),
                             "cookieCount": profile.get("cookieCount"),
+                            "cookieNames": profile.get("cookieNames", []),
+                            "missingCookieNames": profile.get("missingCookieNames", []),
                             "domains": profile.get("domains"),
                         }
                         for profile in local_cookies.get("profiles", [])
@@ -273,6 +278,12 @@ def build_generation_chain_report(
             next_actions.append("Run each target MyShell bot adapter until /api/studio/bot-previews summary.targetBotExecuted equals summary.total.")
         if _component_status(health, "cookieInjection") == "captcha_required":
             next_actions.append("Resolve the MyShell/Cloudflare captcha in a verified browser session before rerunning target-bot execution.")
+        if check_local_cookies and local_cookies.get("missingCookieNames"):
+            next_actions.append(
+                "Refresh the local MyShell login until the cookie export includes: "
+                + ", ".join(str(name) for name in local_cookies.get("missingCookieNames", []))
+                + "."
+            )
         if secrets.get("status") not in {"ready", "skipped"}:
             next_actions.append("Create or update Secret Manager secrets myshell-dreamy-init-data and myshell-cookies.")
         if _component_status(health, "dreamyApiAuth") != "ready" or _component_status(health, "myshellCookies") != "ready":

@@ -109,6 +109,14 @@ python3 scripts/export_myshell_chrome_cookies.py \
   --summary-json
 ```
 
+The summary is value-safe: it includes cookie names, profile coverage, and missing required cookie names such as `ms_token`, but never cookie values. To verify whether those cookies are accepted by the MyShell Art homepage API before uploading anything, run:
+
+```bash
+python scripts/probe_myshell_art_api.py --cookies-file /tmp/myshell-cookies.json
+```
+
+This default probe calls non-generating auth/task endpoints only. Use `--execute --bot-id <targetBotId>` only when a real Art generation run is intended.
+
 Get `DREAMY_TELEGRAM_INIT_DATA` from a real Telegram Miniapp session. It must look like Telegram WebApp `initData` and include `auth_date` plus `hash`.
 
 Then configure Secret Manager, deploy, and require a real media result:
@@ -125,16 +133,17 @@ Without `--apply`, this command is a dry-run and does not upload values. The scr
 Target bot preview execution evidence is collected before materializing preview assets:
 
 ```bash
-python scripts/run_target_bot_previews.py --plan-only --slug brat-generator
+python scripts/run_target_bot_previews.py --plan-only --slug brat-generator --resolve-public-metadata
 MYSHELL_CDP_URL=http://127.0.0.1:9222 \
   python scripts/run_target_bot_previews.py \
   --slug brat-generator \
+  --resolve-public-metadata \
   --output .studio-delivery-check/target-bot-preview-urls.json \
   --merge-existing
 python scripts/materialize_bot_preview_manifest.py --input .studio-delivery-check/target-bot-preview-urls.json
 ```
 
-The runner reuses the MyShell Art CDP bridge and only marks `targetBotExecuted: true` after the target page returns a fresh output URL. If health or runner evidence reports `captcha_required`, the browser reached a MyShell/Cloudflare challenge page after cookie injection; use a verified browser session or complete the challenge before rerunning target-bot execution.
+The runner reuses the MyShell Art CDP bridge and only marks `targetBotExecuted: true` after the target page returns a fresh output URL. With `--resolve-public-metadata`, the plan/report also records the exact public-page `targetBotId`, `targetSlugId`, template, and generate button text. If health or runner evidence reports `captcha_required`, the browser reached a MyShell/Cloudflare challenge page after cookie injection; use a verified browser session or complete the challenge before rerunning target-bot execution.
 
 ## Tests
 
