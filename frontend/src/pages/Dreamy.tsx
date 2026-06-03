@@ -3344,13 +3344,6 @@ function RecommendationAgentPanel({
         <img src={preset.visualUrl} alt="" className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
         <div className="absolute -left-6 top-0 h-full w-12 rotate-12 animate-pulse bg-white/20 blur-sm" />
-        <div
-          data-testid={preset.previewAccepted ? 'ai-recommendation-real-preview' : 'ai-recommendation-preview-fallback'}
-          className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white"
-        >
-          <Bot size={10} />
-          {preset.previewLabel}
-        </div>
       </div>
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
@@ -3463,7 +3456,7 @@ function BotSelectionPanel({
                     <span className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-black/10" />
                     <span
                       data-testid={preset.previewAccepted ? 'starter-bot-preview-real' : 'starter-bot-preview-fallback'}
-                      className="absolute left-2 top-2 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                      className="sr-only"
                     >
                       {preset.previewLabel}
                     </span>
