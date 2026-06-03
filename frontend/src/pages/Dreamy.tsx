@@ -3407,10 +3407,10 @@ function BotSelectionPanel({
   return (
     <section
       data-testid="bot-selection-panel"
-      className="shrink-0 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2"
+      className="flex min-h-[140px] max-h-[min(196px,27dvh)] shrink-0 flex-col overflow-hidden border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2"
       aria-label="Dreamy bot selection"
     >
-      <div className="mb-2 flex items-center justify-between gap-2">
+      <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-xs font-semibold text-Cr-text-subtle-v2">
           <Bot size={14} className="shrink-0 text-dreamy-brand-hot-v2" />
           <span className="truncate">Dreamy bots</span>
@@ -3421,7 +3421,10 @@ function BotSelectionPanel({
         </div>
       </div>
 
-      <div className="max-h-[min(226px,28dvh)] space-y-2 overflow-y-auto pr-1 [-webkit-overflow-scrolling:touch]">
+      <div
+        data-testid="bot-selection-scroll-region"
+        className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 [-webkit-overflow-scrolling:touch]"
+      >
         <RecommendationAgentPanel preset={recommendedPreset} submitting={submitting} onRunPreset={onRunPreset} />
 
         {!!starterPresets.length && (
@@ -3586,15 +3589,11 @@ function Composer({
   mode,
   prompt,
   canSubmitWithoutPrompt,
-  selectedStarterPreset,
-  selectedSegment,
   previewUrl,
   selectedFileName,
   submitting,
   onModeChange,
   onPromptChange,
-  onSelectPreset,
-  onRunPreset,
   onSubmit,
   onPickFile,
   onClearFile,
@@ -3603,15 +3602,11 @@ function Composer({
   mode: StudioMode;
   prompt: string;
   canSubmitWithoutPrompt?: boolean;
-  selectedStarterPreset?: StudioStarterPreset | null;
-  selectedSegment?: StudioSegment | null;
   previewUrl: string;
   selectedFileName?: string;
   submitting: boolean;
   onModeChange: (mode: StudioMode) => void;
   onPromptChange: (value: string) => void;
-  onSelectPreset?: (preset: StudioStarterPreset) => void;
-  onRunPreset?: (preset: StudioStarterPreset) => void;
   onSubmit: () => void;
   onPickFile: () => void;
   onClearFile: () => void;
@@ -3619,32 +3614,16 @@ function Composer({
 }) {
   return (
     <div data-testid="studio-composer" className="shrink-0 border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">
-      <div className="mb-2 flex items-center justify-between gap-3">
+      <div className="mb-1.5 flex items-center justify-between gap-3">
         <ModeSwitch mode={mode} onChange={onModeChange} labelScope="Switch composer mode to" />
         <Pill>{mode === 'canvas' ? 'Canvas chain' : 'Player loop'}</Pill>
       </div>
       <div className="rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2">
-        {selectedStarterPreset && (
-          <div className="mb-2 flex min-w-0 items-center justify-between gap-2 rounded-lg-v2 border border-dreamy-brand-hot-v2/25 bg-dreamy-brand-hot-v2/10 px-2 py-1">
-            <span className="min-w-0 truncate text-[11px] font-semibold text-Cr-text-subtle-v2">
-              {`Selected bot · ${selectedStarterPreset.title}`}
-            </span>
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={() => onRunPreset?.(selectedStarterPreset)}
-              className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-default-v2 disabled:opacity-40"
-            >
-              <Clapperboard size={12} />
-              {getStarterPresetRunLabel(selectedStarterPreset, selectedSegment)}
-            </button>
-          </div>
-        )}
         <textarea
           value={prompt}
           onChange={(event) => onPromptChange(event.target.value)}
           rows={2}
-          className="block max-h-20 min-h-12 w-full resize-none bg-transparent text-sm leading-5 text-Cr-text-default-v2 outline-none placeholder:text-Cr-text-subtlest-v2"
+          className="block max-h-16 min-h-10 w-full resize-none bg-transparent text-sm leading-5 text-Cr-text-default-v2 outline-none placeholder:text-Cr-text-subtlest-v2"
           placeholder="Describe the next shot, style, or change"
         />
         <div className="mt-2 flex items-center justify-between gap-2">
@@ -6325,8 +6304,8 @@ export default function Dreamy() {
       >
         <section
           data-testid="conversation-workspace-panel"
-          className={`h-full min-h-0 flex-col overflow-hidden rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 ${
-            activeTab === 'chat' ? 'flex' : 'hidden lg:flex'
+          className={`h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 ${
+            activeTab === 'chat' ? 'grid' : 'hidden lg:grid'
           }`}
         >
           <div className="flex h-12 shrink-0 items-center justify-between border-b border-Cr-border-default-v2 px-3">
@@ -6355,31 +6334,42 @@ export default function Dreamy() {
             onRunPreset={runStarterPreset}
           />
 
-          <div data-testid="studio-chat-log" className="min-h-[120px] flex-1 space-y-3 overflow-y-auto p-3 [-webkit-overflow-scrolling:touch]">
-            {messages.map((item) => (
-              <ChatMessage
-                key={item.id}
-                item={item}
-                selectedSegment={selectedSegment}
-                submitting={submitting}
-                onAction={runStudio}
-              />
-            ))}
+          <div
+            data-testid="studio-chat-region"
+            className="flex min-h-0 flex-col border-b border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2/40"
+          >
+            <div className="flex h-9 shrink-0 items-center justify-between border-b border-Cr-border-default-v2 px-3">
+              <div className="flex min-w-0 items-center gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
+                <Sparkles size={12} className="shrink-0 text-dreamy-brand-hot-v2" />
+                <span className="truncate">Conversation log</span>
+              </div>
+              <Pill>{`${messages.length} messages`}</Pill>
+            </div>
+            <div
+              data-testid="studio-chat-log"
+              className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 [-webkit-overflow-scrolling:touch]"
+            >
+              {messages.map((item) => (
+                <ChatMessage
+                  key={item.id}
+                  item={item}
+                  selectedSegment={selectedSegment}
+                  submitting={submitting}
+                  onAction={runStudio}
+                />
+              ))}
+            </div>
           </div>
 
           <Composer
             mode={mode}
             prompt={prompt}
             canSubmitWithoutPrompt={selectedPage?.executor === 'navigation'}
-            selectedStarterPreset={selectedStarterPreset}
-            selectedSegment={selectedSegment}
             previewUrl={previewUrl}
             selectedFileName={selectedFile?.name}
             submitting={submitting}
             onModeChange={setMode}
             onPromptChange={setPrompt}
-            onSelectPreset={selectStarterPreset}
-            onRunPreset={runStarterPreset}
             onPickFile={() => fileInputRef.current?.click()}
             onClearFile={clearFile}
             onSubmit={() => void runStudio('generate')}

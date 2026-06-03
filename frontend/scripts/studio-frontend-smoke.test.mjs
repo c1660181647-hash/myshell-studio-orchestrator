@@ -104,6 +104,8 @@ test('runStudioFrontendSmoke records non-overlapping Studio workspace layout', (
   const layoutChecks = [
     'conversation-workspace-panel',
     'bot-selection-panel',
+    'bot-selection-scroll-region',
+    'studio-chat-region',
     'studio-composer',
     'preview-workspace-panel',
     'studio-layout-no-overlap',

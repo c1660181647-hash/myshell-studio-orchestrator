@@ -20,6 +20,8 @@ export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'studio-title',
   'conversation-workspace-panel',
   'bot-selection-panel',
+  'bot-selection-scroll-region',
+  'studio-chat-region',
   'studio-composer',
   'preview-workspace-panel',
   'studio-layout-no-overlap',
@@ -407,6 +409,22 @@ export async function runStudioFrontendSmoke(options = {}) {
       'bot-selection-panel',
       'Bot selection panel',
       page.getByTestId('bot-selection-panel'),
+      timeoutMs,
+    );
+    await checkVisible(
+      checks,
+      page,
+      'bot-selection-scroll-region',
+      'Bot selection scroll region',
+      page.getByTestId('bot-selection-scroll-region'),
+      timeoutMs,
+    );
+    await checkVisible(
+      checks,
+      page,
+      'studio-chat-region',
+      'Conversation log region',
+      page.getByTestId('studio-chat-region'),
       timeoutMs,
     );
     await checkVisible(checks, page, 'studio-composer', 'Studio composer', page.getByTestId('studio-composer'), timeoutMs);
