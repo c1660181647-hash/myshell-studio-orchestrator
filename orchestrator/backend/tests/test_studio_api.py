@@ -311,14 +311,24 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(previews.status_code, 200)
         preview_body = previews.json()
         preview_by_slug = {preview["botSlug"]: preview for preview in preview_body["previews"]}
-        self.assertIn("ai-porn-generator", preview_by_slug)
+        dreamy_previews = {
+            slug: preview
+            for slug, preview in preview_by_slug.items()
+            if preview.get("pageId") == "dreamy-miniapp"
+        }
+        self.assertIn("luna-star", dreamy_previews)
+        self.assertIn("aurora-dusk", dreamy_previews)
+        self.assertNotIn("ai-porn-generator", dreamy_previews)
+        self.assertNotIn("image-to-video-generator", dreamy_previews)
         self.assertIn("seedream-multi-chart", preview_by_slug)
-        self.assertEqual(preview_body["summary"]["dreamyBots"], 2)
+        self.assertEqual(preview_body["summary"]["dreamyBots"], len(dreamy_previews))
+        self.assertGreaterEqual(preview_body["summary"]["dreamyBots"], 8)
         self.assertGreaterEqual(preview_body["summary"]["artBots"], 38)
         self.assertEqual(preview_body["summary"]["total"], preview_body["summary"]["dreamyBots"] + preview_body["summary"]["artBots"])
         self.assertIn("botSpecific", preview_body["summary"])
         self.assertIn("representative", preview_body["summary"])
-        self.assertTrue(preview_by_slug["ai-porn-generator"]["mediaUrl"].startswith("/generated/bot-previews/"))
+        self.assertEqual(dreamy_previews["aurora-dusk"]["source"], "dreamy-catalog")
+        self.assertEqual(dreamy_previews["aurora-dusk"]["botType"], "image-to-video")
         self.assertIn("botSpecific", preview_by_slug["seedream-multi-chart"])
 
         bots = self.client.get("/api/bots")

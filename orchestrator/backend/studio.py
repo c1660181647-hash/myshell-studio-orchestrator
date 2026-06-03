@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from bot_catalog import MYSHELL_BOTS, get_bot_by_slug
-from bot_previews import list_bot_previews
+from bot_previews import DREAMY_BOTS, get_dreamy_bot_by_slug, list_bot_previews
 import myshell_art_api
 from studio_registry import get_page, list_studio_agents, list_studio_pages, page_for_dispatch
 from studio_runtime import adapter_auth_status, cookie_source_status, dreamy_api_base_url, dreamy_init_data, runtime_health
@@ -2750,6 +2750,9 @@ async def _dispatch_preview(
     project_id: str | None = None,
     source_segment_id: str | None = None,
     has_image: bool = False,
+    bot_slug: str | None = None,
+    bot_name: str | None = None,
+    bot_type: str | None = None,
 ) -> dict[str, Any]:
     normalized_action = _normalize_action(action)
     preferred_page = get_page(page_id)
@@ -2767,7 +2770,13 @@ async def _dispatch_preview(
     project = _get_project(project_id) if project_id else None
     source_segment = _resolve_source_segment(project, source_segment_id)
     resolved_source_segment_id = source_segment.get("id") if source_segment else source_segment_id
-    route = await choose_route(prompt, has_image, normalized_action, source_segment)
+    route = (
+        _dreamy_bot_route(bot_slug=bot_slug, bot_name=bot_name, bot_type=bot_type, message=prompt)
+        if page_id == "dreamy-miniapp" and bot_slug
+        else None
+    )
+    if route is None:
+        route = await choose_route(prompt, has_image, normalized_action, source_segment)
     page = page_for_dispatch(route["bot"], page_id, prompt)
     route["action"] = normalized_action
     route["sourceSegmentId"] = resolved_source_segment_id
@@ -2915,6 +2924,72 @@ def _set_graph_status(
     graph[3]["detail"] = "Segment queued in project timeline" if segment else "Waiting for output"
     project["agentGraph"] = graph
     return graph
+
+
+def _normalize_dreamy_bot_type(bot_type: str | None) -> str:
+    normalized = (bot_type or "").strip().lower()
+    if normalized in {"video", "image-to-video", "text-to-video"}:
+        return "image-to-video"
+    if normalized in {"image", "text-to-image", "image-to-image"}:
+        return "text-to-image"
+    return "text-to-image"
+
+
+def _dreamy_catalog_type_from_media(item: dict[str, Any]) -> str:
+    title = str(item.get("title") or item.get("botName") or "").lower()
+    media_values = [
+        str(item.get("templateUrl") or ""),
+        str(item.get("templatePosterUrl") or ""),
+        str(item.get("imageUrl") or ""),
+        str(item.get("imagePosterUrl") or ""),
+    ]
+    if any(value.lower().endswith(".mp4") for value in media_values):
+        return "image-to-video"
+    if any(word in title for word in ("video", "dance", "motion", "animate")):
+        return "image-to-video"
+    return "text-to-image"
+
+
+def _slug_from_dreamy_goto_link(goto_link: str) -> str:
+    if not goto_link:
+        return ""
+    parsed = urlsplit(goto_link)
+    query_slug = dict(parse_qsl(parsed.query)).get("slug_id")
+    if query_slug:
+        return query_slug
+    path = parsed.path or goto_link
+    return path.rstrip("/").split("/")[-1]
+
+
+def _dreamy_bot_route(
+    *,
+    bot_slug: str | None,
+    bot_name: str | None = None,
+    bot_type: str | None = None,
+    message: str = "",
+) -> dict[str, Any] | None:
+    slug = (bot_slug or "").strip()
+    if not slug:
+        return None
+    seed = get_dreamy_bot_by_slug(slug) or {}
+    resolved_type = _normalize_dreamy_bot_type(bot_type or seed.get("type"))
+    name = (bot_name or seed.get("name") or slug).strip()
+    description = str(seed.get("desc") or "Selected from the Dreamy miniapp bot catalog.")
+    return {
+        "intent": "image-to-video" if resolved_type == "image-to-video" else "text-to-image",
+        "analysis": "Selected explicitly from the Dreamy Studio bot list.",
+        "optimizedPrompt": message or "Create a polished Dreamy media segment.",
+        "reason": "Pinned by the left-side Dreamy bot selection.",
+        "bot": {
+            "slug": slug,
+            "name": name,
+            "type": resolved_type,
+            "rating": seed.get("rating", 4.6),
+            "description": description,
+            "pageUrl": f"/bot?slug_id={quote(slug)}",
+        },
+        "executor": "client",
+    }
 
 
 def _keyword_route(message: str, has_image: bool, action: str) -> dict[str, Any]:
@@ -3511,6 +3586,85 @@ async def _dreamy_api_request(endpoint: str, body: dict[str, Any], init_data: st
     return payload if isinstance(payload, dict) else {"data": payload}
 
 
+def _dreamy_floor_defaults() -> list[dict[str, str]]:
+    return [
+        {"title": "Celebrity Style", "floorUrl": "celeb-sex"},
+        {"title": "Sexy Outfits", "floorUrl": "sexy-outfits"},
+        {"title": "Classic Acts", "floorUrl": "classic-acts"},
+        {"title": "Wild Encounters", "floorUrl": "wild-encounters"},
+        {"title": "LGBT", "floorUrl": "lgbt-sex"},
+    ]
+
+
+def _dreamy_catalog_bot_from_image(item: dict[str, Any], floor: dict[str, Any]) -> dict[str, Any] | None:
+    slug = _slug_from_dreamy_goto_link(str(item.get("gotoLink") or item.get("goto_link") or ""))
+    if not slug:
+        return None
+    name = str(item.get("title") or item.get("botName") or item.get("bot_name") or slug)
+    image_url = str(item.get("imagePosterUrl") or item.get("image_poster_url") or item.get("imageUrl") or item.get("image_url") or "")
+    template_url = str(item.get("templatePosterUrl") or item.get("template_poster_url") or item.get("templateUrl") or item.get("template_url") or "")
+    return {
+        "slug": slug,
+        "name": name,
+        "icon": "dreamy",
+        "type": _dreamy_catalog_type_from_media(item),
+        "desc": f"Dreamy miniapp bot from {floor.get('title') or floor.get('floorUrl') or 'catalog'}.",
+        "keywords": ["dreamy", str(floor.get("floorUrl") or ""), name.lower()],
+        "rating": 4.6,
+        "pageId": "dreamy-miniapp",
+        "floorUrl": floor.get("floorUrl") or "",
+        "imageUrl": image_url or template_url,
+        "templateUrl": template_url,
+    }
+
+
+async def _dreamy_catalog_bots() -> tuple[list[dict[str, Any]], str]:
+    init_data = dreamy_init_data()
+    auth_status = adapter_auth_status("dreamy-miniapp")
+    if not init_data or auth_status.get("status") != "ready":
+        return DREAMY_BOTS, "seed-auth-missing"
+
+    floors: list[dict[str, Any]] = _dreamy_floor_defaults()
+    try:
+        init_payload = await _dreamy_api_request(f"{DREAMY_API_PREFIX}/init", {}, init_data)
+        init_floors = init_payload.get("floors")
+        if isinstance(init_floors, list) and init_floors:
+            floors = [floor for floor in init_floors if isinstance(floor, dict) and floor.get("floorUrl")]
+    except Exception:
+        floors = _dreamy_floor_defaults()
+
+    bots: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for floor in floors:
+        floor_url = str(floor.get("floorUrl") or "")
+        if not floor_url:
+            continue
+        try:
+            payload = await _dreamy_api_request(
+                f"{DREAMY_API_PREFIX}/explore",
+                {"floor_url": floor_url, "page": 1, "page_size": 100},
+                init_data,
+            )
+        except Exception:
+            continue
+        response_floors = payload.get("floors") if isinstance(payload.get("floors"), list) else []
+        for response_floor in response_floors:
+            if not isinstance(response_floor, dict):
+                continue
+            images = response_floor.get("images") if isinstance(response_floor.get("images"), list) else []
+            merged_floor = {**floor, **response_floor}
+            for image in images:
+                if not isinstance(image, dict):
+                    continue
+                bot = _dreamy_catalog_bot_from_image(image, merged_floor)
+                if not bot or bot["slug"] in seen:
+                    continue
+                seen.add(bot["slug"])
+                bots.append(bot)
+
+    return (bots or DREAMY_BOTS), "live-dreamy-explore" if bots else "seed-empty-live"
+
+
 def _json_object(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -3838,7 +3992,7 @@ def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dic
         "createdAt": job.get("createdAt", now_iso()),
         "updatedAt": job.get("updatedAt", now_iso()),
     }
-    bot = get_bot_by_slug(job.get("botSlug", "")) or {
+    bot = get_dreamy_bot_by_slug(job.get("botSlug", "")) or get_bot_by_slug(job.get("botSlug", "")) or {
         "slug": job.get("botSlug", ""),
         "name": job.get("botName", ""),
         "type": job.get("botType", segment.get("type", "image")),
@@ -3853,7 +4007,11 @@ def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dic
             "type": bot.get("type") or job.get("botType"),
             "rating": bot.get("rating", 4.5),
             "description": bot.get("desc", ""),
-            "pageUrl": f"https://art.myshell.ai/creative/{bot.get('slug') or job.get('botSlug')}",
+            "pageUrl": (
+                f"/bot?slug_id={quote(str(bot.get('slug') or job.get('botSlug') or ''))}"
+                if page["id"] == "dreamy-miniapp"
+                else f"https://art.myshell.ai/creative/{bot.get('slug') or job.get('botSlug')}"
+            ),
         },
         "executor": page["executor"],
         "analysis": "Retry queued from persisted Studio job.",
@@ -4135,7 +4293,11 @@ def register_studio_routes(app) -> None:
 
     @app.get("/api/studio/bot-previews")
     async def get_studio_bot_previews():
-        return list_bot_previews()
+        dreamy_bots, catalog_source = await _dreamy_catalog_bots()
+        response = list_bot_previews(dreamy_bots=dreamy_bots)
+        response["dreamyCatalogSource"] = catalog_source
+        response["dreamyCatalogReady"] = catalog_source == "live-dreamy-explore"
+        return response
 
     @app.get("/api/studio/overview")
     async def get_studio_overview(limit: int = Query(50, ge=1, le=100)):
@@ -4348,6 +4510,9 @@ def register_studio_routes(app) -> None:
         page_id: str = Query("dreamy-miniapp"),
         agent_id: Optional[str] = Query(None),
         has_image: bool = Query(False),
+        bot_slug: Optional[str] = Query(None),
+        bot_name: Optional[str] = Query(None),
+        bot_type: Optional[str] = Query(None),
     ):
         return await _dispatch_preview(
             message=message,
@@ -4357,6 +4522,9 @@ def register_studio_routes(app) -> None:
             project_id=project_id,
             source_segment_id=source_segment_id,
             has_image=has_image,
+            bot_slug=bot_slug,
+            bot_name=bot_name,
+            bot_type=bot_type,
         )
 
     @app.post("/api/studio/run")
@@ -4368,6 +4536,9 @@ def register_studio_routes(app) -> None:
         source_segment_id: Optional[str] = Form(None),
         page_id: str = Form("dreamy-miniapp"),
         agent_id: Optional[str] = Form(None),
+        bot_slug: Optional[str] = Form(None),
+        bot_name: Optional[str] = Form(None),
+        bot_type: Optional[str] = Form(None),
         agent_graph: Optional[str] = Form(None),
         image: Optional[UploadFile] = File(None),
     ):
@@ -4414,7 +4585,13 @@ def register_studio_routes(app) -> None:
                 },
             )
 
-            route = await choose_route(prompt, has_image, normalized_action, source_segment)
+            route = (
+                _dreamy_bot_route(bot_slug=bot_slug, bot_name=bot_name, bot_type=bot_type, message=prompt)
+                if page_id == "dreamy-miniapp" and bot_slug
+                else None
+            )
+            if route is None:
+                route = await choose_route(prompt, has_image, normalized_action, source_segment)
             page = page_for_dispatch(route["bot"], page_id, prompt)
             if page["id"] == "dreamy-miniapp" and adapter_auth_status("dreamy-miniapp").get("status") == "ready":
                 page = {
@@ -4751,7 +4928,11 @@ def register_studio_routes(app) -> None:
         segment = _find_segment(project, segment_id)
         if not segment:
             route_bot_slug = payload.get("botSlug") or "seedream-multi-chart"
-            bot = get_bot_by_slug(route_bot_slug) or get_bot_by_slug("seedream-multi-chart") or MYSHELL_BOTS[0]
+            bot = get_dreamy_bot_by_slug(route_bot_slug) or get_bot_by_slug(route_bot_slug) or {
+                "slug": route_bot_slug,
+                "name": payload.get("botName") or route_bot_slug,
+                "type": payload.get("type") or "text-to-image",
+            }
             segment = {
                 "id": segment_id or make_id("segment"),
                 "type": payload.get("type") or _segment_type_for_bot(bot),

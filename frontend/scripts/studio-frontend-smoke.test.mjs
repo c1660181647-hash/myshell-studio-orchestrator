@@ -110,6 +110,11 @@ test('runStudioFrontendSmoke records starter presets and direct preset generatio
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('all-bot-previews'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('all-bot-preview-card'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('all-bot-preview-image'));
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('dreamy-bot-list-only'));
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-preset-selection'));
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('dreamy-bot-selection-state'));
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('selected-dreamy-bot-preview'));
+  assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('preview-selected-dreamy-bot'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-preset-direct-generate'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-preset-prompt-ready'));
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('starter-preset-result-visible'));
@@ -122,6 +127,11 @@ test('runStudioFrontendSmoke records starter presets and direct preset generatio
   assert.match(runStudioFrontendSmoke.toString(), /all-bot-previews/);
   assert.match(runStudioFrontendSmoke.toString(), /all-bot-preview-card/);
   assert.match(runStudioFrontendSmoke.toString(), /all-bot-preview-image/);
+  assert.match(runStudioFrontendSmoke.toString(), /dreamy-bot-list-only/);
+  assert.match(runStudioFrontendSmoke.toString(), /starter-preset-selection/);
+  assert.match(runStudioFrontendSmoke.toString(), /dreamy-bot-selection-state/);
+  assert.match(runStudioFrontendSmoke.toString(), /selected-dreamy-bot-preview/);
+  assert.match(runStudioFrontendSmoke.toString(), /preview-selected-dreamy-bot/);
   assert.match(runStudioFrontendSmoke.toString(), /starter-preset-direct-generate/);
   assert.match(runStudioFrontendSmoke.toString(), /starter-preset-prompt-ready/);
   assert.match(runStudioFrontendSmoke.toString(), /starter-preset-result-visible/);
@@ -131,6 +141,7 @@ test('runStudioFrontendSmoke records starter presets and direct preset generatio
 test('runStudioFrontendSmoke records canvas flow and segment export controls', () => {
   const newWorkflowChecks = [
     'preview-segment-rerun',
+    'preview-append-next-segment',
     'preview-export-all-segments',
     'timeline-export-created',
     'timeline-export-output-card',

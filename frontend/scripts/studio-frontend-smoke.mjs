@@ -27,10 +27,16 @@ export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'all-bot-previews',
   'all-bot-preview-card',
   'all-bot-preview-image',
+  'dreamy-bot-list-only',
+  'starter-preset-selection',
+  'dreamy-bot-selection-state',
+  'selected-dreamy-bot-preview',
+  'preview-selected-dreamy-bot',
   'starter-preset-direct-generate',
   'starter-preset-prompt-ready',
   'starter-preset-result-visible',
   'preview-segment-rerun',
+  'preview-append-next-segment',
   'preview-export-all-segments',
   'timeline-export-created',
   'timeline-export-output-card',
@@ -388,18 +394,43 @@ export async function runStudioFrontendSmoke(options = {}) {
       const previewImage = page.getByTestId('starter-bot-preview-image').first();
       await previewImage.waitFor({ state: 'visible', timeout: timeoutMs });
       const previewSource = (await previewImage.getAttribute('src')) || '';
+      const usesGeneratedPreview = /\/generated\/bot-previews\//i.test(previewSource);
+      const usesDreamyCatalogPreview = /^https?:\/\/placehold\.co\//i.test(previewSource);
       checks.push({
         id: 'starter-bot-preview-asset',
-        label: 'Starter bot preview uses generated MyShell media asset',
-        ok: /\/generated\/bot-previews\//i.test(previewSource),
-        message: /\/generated\/bot-previews\//i.test(previewSource)
+        label: 'Starter bot preview uses generated or Dreamy catalog media asset',
+        ok: usesGeneratedPreview || usesDreamyCatalogPreview,
+        message: usesGeneratedPreview || usesDreamyCatalogPreview
           ? undefined
-          : `Preview source is not a generated MyShell asset: ${previewSource}`,
+          : `Preview source is not a generated or Dreamy catalog asset: ${previewSource}`,
       });
     } catch (error) {
       checks.push({
         id: 'starter-bot-preview-asset',
-        label: 'Starter bot preview uses generated MyShell media asset',
+        label: 'Starter bot preview uses generated or Dreamy catalog media asset',
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    try {
+      const botCardTexts = await page.getByTestId('all-bot-preview-card').evaluateAll((cards) =>
+        cards.map((card) => (card.textContent || '').replace(/\s+/g, ' ').trim()),
+      );
+      const hasArtBot = botCardTexts.some((text) => /Seedream|Sora|Kling|Brat|Neon Art/i.test(text));
+      checks.push({
+        id: 'dreamy-bot-list-only',
+        label: 'Connected bot list is scoped to Dreamy bots',
+        ok: botCardTexts.length >= 3 && botCardTexts.some((text) => /Aurora Dusk/i.test(text)) && !hasArtBot,
+        message: hasArtBot
+          ? `Art bot leaked into Dreamy list: ${botCardTexts.join(' | ')}`
+          : botCardTexts.length < 3
+            ? `Expected multiple Dreamy bot cards, saw ${botCardTexts.length}`
+            : undefined,
+      });
+    } catch (error) {
+      checks.push({
+        id: 'dreamy-bot-list-only',
+        label: 'Connected bot list is scoped to Dreamy bots',
         ok: false,
         message: error instanceof Error ? error.message : String(error),
       });
@@ -407,9 +438,49 @@ export async function runStudioFrontendSmoke(options = {}) {
     await clickEnabled(
       checks,
       page,
+      'starter-preset-selection',
+      'Select Dreamy bot card',
+      page.getByTestId('all-bot-preview-card').filter({ hasText: 'Aurora Dusk' }),
+      timeoutMs,
+    );
+    try {
+      const selectedSlug = await page.getByTestId('dreamy-studio-root').getAttribute('data-selected-bot-slug');
+      checks.push({
+        id: 'dreamy-bot-selection-state',
+        label: 'Selected Dreamy bot slug drives Studio state',
+        ok: selectedSlug === 'aurora-dusk',
+        message: selectedSlug === 'aurora-dusk' ? undefined : `Selected slug was ${selectedSlug || 'empty'}`,
+      });
+    } catch (error) {
+      checks.push({
+        id: 'dreamy-bot-selection-state',
+        label: 'Selected Dreamy bot slug drives Studio state',
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    await checkVisible(
+      checks,
+      page,
+      'selected-dreamy-bot-preview',
+      'Selected Dreamy bot handoff preview',
+      page.getByTestId('selected-dreamy-bot-preview'),
+      timeoutMs,
+    );
+    await checkVisible(
+      checks,
+      page,
+      'preview-selected-dreamy-bot',
+      'Right preview follows selected Dreamy bot',
+      page.getByTestId('preview-selected-dreamy-bot'),
+      timeoutMs,
+    );
+    await clickEnabled(
+      checks,
+      page,
       'starter-preset-direct-generate',
-      'Run starter preset directly',
-      page.getByRole('button', { name: /generate cinematic portrait preset/i }),
+      'Run selected starter preset',
+      page.getByTestId('starter-preset-direct-generate'),
       timeoutMs,
     );
     const chatLog = page.getByTestId('studio-chat-log');
@@ -418,7 +489,7 @@ export async function runStudioFrontendSmoke(options = {}) {
       page,
       'starter-preset-prompt-ready',
       'Starter preset prompt is sent',
-      chatLog.getByText(/cinematic neon rain portrait/i),
+      chatLog.getByText(/full body character scene|Animate the selected Dreamy source image|cinematic neon rain portrait/i),
       timeoutMs,
     );
     await checkVisible(
@@ -435,6 +506,14 @@ export async function runStudioFrontendSmoke(options = {}) {
       'preview-segment-rerun',
       'Single segment rerun control',
       page.getByTestId('preview-segment-rerun'),
+      timeoutMs,
+    );
+    await checkVisible(
+      checks,
+      page,
+      'preview-append-next-segment',
+      'Append next segment control',
+      page.getByTestId('preview-append-next-segment'),
       timeoutMs,
     );
     await checkVisible(

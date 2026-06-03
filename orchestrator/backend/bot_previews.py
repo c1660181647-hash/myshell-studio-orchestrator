@@ -19,24 +19,100 @@ DEFAULT_MANIFEST_PATHS = [
 
 DREAMY_BOTS = [
     {
-        "slug": "ai-porn-generator",
-        "name": "Dreamy Image Agent",
-        "icon": "✨",
+        "slug": "luna-star",
+        "name": "Luna Star",
+        "icon": "star",
         "type": "text-to-image",
-        "desc": "Dreamy prompt-to-image generation inside the authenticated miniapp.",
-        "keywords": ["dreamy", "image", "prompt", "character", "source"],
+        "desc": "Dreamy miniapp character image generation.",
+        "keywords": ["dreamy", "image", "character", "portrait", "celebrity"],
         "rating": 4.8,
         "pageId": "dreamy-miniapp",
+        "floorUrl": "celeb-sex",
+        "imageUrl": "https://placehold.co/512x768/1d1c1f/f5f5f6?text=Luna+Star",
     },
     {
-        "slug": "image-to-video-generator",
-        "name": "Dreamy Video Agent",
-        "icon": "🎬",
+        "slug": "crystal-rose",
+        "name": "Crystal Rose",
+        "icon": "rose",
+        "type": "text-to-image",
+        "desc": "Dreamy miniapp outfit and portrait generation.",
+        "keywords": ["dreamy", "image", "outfit", "portrait", "style"],
+        "rating": 4.7,
+        "pageId": "dreamy-miniapp",
+        "floorUrl": "sexy-outfits",
+        "imageUrl": "https://placehold.co/512x768/1d1c1f/f5f5f6?text=Crystal+Rose",
+    },
+    {
+        "slug": "ember-fox",
+        "name": "Ember Fox",
+        "icon": "spark",
+        "type": "text-to-image",
+        "desc": "Dreamy miniapp classic scene generation.",
+        "keywords": ["dreamy", "image", "classic", "scene", "character"],
+        "rating": 4.7,
+        "pageId": "dreamy-miniapp",
+        "floorUrl": "classic-acts",
+        "imageUrl": "https://placehold.co/512x768/1d1c1f/f5f5f6?text=Ember+Fox",
+    },
+    {
+        "slug": "jade-river",
+        "name": "Jade River",
+        "icon": "wave",
+        "type": "text-to-image",
+        "desc": "Dreamy miniapp wild encounter image generation.",
+        "keywords": ["dreamy", "image", "wild", "encounter", "scene"],
+        "rating": 4.6,
+        "pageId": "dreamy-miniapp",
+        "floorUrl": "wild-encounters",
+        "imageUrl": "https://placehold.co/512x768/1d1c1f/f5f5f6?text=Jade+River",
+    },
+    {
+        "slug": "nova-silk",
+        "name": "Nova Silk",
+        "icon": "nova",
+        "type": "text-to-image",
+        "desc": "Dreamy miniapp celebrity style image generation.",
+        "keywords": ["dreamy", "image", "celebrity", "style", "portrait"],
+        "rating": 4.7,
+        "pageId": "dreamy-miniapp",
+        "floorUrl": "celeb-sex",
+        "imageUrl": "https://placehold.co/512x768/1d1c1f/f5f5f6?text=Nova+Silk",
+    },
+    {
+        "slug": "scarlet-bloom",
+        "name": "Scarlet Bloom",
+        "icon": "bloom",
+        "type": "text-to-image",
+        "desc": "Dreamy miniapp fashion image generation.",
+        "keywords": ["dreamy", "image", "fashion", "outfit", "portrait"],
+        "rating": 4.6,
+        "pageId": "dreamy-miniapp",
+        "floorUrl": "sexy-outfits",
+        "imageUrl": "https://placehold.co/512x768/1d1c1f/f5f5f6?text=Scarlet+Bloom",
+    },
+    {
+        "slug": "aurora-dusk",
+        "name": "Aurora Dusk",
+        "icon": "video",
         "type": "image-to-video",
-        "desc": "Dreamy image-to-video segment generation for Studio timelines.",
+        "desc": "Dreamy miniapp video generation for extending Studio timelines.",
         "keywords": ["dreamy", "video", "motion", "segment", "extend"],
         "rating": 4.7,
         "pageId": "dreamy-miniapp",
+        "floorUrl": "classic-acts",
+        "imageUrl": "https://placehold.co/512x768/1d1c1f/f5f5f6?text=Aurora+Dusk",
+    },
+    {
+        "slug": "violet-haze",
+        "name": "Violet Haze",
+        "icon": "haze",
+        "type": "text-to-image",
+        "desc": "Dreamy miniapp LGBT category image generation.",
+        "keywords": ["dreamy", "image", "lgbt", "portrait", "scene"],
+        "rating": 4.5,
+        "pageId": "dreamy-miniapp",
+        "floorUrl": "lgbt-sex",
+        "imageUrl": "https://placehold.co/512x768/1d1c1f/f5f5f6?text=Violet+Haze",
     },
 ]
 
@@ -152,6 +228,40 @@ def _preview_from_asset(bot: dict[str, Any], asset: dict[str, Any], manifest: di
     }
 
 
+def _preview_from_dreamy_catalog(bot: dict[str, Any], manifest: dict[str, Any], asset_id: str) -> dict[str, Any]:
+    checked_at = str(manifest.get("generatedAt") or _now_iso())
+    media_url = str(bot.get("imageUrl") or bot.get("thumbnailUrl") or bot.get("posterUrl") or "")
+    return {
+        "botSlug": bot["slug"],
+        "botName": bot["name"],
+        "botType": bot.get("type"),
+        "pageId": "dreamy-miniapp",
+        "status": "catalog_ready" if media_url else "needs_generation",
+        "accepted": False,
+        "mediaUrl": media_url,
+        "thumbnailUrl": media_url,
+        "posterUrl": media_url,
+        "assetId": asset_id,
+        "source": "dreamy-catalog",
+        "generatedPrompt": bot.get("desc"),
+        "checkedAt": checked_at,
+        "previewKind": "dreamy_catalog_media",
+        "botSpecific": True,
+        "targetBotExecuted": False,
+        "floorUrl": bot.get("floorUrl"),
+        "evidence": {
+            "status": "catalog_ready" if media_url else "needs_generation",
+            "source": "dreamy-catalog",
+            "accepted": False,
+            "mediaUrl": media_url,
+            "checkedAt": checked_at,
+            "botSpecific": True,
+            "targetBotExecuted": False,
+            "message": "Dreamy bot listing media is available; generation evidence is created only after running this slug.",
+        },
+    }
+
+
 def _missing_preview(bot: dict[str, Any], manifest: dict[str, Any], asset_id: str) -> dict[str, Any]:
     checked_at = str(manifest.get("generatedAt") or _now_iso())
     return {
@@ -180,9 +290,9 @@ def _missing_preview(bot: dict[str, Any], manifest: dict[str, Any], asset_id: st
     }
 
 
-def _all_preview_bots() -> list[dict[str, Any]]:
+def _all_preview_bots(dreamy_bots: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     art_bots = [{**bot, "pageId": "myshell-art"} for bot in MYSHELL_BOTS]
-    return [*DREAMY_BOTS, *art_bots]
+    return [*(dreamy_bots or DREAMY_BOTS), *art_bots]
 
 
 def preview_for_bot(bot: dict[str, Any], manifest: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -192,6 +302,8 @@ def preview_for_bot(bot: dict[str, Any], manifest: dict[str, Any] | None = None)
     override = overrides.get(bot["slug"], {}) if isinstance(overrides, dict) else {}
     asset_id = str(override.get("assetId") or _default_asset_id_for_bot(bot))
     asset = assets.get(asset_id)
+    if bot.get("pageId") == "dreamy-miniapp" and bot.get("imageUrl") and not asset:
+        return _preview_from_dreamy_catalog(bot, preview_manifest, asset_id)
     if not asset:
         return _missing_preview(bot, preview_manifest, asset_id)
     preview = _preview_from_asset(bot, asset, preview_manifest)
@@ -214,10 +326,19 @@ def preview_for_bot(bot: dict[str, Any], manifest: dict[str, Any] | None = None)
     return preview
 
 
-def list_bot_previews() -> dict[str, Any]:
+def get_dreamy_bot_by_slug(slug: str) -> dict[str, Any] | None:
+    for bot in DREAMY_BOTS:
+        if bot.get("slug") == slug:
+            return bot
+    return None
+
+
+def list_bot_previews(dreamy_bots: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     manifest = load_preview_manifest()
-    bots = _all_preview_bots()
+    bots = _all_preview_bots(dreamy_bots)
     previews = [preview_for_bot(bot, manifest) for bot in bots]
+    dreamy_count = sum(1 for bot in bots if bot.get("pageId") == "dreamy-miniapp")
+    art_count = sum(1 for bot in bots if bot.get("pageId") == "myshell-art")
     ready_count = sum(1 for preview in previews if preview.get("status") == "ready" and preview.get("accepted"))
     bot_specific_count = sum(1 for preview in previews if preview.get("status") == "ready" and preview.get("accepted") and preview.get("botSpecific"))
     target_executed_count = sum(
@@ -237,8 +358,8 @@ def list_bot_previews() -> dict[str, Any]:
             "representative": ready_count - bot_specific_count,
             "targetBotExecuted": target_executed_count,
             "assets": len(manifest.get("assets", [])),
-            "dreamyBots": len(DREAMY_BOTS),
-            "artBots": len(MYSHELL_BOTS),
+            "dreamyBots": dreamy_count,
+            "artBots": art_count,
         },
         "assets": manifest.get("assets", []),
         "starterPresets": manifest.get("starterPresets", {}),

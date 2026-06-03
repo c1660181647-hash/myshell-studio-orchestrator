@@ -133,6 +133,7 @@ export interface StudioBotPreview {
   previewKind?: string;
   botSpecific?: boolean;
   targetBotExecuted?: boolean;
+  floorUrl?: string;
   message?: string;
   evidence?: StudioEvidence;
 }
@@ -143,6 +144,8 @@ export interface StudioBotPreviewsResponse {
   generatedAt?: string;
   checkedAt: string;
   manifestPath?: string;
+  dreamyCatalogSource?: string;
+  dreamyCatalogReady?: boolean;
   summary: {
     total: number;
     ready: number;
@@ -1028,6 +1031,9 @@ export interface StreamStudioRunOptions {
   sourceSegmentId?: string | null;
   pageId?: StudioApi | string;
   agentId?: string;
+  botSlug?: string;
+  botName?: string;
+  botType?: string;
   agentGraph?: StudioAgentNode[];
   imageFile?: File | null;
   signal?: AbortSignal;
@@ -1210,6 +1216,9 @@ export async function streamStudioRun({
   sourceSegmentId,
   pageId,
   agentId,
+  botSlug,
+  botName,
+  botType,
   agentGraph,
   imageFile,
   signal,
@@ -1223,6 +1232,9 @@ export async function streamStudioRun({
   if (sourceSegmentId) formData.append('source_segment_id', sourceSegmentId);
   if (pageId) formData.append('page_id', pageId);
   if (agentId) formData.append('agent_id', agentId);
+  if (botSlug) formData.append('bot_slug', botSlug);
+  if (botName) formData.append('bot_name', botName);
+  if (botType) formData.append('bot_type', botType);
   if (agentGraph) formData.append('agent_graph', JSON.stringify(agentGraph));
   if (imageFile) formData.append('image', imageFile);
 
@@ -1564,6 +1576,9 @@ export async function fetchStudioDispatchPreview(
     sourceSegmentId?: string;
     pageId?: StudioApi | string;
     agentId?: string;
+    botSlug?: string;
+    botName?: string;
+    botType?: string;
     hasImage?: boolean;
   } = {},
 ): Promise<StudioDispatchPreview> {
@@ -1574,6 +1589,9 @@ export async function fetchStudioDispatchPreview(
   if (options.sourceSegmentId) params.set('source_segment_id', options.sourceSegmentId);
   if (options.pageId) params.set('page_id', options.pageId);
   if (options.agentId) params.set('agent_id', options.agentId);
+  if (options.botSlug) params.set('bot_slug', options.botSlug);
+  if (options.botName) params.set('bot_name', options.botName);
+  if (options.botType) params.set('bot_type', options.botType);
   if (typeof options.hasImage === 'boolean') params.set('has_image', String(options.hasImage));
   const query = params.toString();
   const response = await fetch(getStudioRootEndpoint(`/api/studio/dispatch-preview${query ? `?${query}` : ''}`));

@@ -194,6 +194,9 @@ interface StudioDispatchRunOverride {
   pageName?: string;
   executor?: StudioExecutor;
   mode?: StudioMode;
+  botSlug?: string;
+  botName?: string;
+  botType?: string;
 }
 
 interface StudioStarterPreset {
@@ -226,20 +229,21 @@ interface CanvasFlowPreset {
   connections: CanvasConnection[];
 }
 
-const DEFAULT_DREAMY_SLUG = 'ai-porn-generator';
+const DEFAULT_DREAMY_SLUG = 'luna-star';
+const DREAMY_VIDEO_SLUG = 'aurora-dusk';
 const LOCAL_POSTERS = [exampleGood, exampleMultiple];
 const DEFAULT_STUDIO_AGENT_ID = 'dreamy-miniapp-executor';
 const TRANSIENT_STUDIO_STATUSES = new Set(['queued', 'running']);
 const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
   {
     id: 'cinematic-portrait',
-    title: 'Cinematic Portrait',
+    title: 'Luna Star',
     prompt: 'A cinematic neon rain portrait, detailed face, soft rim light, high contrast, polished studio finish.',
     pageId: 'dreamy-miniapp',
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
     botSlug: DEFAULT_DREAMY_SLUG,
-    recommendation: 'Best first move for a strong source image before video.',
+    recommendation: 'Dreamy catalog bot for the first source image before video.',
     visualUrl: presetCinematicGif,
     fallbackVisualUrl: presetCinematicGif,
     previewStatus: 'fallback',
@@ -252,13 +256,13 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
   },
   {
     id: 'character-scene',
-    title: 'Character Scene',
+    title: 'Aurora Dusk',
     prompt: 'A full body character scene in a glowing city street, expressive pose, cinematic lighting, sharp details.',
     pageId: 'dreamy-miniapp',
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
-    botSlug: 'image-to-video-generator',
-    recommendation: 'Good when the next step is image-to-video motion.',
+    botSlug: DREAMY_VIDEO_SLUG,
+    recommendation: 'Dreamy video bot for appending the next motion segment.',
     visualUrl: presetCharacterGif,
     fallbackVisualUrl: presetCharacterGif,
     previewStatus: 'fallback',
@@ -271,13 +275,13 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
   },
   {
     id: 'style-poster',
-    title: 'Style Poster',
+    title: 'Crystal Rose',
     prompt: 'A vertical movie poster composition with dramatic color, premium fashion styling, clean background, editorial finish.',
     pageId: 'dreamy-miniapp',
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
-    botSlug: 'neon-art-generator',
-    recommendation: 'Useful for restyle passes and cover frames.',
+    botSlug: 'crystal-rose',
+    recommendation: 'Dreamy catalog bot for another stylized source frame.',
     visualUrl: presetStyleGif,
     fallbackVisualUrl: presetStyleGif,
     previewStatus: 'fallback',
@@ -310,7 +314,7 @@ const CANVAS_FLOW_PRESETS: CanvasFlowPreset[] = [
         status: 'ready',
         action: 'generate',
         prompt: 'Generate the strongest source image for this scene.',
-        botName: 'Dreamy Image Agent',
+        botName: 'Luna Star',
         botSlug: DEFAULT_DREAMY_SLUG,
       },
       {
@@ -325,8 +329,8 @@ const CANVAS_FLOW_PRESETS: CanvasFlowPreset[] = [
         status: 'queued',
         action: 'extend',
         prompt: 'Use the selected image as the source and create a five second motion shot.',
-        botName: 'Video Agent',
-        botSlug: 'image-to-video-generator',
+        botName: 'Aurora Dusk',
+        botSlug: DREAMY_VIDEO_SLUG,
       },
       {
         id: 'flow-timeline-video',
@@ -341,7 +345,7 @@ const CANVAS_FLOW_PRESETS: CanvasFlowPreset[] = [
         action: 'extend',
         prompt: 'Extend this shot into the next clip with matching lighting and character continuity.',
         botName: 'Dreamy Video Segment',
-        botSlug: 'sora-video-generator',
+        botSlug: DREAMY_VIDEO_SLUG,
       },
     ],
     connections: [
@@ -400,14 +404,31 @@ function rankStarterPresets(
 ): StudioStarterPreset[] {
   const preferredOrder =
     sourceSegment?.type === 'image'
-      ? ['character-scene', 'style-poster', 'cinematic-portrait']
+      ? ['character-scene', 'cinematic-portrait', 'style-poster']
       : sourceSegment?.type === 'video'
-        ? ['style-poster', 'character-scene', 'cinematic-portrait']
+        ? ['character-scene', 'cinematic-portrait', 'style-poster']
         : hasReferenceImage
-          ? ['style-poster', 'character-scene', 'cinematic-portrait']
+          ? ['character-scene', 'cinematic-portrait', 'style-poster']
           : ['cinematic-portrait', 'character-scene', 'style-poster'];
   const order = new Map(preferredOrder.map((id, index) => [id, index]));
   return [...presets].sort((left, right) => (order.get(left.id) ?? 99) - (order.get(right.id) ?? 99));
+}
+
+function isDreamyStudioBot(preview: StudioBotPreview): boolean {
+  return preview.pageId === 'dreamy-miniapp';
+}
+
+function getStarterPresetAction(preset: StudioStarterPreset, sourceSegment?: StudioSegment | null): StudioAction {
+  if ((preset.botSlug === DREAMY_VIDEO_SLUG || preset.workflow.toLowerCase().includes('video')) && sourceSegment) return 'extend';
+  return 'generate';
+}
+
+function botTypeForStarterPreset(preset: StudioStarterPreset): string {
+  return preset.workflow.toLowerCase().includes('video') ? 'image-to-video' : 'text-to-image';
+}
+
+function getStarterPresetRunLabel(preset: StudioStarterPreset, sourceSegment?: StudioSegment | null): string {
+  return getStarterPresetAction(preset, sourceSegment) === 'extend' ? 'Append segment' : 'Add segment';
 }
 
 function previewLabelFor(preview?: StudioBotPreview): string {
@@ -415,9 +436,47 @@ function previewLabelFor(preview?: StudioBotPreview): string {
   if (preview.status === 'ready' && preview.accepted) {
     return preview.botSpecific ? 'Bot result' : 'MyShell result';
   }
+  if (preview.status === 'catalog_ready') return 'Catalog media';
   if (preview.status === 'auth_missing' || preview.evidence?.status === 'auth_missing') return 'Needs auth';
   if (preview.status === 'needs_generation') return 'Needs refresh';
   return preview.status || 'Preview pending';
+}
+
+function workflowForDreamyBotType(botType?: string): string {
+  return (botType || '').toLowerCase().includes('video') ? 'Image to video' : 'Text to image';
+}
+
+function stepsForDreamyBotType(botType?: string): string[] {
+  return (botType || '').toLowerCase().includes('video')
+    ? ['Source image', 'Motion prompt', 'Video segment']
+    : ['Prompt', 'Dreamy bot', 'Image segment'];
+}
+
+function starterPresetFromBotPreview(preview: StudioBotPreview): StudioStarterPreset {
+  const botType = preview.botType || '';
+  const imageUrl = resolveStudioDisplayAssetUrl(preview.thumbnailUrl || preview.mediaUrl || preview.posterUrl) || presetCinematicGif;
+  const isVideo = botType.toLowerCase().includes('video');
+  return {
+    id: `dreamy-bot-${preview.botSlug}`,
+    title: preview.botName,
+    prompt: isVideo
+      ? `Animate the selected Dreamy source image with ${preview.botName}, preserving character continuity and cinematic motion.`
+      : `Create a polished Dreamy image with ${preview.botName}, cinematic lighting, clear subject, and production-ready composition.`,
+    pageId: 'dreamy-miniapp',
+    pageName: 'Dreamy Miniapp',
+    agentId: DEFAULT_STUDIO_AGENT_ID,
+    botSlug: preview.botSlug,
+    recommendation: preview.generatedPrompt || preview.evidence?.message || `Run ${preview.botName} through the Dreamy miniapp.`,
+    visualUrl: imageUrl,
+    fallbackVisualUrl: imageUrl,
+    previewStatus: preview.status,
+    previewAccepted: Boolean(preview.botSpecific || preview.mediaUrl || preview.thumbnailUrl || preview.posterUrl),
+    previewSource: preview.source || 'dreamy-catalog',
+    previewLabel: previewLabelFor(preview),
+    workflow: workflowForDreamyBotType(botType),
+    steps: stepsForDreamyBotType(botType),
+    estimatedWaitSeconds: isVideo ? 60 : 30,
+  };
 }
 
 function hydrateStarterPresets(
@@ -428,7 +487,8 @@ function hydrateStarterPresets(
   const previewBySlug = new Map(previewsResponse.previews.map((preview) => [preview.botSlug, preview]));
   return presets.map((preset) => {
     const manifestStarter = previewsResponse.starterPresets?.[preset.id];
-    const previewSlug = manifestStarter?.botSlug || preset.botSlug;
+    const manifestPreview = manifestStarter?.botSlug ? previewBySlug.get(manifestStarter.botSlug) : undefined;
+    const previewSlug = manifestPreview && isDreamyStudioBot(manifestPreview) ? manifestStarter?.botSlug || preset.botSlug : preset.botSlug;
     const preview = previewBySlug.get(previewSlug);
     const previewMedia = resolveStudioDisplayAssetUrl(preview?.thumbnailUrl || preview?.mediaUrl || preview?.posterUrl);
     const visualUrl = previewMedia || preset.fallbackVisualUrl;
@@ -724,16 +784,23 @@ function buildCanvasGraph(
   return { nodes, connections };
 }
 
-function createLocalProject(mode: StudioMode, message: string, action: StudioAction, parent?: StudioSegment): StudioProject {
-  const projectId = makeId('local_project');
+function createLocalProject(
+  mode: StudioMode,
+  message: string,
+  action: StudioAction,
+  parent?: StudioSegment,
+  existing?: StudioProject | null,
+): StudioProject {
+  const projectId = existing?.projectId || makeId('local_project');
+  const conversationId = existing?.conversationId || makeId('conversation');
   const segment: StudioSegment = {
     id: makeId('segment'),
     type: action === 'extend' ? 'video' : 'image',
     url: '',
     posterUrl: LOCAL_POSTERS[Math.floor(Math.random() * LOCAL_POSTERS.length)],
     prompt: message,
-    botSlug: action === 'extend' ? 'sora-video-generator' : DEFAULT_DREAMY_SLUG,
-    botName: action === 'extend' ? 'Sora Video Generator' : 'Dreamy Agent',
+    botSlug: action === 'extend' ? DREAMY_VIDEO_SLUG : DEFAULT_DREAMY_SLUG,
+    botName: action === 'extend' ? 'Aurora Dusk' : 'Luna Star',
     action,
     parentSegmentId: parent?.id,
     status: 'draft',
@@ -747,21 +814,50 @@ function createLocalProject(mode: StudioMode, message: string, action: StudioAct
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
+  const fallbackAgentGraph: StudioAgentNode[] = [
+    { id: 'intent-router', label: 'Intent Router', status: 'done', detail: 'Local route fallback' },
+    { id: 'asset-planner', label: 'Asset Planner', status: parent ? 'done' : 'queued', detail: parent?.botName || 'Prompt only' },
+    { id: 'dreamy-executor', label: 'Dreamy Executor', status: 'queued', detail: 'Waiting for Studio backend' },
+    { id: 'timeline', label: 'Timeline', status: 'queued', detail: 'Draft segment added' },
+  ];
+  const agentGraph: StudioAgentNode[] = existing?.agentGraph?.length ? existing.agentGraph : fallbackAgentGraph;
   return {
+    ...(existing || {}),
     projectId,
-    conversationId: makeId('conversation'),
+    conversationId,
     mode,
-    messages: [],
-    segments: [segment],
+    messages: existing?.messages || [],
+    segments: [...(existing?.segments || []), segment],
     selectedSegmentId: segment.id,
-    agentGraph: [
-      { id: 'intent-router', label: 'Intent Router', status: 'done', detail: 'Local route fallback' },
-      { id: 'asset-planner', label: 'Asset Planner', status: parent ? 'done' : 'queued', detail: parent?.botName || 'Prompt only' },
-      { id: 'dreamy-executor', label: 'Dreamy Executor', status: 'queued', detail: 'Waiting for Studio backend' },
-      { id: 'timeline', label: 'Timeline', status: 'queued', detail: 'Draft segment added' },
-    ],
-    jobs: [],
+    agentGraph,
+    jobs: existing?.jobs || [],
     updatedAt: nowIso(),
+  };
+}
+
+function mergeStudioProjectState(current: StudioProject | null, incoming: StudioProject): StudioProject {
+  if (!current || current.projectId !== incoming.projectId) return incoming;
+  const incomingSegments = new Map(incoming.segments.map((segment) => [segment.id, segment]));
+  const incomingJobs = new Map((incoming.jobs || []).map((job) => [job.jobId, job]));
+  const incomingExports = new Map((incoming.timelineExports || []).map((item) => [item.exportId, item]));
+  return {
+    ...current,
+    ...incoming,
+    messages: incoming.messages?.length ? incoming.messages : current.messages,
+    segments: [
+      ...current.segments.map((segment) => incomingSegments.get(segment.id) || segment),
+      ...incoming.segments.filter((segment) => !current.segments.some((currentSegment) => currentSegment.id === segment.id)),
+    ],
+    jobs: [
+      ...(current.jobs || []).map((job) => incomingJobs.get(job.jobId) || job),
+      ...(incoming.jobs || []).filter((job) => !(current.jobs || []).some((currentJob) => currentJob.jobId === job.jobId)),
+    ],
+    timelineExports: [
+      ...(incoming.timelineExports || []),
+      ...((current.timelineExports || []).filter((item) => !incomingExports.has(item.exportId))),
+    ],
+    selectedSegmentId: incoming.selectedSegmentId || current.selectedSegmentId,
+    updatedAt: incoming.updatedAt || current.updatedAt,
   };
 }
 
@@ -2145,6 +2241,7 @@ function SegmentCard({
 function PreviewPanel({
   project,
   selectedSegment,
+  selectedStarterPreset,
   selectedJob,
   agentsOpen,
   onToggleAgents,
@@ -2153,12 +2250,14 @@ function PreviewPanel({
   onCancelJob,
   onRetryJob,
   onAction,
+  onRunPreset,
   onExportAllSegments,
   timelineExporting,
   submitting,
 }: {
   project: StudioProject | null;
   selectedSegment?: StudioSegment | null;
+  selectedStarterPreset?: StudioStarterPreset | null;
   selectedJob?: StudioJob | null;
   agentsOpen: boolean;
   onToggleAgents: () => void;
@@ -2167,14 +2266,19 @@ function PreviewPanel({
   onCancelJob: (jobId: string) => void;
   onRetryJob: (jobId: string) => void;
   onAction: (action: StudioAction, prompt?: string, source?: StudioSegment | null) => void;
+  onRunPreset?: (preset: StudioStarterPreset) => void;
   onExportAllSegments: () => void;
   timelineExporting: boolean;
   submitting: boolean;
 }) {
   const media = getSegmentMedia(selectedSegment);
+  const selectedStarterVisual = resolveStudioDisplayAssetUrl(selectedStarterPreset?.visualUrl);
   const graph = project?.agentGraph?.length ? project.agentGraph : EMPTY_GRAPH;
   const runningAgents = graph.filter((node) => node.status === 'running' || node.status === 'queued').length;
   const segments = project?.segments || [];
+  const selectedSegmentIndex = selectedSegment
+    ? segments.findIndex((segment) => segment.id === selectedSegment.id)
+    : -1;
   const evidence = selectedSegment?.evidence || selectedJob?.evidence;
   const authStatus = selectedSegment?.authStatus || selectedJob?.authStatus;
   const activeJobId = selectedSegment?.jobId || selectedJob?.jobId;
@@ -2191,7 +2295,11 @@ function PreviewPanel({
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold">Preview</div>
             <div className="truncate text-[11px] text-Cr-text-subtler-v2">
-              {segments.length ? `${segments.length} segments` : 'No segments'}
+              {selectedStarterPreset
+                ? `Selected bot: ${selectedStarterPreset.title}`
+                : segments.length
+                  ? `${segments.length} segments`
+                  : 'No segments'}
             </div>
           </div>
         </div>
@@ -2218,6 +2326,31 @@ function PreviewPanel({
             />
           ) : media ? (
             <img src={media} alt="Selected segment" className="h-full w-full object-contain" />
+          ) : selectedStarterPreset ? (
+            <div
+              data-testid="preview-selected-dreamy-bot"
+              className="grid h-full w-full grid-rows-[minmax(0,1fr)_auto] bg-black/20"
+            >
+              <div className="relative min-h-0">
+                {selectedStarterVisual ? (
+                  <img src={selectedStarterVisual} alt="" className="h-full w-full object-cover opacity-85" />
+                ) : (
+                  <div className="grid h-full place-items-center text-Cr-text-subtler-v2">
+                    <Bot size={32} />
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/15 to-transparent" />
+              </div>
+              <div className="grid gap-1 border-t border-white/10 bg-[#111219]/95 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Pill tone="hot">Selected Dreamy bot</Pill>
+                  <Pill>{selectedStarterPreset.workflow}</Pill>
+                  <Pill>{selectedStarterPreset.botSlug}</Pill>
+                </div>
+                <div className="truncate text-sm font-semibold text-Cr-text-default-v2">{selectedStarterPreset.title}</div>
+                <div className="line-clamp-2 text-xs leading-5 text-Cr-text-subtler-v2">{selectedStarterPreset.recommendation}</div>
+              </div>
+            </div>
           ) : (
             <div className="flex flex-col items-center gap-3 text-Cr-text-subtler-v2">
               <div className="flex h-14 w-14 items-center justify-center rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2">
@@ -2234,6 +2367,35 @@ function PreviewPanel({
             </div>
           )}
         </div>
+
+        {selectedStarterPreset && (
+          <div
+            data-testid="selected-dreamy-bot-preview"
+            className="grid gap-2 rounded-lg-v2 border border-dreamy-brand-hot-v2/35 bg-dreamy-brand-hot-v2/10 p-3 text-xs text-Cr-text-subtle-v2 sm:grid-cols-[minmax(0,1fr)_auto]"
+          >
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold text-Cr-text-default-v2">{selectedStarterPreset.title}</span>
+                <Pill tone="hot">{selectedStarterPreset.workflow}</Pill>
+                <Pill>{selectedSegmentIndex >= 0 ? `Segment ${selectedSegmentIndex + 1} selected` : 'First segment'}</Pill>
+              </div>
+              <div className="mt-1 truncate text-Cr-text-subtler-v2">
+                {selectedSegment
+                  ? `Next run appends segment ${segments.length + 1} after the selected clip.`
+                  : selectedStarterPreset.recommendation}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onRunPreset?.(selectedStarterPreset)}
+              disabled={submitting}
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md-v2 bg-dreamy-brand-hot-v2 px-3 font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+            >
+              <Clapperboard size={13} />
+              {getStarterPresetRunLabel(selectedStarterPreset, selectedSegment)}
+            </button>
+          </div>
+        )}
 
         <div className="grid grid-cols-[1fr_auto] gap-2">
           <div className="flex items-center gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2">
@@ -2263,12 +2425,13 @@ function PreviewPanel({
             </button>
             <button
               type="button"
+              data-testid="preview-append-next-segment"
               disabled={!selectedSegment || submitting}
               onClick={() => onAction('extend', 'Extend this into the next shot', selectedSegment)}
               className="inline-flex h-11 items-center gap-2 rounded-lg-v2 bg-dreamy-brand-hot-v2 px-3 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
             >
               <Clapperboard size={14} />
-              Extend
+              Append next segment
             </button>
           </div>
         </div>
@@ -2444,16 +2607,20 @@ function PreviewPanel({
 function CanvasWorkspace({
   project,
   selectedSegment,
+  selectedStarterPreset,
   onSelectSegment,
   onDeleteSegment,
   onAction,
+  onRunPreset,
   submitting,
 }: {
   project: StudioProject | null;
   selectedSegment?: StudioSegment | null;
+  selectedStarterPreset?: StudioStarterPreset | null;
   onSelectSegment: (segmentId: string) => void;
   onDeleteSegment: (segmentId: string) => void;
   onAction: (action: StudioAction, prompt?: string, source?: StudioSegment | null) => void;
+  onRunPreset?: (preset: StudioStarterPreset) => void;
   submitting: boolean;
 }) {
   const [tool, setTool] = useState<CanvasTool>('select');
@@ -2485,10 +2652,40 @@ function CanvasWorkspace({
   } | null>(null);
 
   const baseCanvas = useMemo(() => buildCanvasGraph(project, positionOverrides), [positionOverrides, project]);
-  const nodes = useMemo(() => [...baseCanvas.nodes, ...customNodes], [baseCanvas.nodes, customNodes]);
+  const selectedStarterNode = useMemo<CanvasNode | null>(() => {
+    if (!selectedStarterPreset) return null;
+    return {
+      id: `selected-dreamy-bot-${selectedStarterPreset.id}`,
+      kind: 'agent',
+      title: `Selected Bot · ${selectedStarterPreset.title}`,
+      subtitle: selectedStarterPreset.recommendation,
+      x: 154,
+      y: 52,
+      width: 264,
+      height: 138,
+      status: 'ready',
+      action: getStarterPresetAction(selectedStarterPreset, selectedSegment),
+      prompt: selectedStarterPreset.prompt,
+      botSlug: selectedStarterPreset.botSlug,
+      botName: selectedStarterPreset.title,
+      mediaUrl: selectedStarterPreset.visualUrl,
+    };
+  }, [selectedSegment, selectedStarterPreset]);
+  const nodes = useMemo(
+    () => (selectedStarterNode ? [selectedStarterNode, ...baseCanvas.nodes, ...customNodes] : [...baseCanvas.nodes, ...customNodes]),
+    [baseCanvas.nodes, customNodes, selectedStarterNode],
+  );
   const connections = useMemo(
-    () => [...baseCanvas.connections, ...customConnections],
-    [baseCanvas.connections, customConnections],
+    () => (
+      selectedStarterNode
+        ? [
+            { id: `${selectedStarterNode.id}-to-prompt-root`, from: selectedStarterNode.id, to: 'prompt-root', label: 'selected bot' },
+            ...baseCanvas.connections,
+            ...customConnections,
+          ]
+        : [...baseCanvas.connections, ...customConnections]
+    ),
+    [baseCanvas.connections, customConnections, selectedStarterNode],
   );
   const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
   const selectedNode = nodeMap.get(selectedNodeId) || nodes[0] || null;
@@ -2504,6 +2701,13 @@ function CanvasWorkspace({
       setSelectedNodeId(nodes.some((node) => node.id === nextId) ? nextId : nodes[0].id);
     }
   }, [nodes, selectedNodeId, selectedSegment?.id]);
+
+  useEffect(() => {
+    if (!selectedStarterNode) return;
+    setSelectedNodeId(selectedStarterNode.id);
+    setCanvasAction(selectedStarterNode.action || 'generate');
+    setCanvasCommand(selectedStarterNode.prompt || '');
+  }, [selectedStarterNode?.id]);
 
   useEffect(() => {
     if (!selectedNode) return;
@@ -2658,6 +2862,10 @@ function CanvasWorkspace({
   };
 
   const runSelected = () => {
+    if (selectedStarterPreset && selectedNode?.id === selectedStarterNode?.id) {
+      onRunPreset?.(selectedStarterPreset);
+      return;
+    }
     const promptText = canvasCommand.trim() || selectedNode?.prompt || `Run ${selectedNode?.title || 'selected node'}`;
     onAction(canvasAction, promptText, selectedNodeSegment);
   };
@@ -2778,6 +2986,46 @@ function CanvasWorkspace({
               <Plus size={14} />
             </button>
           </div>
+          {selectedStarterPreset && (
+            <div
+              data-testid="canvas-selected-dreamy-bot"
+              className="m-3 mb-0 grid gap-2 rounded-md-v2 border border-dreamy-brand-hot-v2/40 bg-dreamy-brand-hot-v2/10 p-3"
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedStarterNode) selectCanvasNode(selectedStarterNode);
+                  setCanvasCommand(selectedStarterPreset.prompt);
+                  setCanvasAction(getStarterPresetAction(selectedStarterPreset, selectedSegment));
+                }}
+                className="grid grid-cols-[56px_minmax(0,1fr)] gap-2 text-left"
+              >
+                <span className="relative h-14 overflow-hidden rounded-md-v2 bg-black/30">
+                  {selectedStarterPreset.visualUrl ? (
+                    <img src={selectedStarterPreset.visualUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="grid h-full place-items-center text-Cr-text-subtler-v2">
+                      <Bot size={18} />
+                    </span>
+                  )}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-semibold text-Cr-text-default-v2">{selectedStarterPreset.title}</span>
+                  <span className="mt-1 block truncate text-[11px] text-Cr-text-subtler-v2">{selectedStarterPreset.workflow}</span>
+                  <span className="mt-1 block truncate text-[10px] font-semibold text-Cr-text-subtlest-v2">{selectedStarterPreset.botSlug}</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onRunPreset?.(selectedStarterPreset)}
+                disabled={submitting}
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md-v2 bg-dreamy-brand-hot-v2 px-2 text-[11px] font-semibold text-white disabled:bg-white/[0.06] disabled:text-Cr-text-subtlest-v2"
+              >
+                <Clapperboard size={12} />
+                {getStarterPresetRunLabel(selectedStarterPreset, selectedSegment)}
+              </button>
+            </div>
+          )}
           <div className="mx-4 my-3 flex h-10 shrink-0 items-center gap-2 rounded-md-v2 border border-white/10 bg-black/20 px-3 text-xs text-Cr-text-subtlest-v2">
             <SlidersHorizontal size={14} />
             <span>Search layers...</span>
@@ -2891,7 +3139,7 @@ function CanvasWorkspace({
                     style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
                   >
                     <div className="flex h-full">
-                      {node.kind === 'segment' && node.mediaUrl && (
+                      {node.mediaUrl && (
                         <div className="h-full w-[86px] shrink-0 bg-black/30">
                           <img src={node.mediaUrl} alt="" className="h-full w-full object-cover opacity-80" />
                         </div>
@@ -3139,11 +3387,14 @@ function Composer({
   starterPresets,
   botPreviewCards,
   selectedStarterPresetId,
+  selectedStarterPreset,
+  selectedSegment,
   previewUrl,
   selectedFileName,
   submitting,
   onModeChange,
   onPromptChange,
+  onSelectPreset,
   onRunPreset,
   onSubmit,
   onPickFile,
@@ -3157,11 +3408,14 @@ function Composer({
   starterPresets?: StudioStarterPreset[];
   botPreviewCards?: StudioBotPreview[];
   selectedStarterPresetId?: string;
+  selectedStarterPreset?: StudioStarterPreset | null;
+  selectedSegment?: StudioSegment | null;
   previewUrl: string;
   selectedFileName?: string;
   submitting: boolean;
   onModeChange: (mode: StudioMode) => void;
   onPromptChange: (value: string) => void;
+  onSelectPreset?: (preset: StudioStarterPreset) => void;
   onRunPreset?: (preset: StudioStarterPreset) => void;
   onSubmit: () => void;
   onPickFile: () => void;
@@ -3171,6 +3425,14 @@ function Composer({
   const visiblePresets = showStarterPresets ? starterPresets || [] : [];
   const recommendedPreset = visiblePresets[0];
   const visibleBotPreviewCards = showStarterPresets ? botPreviewCards || [] : [];
+  const activeStarterPresetId = selectedStarterPreset?.id || selectedStarterPresetId;
+  const presetByBotSlug = useMemo(
+    () => new Map(visiblePresets.map((preset) => [preset.botSlug, preset])),
+    [visiblePresets],
+  );
+  const selectPreset = useCallback((preset: StudioStarterPreset) => {
+    onSelectPreset?.(preset);
+  }, [onSelectPreset]);
 
   return (
     <div className="shrink-0 border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-3">
@@ -3192,12 +3454,12 @@ function Composer({
                   key={preset.id}
                   type="button"
                   data-testid={`starter-preset-${preset.id}`}
-                  aria-label={`Generate ${preset.title} preset`}
-                  aria-pressed={selectedStarterPresetId === preset.id}
+                  aria-label={`Select ${preset.title} preset`}
+                  aria-pressed={activeStarterPresetId === preset.id}
                   disabled={submitting}
-                  onClick={() => onRunPreset?.(preset)}
+                  onClick={() => selectPreset(preset)}
                   className={`group grid min-h-[148px] overflow-hidden rounded-lg-v2 border text-left transition-colors active:bg-Cr-beta-white-8-v2 disabled:opacity-50 ${
-                    selectedStarterPresetId === preset.id
+                    activeStarterPresetId === preset.id
                       ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
                       : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2'
                   }`}
@@ -3221,10 +3483,10 @@ function Composer({
                   <span className="grid gap-1.5 p-3">
                     <span className="flex items-center justify-between gap-2">
                       <span className="min-w-0 truncate text-xs font-semibold text-Cr-text-default-v2">{preset.title}</span>
-                      {selectedStarterPresetId === preset.id ? (
+                      {activeStarterPresetId === preset.id ? (
                         <CheckCircle2 size={13} className="shrink-0 text-Cr-text-success-default-v2" />
                       ) : (
-                        <Send size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
+                        <MousePointer2 size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
                       )}
                     </span>
                     <span className="line-clamp-2 text-[11px] leading-4 text-Cr-text-subtler-v2">{preset.recommendation}</span>
@@ -3238,12 +3500,43 @@ function Composer({
                 </button>
               ))}
             </div>
+            {selectedStarterPreset && (
+              <div className="grid gap-2 rounded-lg-v2 border border-dreamy-brand-hot-v2/35 bg-dreamy-brand-hot-v2/10 p-2 sm:grid-cols-[56px_minmax(0,1fr)_auto]">
+                <div className="relative h-14 overflow-hidden rounded-md-v2 bg-black/25">
+                  {selectedStarterPreset.visualUrl ? (
+                    <img src={selectedStarterPreset.visualUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="grid h-full place-items-center text-Cr-text-subtler-v2">
+                      <Bot size={18} />
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="truncate text-xs font-semibold text-Cr-text-default-v2">{selectedStarterPreset.title}</span>
+                    <Pill tone="hot">{selectedStarterPreset.workflow}</Pill>
+                  </div>
+                  <div className="mt-1 truncate text-[11px] text-Cr-text-subtler-v2">{selectedStarterPreset.botSlug}</div>
+                  <div className="mt-1 line-clamp-1 text-[11px] text-Cr-text-subtlest-v2">{selectedStarterPreset.recommendation}</div>
+                </div>
+                <button
+                  type="button"
+                  data-testid="starter-preset-direct-generate"
+                  disabled={submitting}
+                  onClick={() => onRunPreset?.(selectedStarterPreset)}
+                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md-v2 bg-dreamy-brand-hot-v2 px-3 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2 sm:self-center"
+                >
+                  <Clapperboard size={13} />
+                  {getStarterPresetRunLabel(selectedStarterPreset, selectedSegment)}
+                </button>
+              </div>
+            )}
             {!!visibleBotPreviewCards.length && (
               <div data-testid="all-bot-previews" className="mt-2 grid gap-2">
                 <div className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
                   <span className="inline-flex min-w-0 items-center gap-2">
                     <Bot size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
-                    <span className="truncate">Connected MyShell bots</span>
+                    <span className="truncate">Connected Dreamy bots</span>
                   </span>
                   <Pill tone={visibleBotPreviewCards.every((preview) => preview.accepted && preview.botSpecific) ? 'success' : 'hot'}>
                     {`${visibleBotPreviewCards.filter((preview) => preview.accepted && preview.botSpecific).length}/${visibleBotPreviewCards.length} bot-specific`}
@@ -3252,11 +3545,22 @@ function Composer({
                 <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
                   {visibleBotPreviewCards.map((preview) => {
                     const imageUrl = resolveStudioDisplayAssetUrl(preview.thumbnailUrl || preview.mediaUrl || preview.posterUrl);
+                    const linkedPreset = presetByBotSlug.get(preview.botSlug) || starterPresetFromBotPreview(preview);
                     return (
-                      <div
+                      <button
                         key={preview.botSlug}
+                        type="button"
                         data-testid="all-bot-preview-card"
-                        className="grid w-[132px] shrink-0 overflow-hidden rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2"
+                        data-bot-slug={preview.botSlug}
+                        disabled={submitting}
+                        aria-pressed={activeStarterPresetId === linkedPreset.id}
+                        onPointerDown={() => selectPreset(linkedPreset)}
+                        onClick={() => selectPreset(linkedPreset)}
+                        className={`grid w-[132px] shrink-0 overflow-hidden rounded-lg-v2 border text-left disabled:opacity-60 ${
+                          activeStarterPresetId === linkedPreset.id
+                            ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
+                            : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2'
+                        }`}
                       >
                         <div className="relative h-[72px] bg-black/25">
                           {imageUrl ? (
@@ -3279,7 +3583,7 @@ function Composer({
                           <span className="truncate text-[11px] font-semibold text-Cr-text-default-v2">{preview.botName}</span>
                           <span className="truncate text-[10px] uppercase text-Cr-text-subtlest-v2">{preview.botType || preview.pageId || 'bot'}</span>
                         </div>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
@@ -3415,13 +3719,29 @@ export default function Dreamy() {
   );
   const connectedBotPreviewCards = useMemo(
     () =>
-      [...(botPreviews?.previews || [])].sort((left, right) => {
-        const leftDreamy = left.pageId === 'dreamy-miniapp' ? 0 : 1;
-        const rightDreamy = right.pageId === 'dreamy-miniapp' ? 0 : 1;
-        if (leftDreamy !== rightDreamy) return leftDreamy - rightDreamy;
+      [...(botPreviews?.previews || [])].filter(isDreamyStudioBot).sort((left, right) => {
         return left.botName.localeCompare(right.botName);
       }),
     [botPreviews],
+  );
+  const connectedBotPresets = useMemo(
+    () => connectedBotPreviewCards.map(starterPresetFromBotPreview),
+    [connectedBotPreviewCards],
+  );
+  const selectableStarterPresets = useMemo(() => {
+    const bySlug = new Map<string, StudioStarterPreset>();
+    for (const preset of recommendedStarterPresets) bySlug.set(preset.botSlug, preset);
+    for (const preset of connectedBotPresets) {
+      if (!bySlug.has(preset.botSlug)) bySlug.set(preset.botSlug, preset);
+    }
+    return [...bySlug.values()];
+  }, [connectedBotPresets, recommendedStarterPresets]);
+  const selectedStarterPreset = useMemo(
+    () =>
+      selectableStarterPresets.find((preset) => preset.id === selectedStarterPresetId) ||
+      selectableStarterPresets[0] ||
+      null,
+    [selectableStarterPresets, selectedStarterPresetId],
   );
 
   const selectedJob = useMemo(() => {
@@ -3471,6 +3791,18 @@ export default function Dreamy() {
     changePage(nextPageId);
     setQueuePageFilter(nextPageId);
   }, [changePage]);
+  const selectStarterPreset = useCallback((preset: StudioStarterPreset) => {
+    setSelectedStarterPresetId(preset.id);
+    setSelectedPageId(preset.pageId);
+    setSelectedAgentId(preset.agentId);
+    setPrompt(preset.prompt);
+    setActiveTab('preview');
+    trackEvent('dreamy_studio_preset_selected', {
+      preset_id: preset.id,
+      bot_slug: preset.botSlug,
+      page_id: preset.pageId,
+    });
+  }, []);
   const displayedHubJobs = useMemo(
     () => hubJobs.filter((job) => {
       if (queueStatusFilter !== 'all' && job.status !== queueStatusFilter) return false;
@@ -4138,32 +4470,38 @@ export default function Dreamy() {
     const savedSession = readStudioDispatchSession();
     const projectId = project?.projectId || savedSession?.projectId || readLastStudioProjectId() || undefined;
     const restore = async () => {
+      const restoreCandidates: Array<{ sessionId: string; targetId: string | undefined; announce: boolean }> = [];
       if (restoreParams.sessionId) {
-        const session = await fetchStudioDispatchSession(restoreParams.sessionId, { targetId: restoreParams.targetId });
-        if (!cancelled) {
-          applyDispatchSession(session);
-          const restoreKey = `${session.sessionId}:${session.focusedTargetId || restoreParams.targetId || ''}`;
-          if (restoredDispatchUrlRef.current !== restoreKey) {
-            restoredDispatchUrlRef.current = restoreKey;
-            const focusedTarget = session.focusedTarget || session.targets.find((target) => target.id === session.focusedTargetId);
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: makeId('assistant'),
-                role: 'assistant',
-                content: focusedTarget
-                  ? `Dispatch queue restored at ${focusedTarget.pageName} (${focusedTarget.status}).`
-                  : `Dispatch queue restored for ${session.sessionId}.`,
-                createdAt: nowIso(),
-              },
-            ]);
-          }
-        }
-        return;
+        restoreCandidates.push({ sessionId: restoreParams.sessionId, targetId: restoreParams.targetId, announce: true });
       }
       if (savedSession?.sessionId) {
-        const session = await fetchStudioDispatchSession(savedSession.sessionId, { targetId: savedSession.targetId });
-        if (!cancelled) applyDispatchSession(session);
+        restoreCandidates.push({ sessionId: savedSession.sessionId, targetId: savedSession.targetId, announce: false });
+      }
+
+      for (const candidate of restoreCandidates) {
+        const session = await fetchStudioDispatchSession(candidate.sessionId, { targetId: candidate.targetId }).catch(() => null);
+        if (!session) continue;
+        if (!cancelled) {
+          applyDispatchSession(session);
+          if (candidate.announce) {
+            const restoreKey = `${session.sessionId}:${session.focusedTargetId || candidate.targetId || ''}`;
+            if (restoredDispatchUrlRef.current !== restoreKey) {
+              restoredDispatchUrlRef.current = restoreKey;
+              const focusedTarget = session.focusedTarget || session.targets.find((target) => target.id === session.focusedTargetId);
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: makeId('assistant'),
+                  role: 'assistant',
+                  content: focusedTarget
+                    ? `Dispatch queue restored at ${focusedTarget.pageName} (${focusedTarget.status}).`
+                    : `Dispatch queue restored for ${session.sessionId}.`,
+                  createdAt: nowIso(),
+                },
+              ]);
+            }
+          }
+        }
         return;
       }
       if (!projectId) return;
@@ -4258,6 +4596,9 @@ export default function Dreamy() {
       sourceSegmentId: selectedSegment?.id,
       pageId: selectedPageId,
       agentId: selectedAgentId,
+      botSlug: selectedPageId === 'dreamy-miniapp' ? selectedStarterPreset?.botSlug : undefined,
+      botName: selectedPageId === 'dreamy-miniapp' ? selectedStarterPreset?.title : undefined,
+      botType: selectedPageId === 'dreamy-miniapp' && selectedStarterPreset ? botTypeForStarterPreset(selectedStarterPreset) : undefined,
       hasImage: Boolean(selectedFile),
     }).then((preview) => {
       if (!cancelled) setDispatchPreview(preview);
@@ -4267,11 +4608,27 @@ export default function Dreamy() {
     return () => {
       cancelled = true;
     };
-  }, [project?.projectId, prompt, selectedAgentId, selectedFile, selectedPageId, selectedSegment?.id]);
+  }, [
+    project?.projectId,
+    prompt,
+    selectedAgentId,
+    selectedFile,
+    selectedPageId,
+    selectedSegment?.id,
+    selectedStarterPreset?.botSlug,
+    selectedStarterPreset?.title,
+    selectedStarterPreset?.workflow,
+  ]);
 
   const mergeProject = useCallback((incoming: StudioProject) => {
-    setProject(incoming);
-    setHubJobs(incoming.jobs || []);
+    setProject((current) => mergeStudioProjectState(current, incoming));
+    setHubJobs((current) => {
+      const incomingJobs = new Map((incoming.jobs || []).map((job) => [job.jobId, job]));
+      return [
+        ...current.map((job) => incomingJobs.get(job.jobId) || job),
+        ...(incoming.jobs || []).filter((job) => !current.some((currentJob) => currentJob.jobId === job.jobId)),
+      ];
+    });
     saveLastStudioProjectId(incoming.projectId);
     setMode(incoming.mode || 'player');
   }, []);
@@ -4793,6 +5150,11 @@ export default function Dreamy() {
       const targetAgentId = dispatchOverride?.agentId || selectedAgentId;
       const targetPageName = dispatchOverride?.pageName || targetPage?.name || String(targetPageId);
       const targetExecutor = dispatchOverride?.executor || targetPage?.executor;
+      const targetBotSlug = dispatchOverride?.botSlug || (targetPageId === 'dreamy-miniapp' ? selectedStarterPreset?.botSlug : undefined);
+      const targetBotName = dispatchOverride?.botName || (targetPageId === 'dreamy-miniapp' ? selectedStarterPreset?.title : undefined);
+      const targetBotType = dispatchOverride?.botType || (
+        targetPageId === 'dreamy-miniapp' && selectedStarterPreset ? botTypeForStarterPreset(selectedStarterPreset) : undefined
+      );
       const isNavigationDispatch = targetExecutor === 'navigation';
       const isMatrixDispatch = Boolean(dispatchOverride);
       if (!text && action === 'generate' && !isNavigationDispatch && !isMatrixDispatch) return;
@@ -4814,12 +5176,14 @@ export default function Dreamy() {
         { id: assistantId, role: 'assistant', content: 'Routing next segment...', pending: true, createdAt: nowIso(), action },
       ]);
       setSubmitting(true);
-      setActiveTab('chat');
+      setActiveTab('preview');
       trackEvent('dreamy_studio_run', {
         action,
         mode: targetMode,
         page_id: targetPageId,
         agent_id: targetAgentId,
+        bot_slug: targetBotSlug || '',
+        bot_type: targetBotType || '',
         has_image: Boolean(fileForRequest),
         source_segment_id: sourceSegment?.id || '',
       });
@@ -4837,6 +5201,9 @@ export default function Dreamy() {
           sourceSegmentId: sourceSegment?.id,
           pageId: targetPageId,
           agentId: targetAgentId,
+          botSlug: targetBotSlug,
+          botName: targetBotName,
+          botType: targetBotType,
           agentGraph: project?.agentGraph,
           imageFile: fileForRequest,
           signal: controller.signal,
@@ -4955,7 +5322,7 @@ export default function Dreamy() {
         if (controller.signal.aborted) {
           updateAssistant(assistantId, { pending: false, content: 'Stopped.' });
         } else {
-          const fallback = createLocalProject(targetMode, runPrompt, action, sourceSegment || undefined);
+          const fallback = createLocalProject(targetMode, runPrompt, action, sourceSegment || undefined, project);
           mergeProject(fallback);
           updateAssistant(assistantId, {
             pending: false,
@@ -4987,6 +5354,7 @@ export default function Dreamy() {
       selectedPage,
       selectedPageId,
       selectedSegment,
+      selectedStarterPreset,
       submitting,
       updateAssistant,
     ],
@@ -4999,20 +5367,19 @@ export default function Dreamy() {
   };
 
   const runStarterPreset = useCallback((preset: StudioStarterPreset) => {
-    setMode('player');
-    setActiveTab('chat');
-    setSelectedStarterPresetId(preset.id);
-    setSelectedPageId(preset.pageId);
-    setSelectedAgentId(preset.agentId);
-    setPrompt(preset.prompt);
-    void runStudio('generate', preset.prompt, selectedSegment, {
+    selectStarterPreset(preset);
+    const action = getStarterPresetAction(preset, selectedSegment);
+    void runStudio(action, preset.prompt, selectedSegment, {
       pageId: preset.pageId,
       agentId: preset.agentId,
       pageName: preset.pageName,
       executor: 'client',
-      mode: 'player',
+      mode,
+      botSlug: preset.botSlug,
+      botName: preset.title,
+      botType: botTypeForStarterPreset(preset),
     });
-  }, [runStudio, selectedSegment]);
+  }, [mode, runStudio, selectStarterPreset, selectedSegment]);
 
   const runMatrixEntry = useCallback((entry: StudioDispatchMatrixEntry) => {
     changePage(entry.pageId);
@@ -5481,7 +5848,12 @@ export default function Dreamy() {
   };
 
   return (
-    <div className="flex h-full min-h-[100dvh] flex-col bg-[#090a0f] text-Cr-text-default-v2">
+    <div
+      data-testid="dreamy-studio-root"
+      data-selected-starter-preset-id={selectedStarterPresetId}
+      data-selected-bot-slug={selectedStarterPreset?.botSlug || ''}
+      className="flex h-full min-h-[100dvh] flex-col bg-[#090a0f] text-Cr-text-default-v2"
+    >
       <header className="grid h-14 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-white/10 bg-[#0f1016] px-3 lg:grid-cols-[minmax(230px,1fr)_auto_minmax(230px,1fr)] lg:px-4">
         <div className="flex min-w-0 items-center gap-3">
           <button
@@ -5880,7 +6252,7 @@ export default function Dreamy() {
       </div>
       )}
 
-      <div className={`${mode === 'canvas' ? 'hidden' : 'grid'} h-11 shrink-0 grid-cols-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-1 lg:hidden`}>
+      <div className="grid h-11 shrink-0 grid-cols-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-1 lg:hidden">
         {(['chat', 'preview'] as TabKey[]).map((tab) => (
           <button
             key={tab}
@@ -5896,15 +6268,15 @@ export default function Dreamy() {
       </div>
 
       <main
-        className={`min-h-0 flex-1 ${
+        className={`relative z-0 min-h-0 flex-1 overflow-hidden ${
           mode === 'canvas'
-            ? 'grid p-0'
+            ? 'grid gap-3 p-3 lg:grid-cols-[minmax(340px,0.34fr)_minmax(520px,0.66fr)]'
             : 'grid gap-3 p-3 lg:grid-cols-[minmax(360px,0.42fr)_minmax(480px,0.58fr)]'
         }`}
       >
         <section
           className={`min-h-0 flex-col overflow-hidden rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 ${
-            mode === 'canvas' ? 'hidden' : activeTab === 'chat' ? 'flex' : 'hidden lg:flex'
+            activeTab === 'chat' ? 'flex' : 'hidden lg:flex'
           }`}
         >
           <div className="flex h-12 shrink-0 items-center justify-between border-b border-Cr-border-default-v2 px-3">
@@ -5913,9 +6285,9 @@ export default function Dreamy() {
                 <Sparkles size={16} className="text-dreamy-brand-hot-v2" />
               </div>
               <div>
-                <div className="text-sm font-semibold">Conversation</div>
+                <div className="text-sm font-semibold">{mode === 'canvas' ? 'Bot Selection' : 'Conversation'}</div>
                 <div className="text-[11px] text-Cr-text-subtler-v2">
-                  {project?.conversationId || 'No session'} · {selectedPage?.name || 'Dreamy Miniapp'} · {selectedAgent?.label || selectedAgentId} · {displayedHubJobs.length} jobs
+                  {project?.conversationId || 'No session'} · {selectedStarterPreset?.title || selectedPage?.name || 'Dreamy Miniapp'} · {selectedAgent?.label || selectedAgentId} · {displayedHubJobs.length} jobs
                 </div>
               </div>
             </div>
@@ -5938,15 +6310,18 @@ export default function Dreamy() {
             mode={mode}
             prompt={prompt}
             canSubmitWithoutPrompt={selectedPage?.executor === 'navigation'}
-            showStarterPresets={mode === 'player'}
+            showStarterPresets
             starterPresets={recommendedStarterPresets}
             botPreviewCards={connectedBotPreviewCards}
             selectedStarterPresetId={selectedStarterPresetId}
+            selectedStarterPreset={selectedStarterPreset}
+            selectedSegment={selectedSegment}
             previewUrl={previewUrl}
             selectedFileName={selectedFile?.name}
             submitting={submitting}
             onModeChange={setMode}
             onPromptChange={setPrompt}
+            onSelectPreset={selectStarterPreset}
             onRunPreset={runStarterPreset}
             onPickFile={() => fileInputRef.current?.click()}
             onClearFile={clearFile}
@@ -5955,20 +6330,23 @@ export default function Dreamy() {
           />
         </section>
 
-        <div className={mode === 'canvas' ? 'min-h-0 h-full' : activeTab === 'preview' ? 'min-h-0 lg:h-full' : 'hidden min-h-0 lg:block lg:h-full'}>
+        <div className={activeTab === 'preview' ? 'min-h-0 lg:h-full' : 'hidden min-h-0 lg:block lg:h-full'}>
           {mode === 'canvas' ? (
             <CanvasWorkspace
               project={project}
               selectedSegment={selectedSegment}
+              selectedStarterPreset={selectedStarterPreset}
               onSelectSegment={selectSegment}
               onDeleteSegment={deleteSegment}
               onAction={runStudio}
+              onRunPreset={runStarterPreset}
               submitting={submitting}
             />
           ) : (
             <PreviewPanel
               project={project}
               selectedSegment={selectedSegment}
+              selectedStarterPreset={selectedStarterPreset}
               selectedJob={selectedJob}
               agentsOpen={agentsOpen}
               onToggleAgents={() => setAgentsOpen((value) => !value)}
@@ -5977,6 +6355,7 @@ export default function Dreamy() {
               onCancelJob={(jobId) => void cancelJob(jobId)}
               onRetryJob={(jobId) => void retryJob(jobId)}
               onAction={runStudio}
+              onRunPreset={runStarterPreset}
               onExportAllSegments={exportAllSegments}
               timelineExporting={timelineExporting}
               submitting={submitting}
@@ -5984,7 +6363,7 @@ export default function Dreamy() {
           )}
         </div>
       </main>
-      <footer className="flex h-8 shrink-0 items-center gap-2 overflow-x-auto border-t border-white/10 bg-[#0f1016] px-3 text-[11px] text-Cr-text-subtler-v2 [-webkit-overflow-scrolling:touch]">
+      <footer className="relative z-20 flex h-8 shrink-0 items-center gap-2 overflow-x-auto border-t border-white/10 bg-[#0f1016] px-3 text-[11px] text-Cr-text-subtler-v2 [-webkit-overflow-scrolling:touch]">
         <span className="inline-flex shrink-0 items-center gap-1.5 font-semibold">
           <span className={`h-2 w-2 rounded-full ${previewDispatchReady ? 'bg-Cr-text-success-default-v2' : 'bg-dreamy-brand-hot-v2'}`} />
           {previewDispatchReady ? 'Ready' : 'Needs attention'}
