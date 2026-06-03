@@ -280,10 +280,20 @@ async def _poll_task(record: dict[str, Any]) -> None:
     record["rawTaskStatus"] = raw_status
     record["queuePosition"] = media.get("queuePosition", "")
     record["checkedAt"] = _now_iso()
+    tasks = payload.get("tasks") if isinstance(payload.get("tasks"), list) else []
+    task = next(
+        (item for item in tasks if isinstance(item, dict) and str(item.get("jobId") or item.get("taskId") or "") == task_id),
+        tasks[0] if tasks and isinstance(tasks[0], dict) else {},
+    )
+    result = task.get("result") if isinstance(task, dict) and isinstance(task.get("result"), dict) else {}
+    err_msg = str(result.get("errMsg") or "")
+    if err_msg:
+        record["message"] = err_msg
     if media.get("mediaUrl"):
         record["mediaUrl"] = media["mediaUrl"]
         record["remoteUrl"] = media["mediaUrl"]
         record["targetBotExecuted"] = True
+        record.pop("message", None)
     if media.get("posterUrl"):
         record["posterUrl"] = media["posterUrl"]
 
@@ -318,6 +328,7 @@ async def _submit_task(record: dict[str, Any], *, source_image_url: str, prompt:
             "targetBotExecuted": False,
         }
     )
+    record.pop("message", None)
 
 
 def _summary(report: dict[str, Any]) -> dict[str, int]:

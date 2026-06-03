@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+import asyncio
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -87,6 +88,36 @@ class DreamyPornWorkshopRunnerTest(unittest.TestCase):
         self.assertIn("Active Bot", html)
         self.assertIn("queue_full", html)
         self.assertIn("Cancelled Bot", html)
+
+    def test_poll_task_records_dreamy_error_message(self) -> None:
+        original_request = runner._dreamyporn_web_request
+        original_media = runner._dreamyporn_web_task_media
+
+        async def fake_request(_url: str, _body: dict) -> dict:
+            return {
+                "tasks": [
+                    {
+                        "jobId": "task-error",
+                        "status": "error",
+                        "result": {"errMsg": "widget failed"},
+                    }
+                ]
+            }
+
+        def fake_media(_payload: dict, _task_id: str) -> dict:
+            return {"status": "error", "queuePosition": "0"}
+
+        try:
+            runner._dreamyporn_web_request = fake_request
+            runner._dreamyporn_web_task_media = fake_media
+            record = {"taskId": "task-error", "message": "old queue full"}
+            asyncio.run(runner._poll_task(record))
+        finally:
+            runner._dreamyporn_web_request = original_request
+            runner._dreamyporn_web_task_media = original_media
+
+        self.assertEqual(record["status"], "error")
+        self.assertEqual(record["message"], "widget failed")
 
 
 if __name__ == "__main__":
