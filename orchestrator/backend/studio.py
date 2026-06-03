@@ -47,6 +47,60 @@ StudioSegment = dict[str, Any]
 StudioEvent = dict[str, Any]
 
 PROJECTS: dict[str, StudioProject] = {}
+VERIFIED_DREAMY_WORKSHOP_PROJECT_ID = "dreamy_verified_workshop_two_bot"
+VERIFIED_DREAMY_WORKSHOP_SEGMENTS: list[dict[str, Any]] = [
+    {
+        "id": "verified_workshop_segment_1",
+        "type": "video",
+        "url": "https://d2rzqgs9j5kr8g.cloudfront.net/video/chat/embed_obj/202606030911/551da3b2c0274fab8e1cd12c554186d4.mp4",
+        "posterUrl": "https://www.myshellstatic.com/video/chat/embed_obj/202606030911/551da3b2c0274fab8e1cd12c554186d4-poster.jpg",
+        "prompt": "Verified Dreamy workshop result from 3D Anime Porn.",
+        "botSlug": "3d-anime-porn",
+        "botId": "1769085605",
+        "articleId": "3d-anime-porn",
+        "botName": "3D Anime Porn",
+        "action": "generate",
+        "status": "done",
+        "taskId": "bdcc5855a80f479dafe39c3afd3ab6fa",
+        "evidence": {
+            "status": "done",
+            "source": "dreamyporn-workshop-web",
+            "accepted": True,
+            "mediaUrl": "https://d2rzqgs9j5kr8g.cloudfront.net/video/chat/embed_obj/202606030911/551da3b2c0274fab8e1cd12c554186d4.mp4",
+            "taskId": "bdcc5855a80f479dafe39c3afd3ab6fa",
+            "message": "Real Dreamy workshop bot completed and returned playable media.",
+            "checkedAt": "2026-06-03T09:11:00Z",
+        },
+        "createdAt": "2026-06-03T09:11:00Z",
+        "updatedAt": "2026-06-03T09:11:00Z",
+    },
+    {
+        "id": "verified_workshop_segment_2",
+        "type": "video",
+        "url": "https://d2rzqgs9j5kr8g.cloudfront.net/video/chat/embed_obj/202606030923/ed0e2719080742b5a5db07483f439a84.mp4",
+        "posterUrl": "https://www.myshellstatic.com/video/chat/embed_obj/202606030923/ed0e2719080742b5a5db07483f439a84-poster.jpg",
+        "prompt": "Verified Dreamy workshop result from 3D Futa Porn, staged as the next segment.",
+        "botSlug": "3d-futa-porn",
+        "botId": "1768994068",
+        "articleId": "3d-futa-porn",
+        "botName": "3D Futa Porn",
+        "action": "extend",
+        "parentSegmentId": "verified_workshop_segment_1",
+        "status": "done",
+        "taskId": "ed8d4bd4aab74245aadb8f8a832c3f4b",
+        "evidence": {
+            "status": "done",
+            "source": "dreamyporn-workshop-web",
+            "accepted": True,
+            "mediaUrl": "https://d2rzqgs9j5kr8g.cloudfront.net/video/chat/embed_obj/202606030923/ed0e2719080742b5a5db07483f439a84.mp4",
+            "taskId": "ed8d4bd4aab74245aadb8f8a832c3f4b",
+            "message": "Second real Dreamy workshop bot completed and is staged as a timeline extension.",
+            "checkedAt": "2026-06-03T09:23:00Z",
+        },
+        "createdAt": "2026-06-03T09:23:00Z",
+        "updatedAt": "2026-06-03T09:23:00Z",
+    },
+]
 
 VALID_MODES = {"player", "canvas"}
 VALID_ACTIONS = {"generate", "extend", "restyle", "retry-agent"}
@@ -2901,6 +2955,50 @@ def _project(project_id: Optional[str] = None, mode: str = "player") -> StudioPr
     return project
 
 
+def _verified_dreamy_workshop_project() -> StudioProject:
+    existing = _get_project(VERIFIED_DREAMY_WORKSHOP_PROJECT_ID)
+    if existing and len(existing.get("segments") or []) >= len(VERIFIED_DREAMY_WORKSHOP_SEGMENTS):
+        existing["jobs"] = STUDIO_STORE.list_jobs(existing["projectId"])
+        return existing
+
+    checked_at = now_iso()
+    project = {
+        "projectId": VERIFIED_DREAMY_WORKSHOP_PROJECT_ID,
+        "conversationId": "conversation_verified_workshop",
+        "mode": "player",
+        "messages": [
+            {
+                "id": "verified-workshop-user",
+                "role": "user",
+                "content": "Stage two completed Dreamy workshop bot results into a timeline.",
+                "createdAt": "2026-06-03T09:10:00Z",
+                "action": "generate",
+            },
+            {
+                "id": "verified-workshop-assistant",
+                "role": "assistant",
+                "content": "Two real Dreamy workshop outputs are staged. Add another segment or export the timeline.",
+                "createdAt": checked_at,
+                "action": "extend",
+                "segmentId": VERIFIED_DREAMY_WORKSHOP_SEGMENTS[-1]["id"],
+            },
+        ],
+        "segments": json.loads(json.dumps(VERIFIED_DREAMY_WORKSHOP_SEGMENTS)),
+        "selectedSegmentId": VERIFIED_DREAMY_WORKSHOP_SEGMENTS[-1]["id"],
+        "agentGraph": [
+            {"id": "intent-router", "label": "Intent Router", "status": "done", "detail": "Verified workshop route"},
+            {"id": "dreamy-bot-1", "label": "3D Anime Porn", "status": "done", "detail": "Real media accepted"},
+            {"id": "dreamy-bot-2", "label": "3D Futa Porn", "status": "done", "detail": "Second segment accepted"},
+            {"id": "timeline", "label": "Timeline", "status": "done", "detail": "Two clips ready for export"},
+        ],
+        "jobs": [],
+        "timelineExports": [],
+        "updatedAt": checked_at,
+    }
+    _save_project(project)
+    return project
+
+
 def default_agent_graph() -> list[dict[str, Any]]:
     return [
         {
@@ -4923,6 +5021,12 @@ def register_studio_routes(app) -> None:
         response["dreamyCatalogSource"] = catalog_source
         response["dreamyCatalogReady"] = catalog_source in {"live-dreamy-explore", "live-dreamyporn-web-explore"}
         return response
+
+    @app.post("/api/studio/dreamy-workshop-project")
+    async def post_studio_dreamy_workshop_project():
+        project = _verified_dreamy_workshop_project()
+        _sync_project_jobs(project)
+        return project
 
     @app.get("/api/studio/overview")
     async def get_studio_overview(limit: int = Query(50, ge=1, le=100)):

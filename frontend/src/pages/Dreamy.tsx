@@ -37,7 +37,6 @@ import {
 } from 'lucide-react';
 import presetCharacterGif from '../assets/dreamy-preset-character.gif';
 import presetCinematicGif from '../assets/dreamy-preset-cinematic.gif';
-import presetStyleGif from '../assets/dreamy-preset-style.gif';
 import exampleGood from '../assets/example-good.png';
 import exampleMultiple from '../assets/example-multiple.png';
 import exampleSmall from '../assets/example-small.png';
@@ -67,6 +66,7 @@ import {
   fetchStudioReadiness,
   fetchStudioDispatchSession,
   fetchStudioDispatchSessions,
+  fetchVerifiedDreamyWorkshopProject,
   getStudioDispatchSelectionPageIds,
   getStudioDispatchTargetHref,
   getStudioRootEndpoint,
@@ -244,68 +244,107 @@ interface CanvasFlowPreset {
   connections: CanvasConnection[];
 }
 
-const DEFAULT_DREAMY_SLUG = 'luna-star';
-const DREAMY_VIDEO_SLUG = 'aurora-dusk';
+const DEFAULT_DREAMY_SLUG = '3d-anime-porn';
+const DREAMY_VIDEO_SLUG = '3d-futa-porn';
+const VERIFIED_WORKSHOP_PROJECT_ID = 'dreamy_verified_workshop_two_bot';
+const VERIFIED_WORKSHOP_SEGMENTS: StudioSegment[] = [
+  {
+    id: 'verified_workshop_segment_1',
+    type: 'video',
+    url: 'https://d2rzqgs9j5kr8g.cloudfront.net/video/chat/embed_obj/202606030911/551da3b2c0274fab8e1cd12c554186d4.mp4',
+    posterUrl: 'https://www.myshellstatic.com/video/chat/embed_obj/202606030911/551da3b2c0274fab8e1cd12c554186d4-poster.jpg',
+    prompt: 'Verified Dreamy workshop result from 3D Anime Porn.',
+    botSlug: DEFAULT_DREAMY_SLUG,
+    botId: '1769085605',
+    articleId: DEFAULT_DREAMY_SLUG,
+    botName: '3D Anime Porn',
+    action: 'generate',
+    status: 'done',
+    taskId: 'bdcc5855a80f479dafe39c3afd3ab6fa',
+    evidence: {
+      status: 'done',
+      source: 'dreamyporn-workshop-web',
+      accepted: true,
+      mediaUrl: 'https://d2rzqgs9j5kr8g.cloudfront.net/video/chat/embed_obj/202606030911/551da3b2c0274fab8e1cd12c554186d4.mp4',
+      taskId: 'bdcc5855a80f479dafe39c3afd3ab6fa',
+      message: 'Real Dreamy workshop bot completed and returned playable media.',
+      checkedAt: '2026-06-03T09:11:00Z',
+    },
+    createdAt: '2026-06-03T09:11:00Z',
+    updatedAt: '2026-06-03T09:11:00Z',
+  },
+  {
+    id: 'verified_workshop_segment_2',
+    type: 'video',
+    url: 'https://d2rzqgs9j5kr8g.cloudfront.net/video/chat/embed_obj/202606030923/ed0e2719080742b5a5db07483f439a84.mp4',
+    posterUrl: 'https://www.myshellstatic.com/video/chat/embed_obj/202606030923/ed0e2719080742b5a5db07483f439a84-poster.jpg',
+    prompt: 'Verified Dreamy workshop result from 3D Futa Porn, staged as the next segment.',
+    botSlug: DREAMY_VIDEO_SLUG,
+    botId: '1768994068',
+    articleId: DREAMY_VIDEO_SLUG,
+    botName: '3D Futa Porn',
+    action: 'extend',
+    parentSegmentId: 'verified_workshop_segment_1',
+    status: 'done',
+    taskId: 'ed8d4bd4aab74245aadb8f8a832c3f4b',
+    evidence: {
+      status: 'done',
+      source: 'dreamyporn-workshop-web',
+      accepted: true,
+      mediaUrl: 'https://d2rzqgs9j5kr8g.cloudfront.net/video/chat/embed_obj/202606030923/ed0e2719080742b5a5db07483f439a84.mp4',
+      taskId: 'ed8d4bd4aab74245aadb8f8a832c3f4b',
+      message: 'Second real Dreamy workshop bot completed and is staged as a timeline extension.',
+      checkedAt: '2026-06-03T09:23:00Z',
+    },
+    createdAt: '2026-06-03T09:23:00Z',
+    updatedAt: '2026-06-03T09:23:00Z',
+  },
+];
 const LOCAL_POSTERS = [exampleGood, exampleMultiple];
 const DEFAULT_STUDIO_AGENT_ID = 'dreamy-miniapp-executor';
 const TRANSIENT_STUDIO_STATUSES = new Set(['queued', 'running']);
 const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
   {
-    id: 'cinematic-portrait',
-    title: 'Luna Star',
-    prompt: 'A cinematic neon rain portrait, detailed face, soft rim light, high contrast, polished studio finish.',
+    id: 'verified-3d-anime',
+    title: '3D Anime Porn',
+    prompt: 'Continue from the verified 3D Anime Porn workshop output with a matching five second shot.',
     pageId: 'dreamy-miniapp',
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
     botSlug: DEFAULT_DREAMY_SLUG,
-    recommendation: 'Dreamy catalog bot for the first source image before video.',
-    visualUrl: presetCinematicGif,
-    fallbackVisualUrl: presetCinematicGif,
-    previewStatus: 'fallback',
-    previewAccepted: false,
-    previewSource: 'local-gif-fallback',
-    previewLabel: 'Local fallback',
-    workflow: 'Text to image',
-    steps: ['Prompt', 'Image source', 'Timeline slot'],
-    estimatedWaitSeconds: 10,
+    botId: '1769085605',
+    articleId: DEFAULT_DREAMY_SLUG,
+    recommendation: 'Verified workshop bot with completed media already staged in the timeline.',
+    visualUrl: VERIFIED_WORKSHOP_SEGMENTS[0].posterUrl || presetCinematicGif,
+    fallbackVisualUrl: VERIFIED_WORKSHOP_SEGMENTS[0].posterUrl || presetCinematicGif,
+    previewStatus: 'done',
+    previewAccepted: true,
+    previewSource: 'dreamyporn-workshop-web',
+    previewLabel: 'Verified result',
+    workflow: 'Workshop video',
+    steps: ['Verified bot', 'Video segment', 'Timeline'],
+    estimatedWaitSeconds: 0,
   },
   {
-    id: 'character-scene',
-    title: 'Aurora Dusk',
-    prompt: 'A full body character scene in a glowing city street, expressive pose, cinematic lighting, sharp details.',
+    id: 'verified-3d-futa',
+    title: '3D Futa Porn',
+    prompt: 'Append a next segment from the verified 3D Futa Porn workshop output.',
     pageId: 'dreamy-miniapp',
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
     botSlug: DREAMY_VIDEO_SLUG,
-    recommendation: 'Dreamy video bot for appending the next motion segment.',
-    visualUrl: presetCharacterGif,
-    fallbackVisualUrl: presetCharacterGif,
-    previewStatus: 'fallback',
-    previewAccepted: false,
-    previewSource: 'local-gif-fallback',
-    previewLabel: 'Local fallback',
-    workflow: 'Text to image to video',
-    steps: ['Prompt', 'Character image', 'Video segment'],
-    estimatedWaitSeconds: 12,
-  },
-  {
-    id: 'style-poster',
-    title: 'Crystal Rose',
-    prompt: 'A vertical movie poster composition with dramatic color, premium fashion styling, clean background, editorial finish.',
-    pageId: 'dreamy-miniapp',
-    pageName: 'Dreamy Miniapp',
-    agentId: DEFAULT_STUDIO_AGENT_ID,
-    botSlug: 'crystal-rose',
-    recommendation: 'Dreamy catalog bot for another stylized source frame.',
-    visualUrl: presetStyleGif,
-    fallbackVisualUrl: presetStyleGif,
-    previewStatus: 'fallback',
-    previewAccepted: false,
-    previewSource: 'local-gif-fallback',
-    previewLabel: 'Local fallback',
-    workflow: 'Reference image to style',
-    steps: ['Prompt', 'Poster frame', 'Restyle'],
-    estimatedWaitSeconds: 8,
+    botId: '1768994068',
+    articleId: DREAMY_VIDEO_SLUG,
+    recommendation: 'Verified workshop bot used as the second timeline segment.',
+    visualUrl: VERIFIED_WORKSHOP_SEGMENTS[1].posterUrl || presetCharacterGif,
+    fallbackVisualUrl: VERIFIED_WORKSHOP_SEGMENTS[1].posterUrl || presetCharacterGif,
+    previewStatus: 'done',
+    previewAccepted: true,
+    previewSource: 'dreamyporn-workshop-web',
+    previewLabel: 'Verified result',
+    workflow: 'Workshop video',
+    steps: ['Verified bot', 'Next segment', 'Timeline'],
+    estimatedWaitSeconds: 0,
   },
 ];
 
@@ -329,7 +368,7 @@ const CANVAS_FLOW_PRESETS: CanvasFlowPreset[] = [
         status: 'ready',
         action: 'generate',
         prompt: 'Generate the strongest source image for this scene.',
-        botName: 'Luna Star',
+        botName: '3D Anime Porn',
         botSlug: DEFAULT_DREAMY_SLUG,
       },
       {
@@ -344,7 +383,7 @@ const CANVAS_FLOW_PRESETS: CanvasFlowPreset[] = [
         status: 'queued',
         action: 'extend',
         prompt: 'Use the selected image as the source and create a five second motion shot.',
-        botName: 'Aurora Dusk',
+        botName: '3D Futa Porn',
         botSlug: DREAMY_VIDEO_SLUG,
       },
       {
@@ -419,12 +458,12 @@ function rankStarterPresets(
 ): StudioStarterPreset[] {
   const preferredOrder =
     sourceSegment?.type === 'image'
-      ? ['character-scene', 'cinematic-portrait', 'style-poster']
+      ? ['verified-3d-futa', 'verified-3d-anime']
       : sourceSegment?.type === 'video'
-        ? ['character-scene', 'cinematic-portrait', 'style-poster']
+        ? ['verified-3d-futa', 'verified-3d-anime']
         : hasReferenceImage
-          ? ['character-scene', 'cinematic-portrait', 'style-poster']
-          : ['cinematic-portrait', 'character-scene', 'style-poster'];
+          ? ['verified-3d-futa', 'verified-3d-anime']
+          : ['verified-3d-anime', 'verified-3d-futa'];
   const order = new Map(preferredOrder.map((id, index) => [id, index]));
   return [...presets].sort((left, right) => (order.get(left.id) ?? 99) - (order.get(right.id) ?? 99));
 }
@@ -542,9 +581,9 @@ function hydrateStarterPresets(
       botSlug: previewSlug,
       visualUrl,
       previewStatus: preview?.status || preset.previewStatus,
-      previewAccepted: Boolean(preview?.accepted),
+      previewAccepted: preview ? Boolean(preview.accepted) : preset.previewAccepted,
       previewSource: preview?.source || preset.previewSource,
-      previewLabel: previewLabelFor(preview),
+      previewLabel: preview ? previewLabelFor(preview) : preset.previewLabel,
     };
   });
 }
@@ -580,6 +619,47 @@ function makeId(prefix: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function createVerifiedWorkshopFallbackProject(): StudioProject {
+  const checkedAt = nowIso();
+  return {
+    projectId: VERIFIED_WORKSHOP_PROJECT_ID,
+    conversationId: 'conversation_verified_workshop',
+    mode: 'player',
+    messages: [
+      {
+        id: 'verified-workshop-user',
+        role: 'user',
+        content: 'Stage two completed Dreamy workshop bot results into a timeline.',
+        createdAt: '2026-06-03T09:10:00Z',
+        action: 'generate',
+      },
+      {
+        id: 'verified-workshop-assistant',
+        role: 'assistant',
+        content: 'Two real Dreamy workshop outputs are staged. Add another segment or export the timeline.',
+        createdAt: checkedAt,
+        action: 'extend',
+        segmentId: VERIFIED_WORKSHOP_SEGMENTS[1].id,
+      },
+    ],
+    segments: VERIFIED_WORKSHOP_SEGMENTS.map((segment) => {
+      const clone: StudioSegment = { ...segment };
+      if (segment.evidence) clone.evidence = { ...segment.evidence };
+      return clone;
+    }),
+    selectedSegmentId: VERIFIED_WORKSHOP_SEGMENTS[1].id,
+    agentGraph: [
+      { id: 'intent-router', label: 'Intent Router', status: 'done', detail: 'Verified workshop route' },
+      { id: 'dreamy-bot-1', label: '3D Anime Porn', status: 'done', detail: 'Real media accepted' },
+      { id: 'dreamy-bot-2', label: '3D Futa Porn', status: 'done', detail: 'Second segment accepted' },
+      { id: 'timeline', label: 'Timeline', status: 'done', detail: 'Two clips ready for export' },
+    ],
+    jobs: [],
+    timelineExports: [],
+    updatedAt: checkedAt,
+  };
 }
 
 function downloadJsonText(jsonText: string, filename: string): void {
@@ -647,6 +727,16 @@ function healthPillTone(status?: string): 'default' | 'hot' | 'success' | 'dange
   return 'default';
 }
 
+function liveGenerationLabel(status?: string): string {
+  if (!status) return 'Checking generation';
+  if (status === 'ok' || status === 'ready' || status === 'client_delegated') return 'Generation ready';
+  if (status === 'auth_missing' || status === 'needs_configuration') return 'Login needed';
+  if (status === 'unavailable') return 'Generation offline';
+  if (status === 'degraded') return 'Generation limited';
+  if (status === 'error' || status === 'blocked') return 'Generation issue';
+  return 'Generation active';
+}
+
 function handoffPillTone(status?: string): 'default' | 'hot' | 'success' | 'danger' {
   if (status === 'ready') return 'success';
   if (status === 'needs_attention' || status === 'blocked') return 'danger';
@@ -686,7 +776,8 @@ function resolveStudioDisplayAssetUrl(url?: string): string {
 }
 
 function getSegmentMedia(segment?: StudioSegment | null): string {
-  return resolveStudioDisplayAssetUrl(segment?.url || segment?.posterUrl);
+  if (!segment) return '';
+  return resolveStudioDisplayAssetUrl(segment.type === 'video' ? segment.posterUrl || segment.url : segment.url || segment.posterUrl);
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -845,7 +936,7 @@ function createLocalProject(
     posterUrl: LOCAL_POSTERS[Math.floor(Math.random() * LOCAL_POSTERS.length)],
     prompt: message,
     botSlug: action === 'extend' ? DREAMY_VIDEO_SLUG : DEFAULT_DREAMY_SLUG,
-    botName: action === 'extend' ? 'Aurora Dusk' : 'Luna Star',
+    botName: action === 'extend' ? '3D Futa Porn' : '3D Anime Porn',
     action,
     parentSegmentId: parent?.id,
     status: 'draft',
@@ -2357,7 +2448,7 @@ function PreviewPanel({
           className="inline-flex h-8 items-center gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 text-xs font-semibold text-Cr-text-subtle-v2"
         >
           <GitBranch size={14} />
-          Auto route: {graph.length}
+          Agents
           {runningAgents > 0 && <span className="h-1.5 w-1.5 rounded-full bg-dreamy-brand-hot-v2" />}
         </button>
       </div>
@@ -3380,7 +3471,6 @@ function RecommendationAgentPanel({
 
 function BotSelectionPanel({
   starterPresets,
-  botPreviewCards,
   selectedStarterPresetId,
   selectedStarterPreset,
   selectedSegment,
@@ -3396,7 +3486,6 @@ function BotSelectionPanel({
   onRunPreset,
 }: {
   starterPresets: StudioStarterPreset[];
-  botPreviewCards: StudioBotPreview[];
   selectedStarterPresetId?: string;
   selectedStarterPreset?: StudioStarterPreset | null;
   selectedSegment?: StudioSegment | null;
@@ -3424,13 +3513,13 @@ function BotSelectionPanel({
   return (
     <section
       data-testid="bot-selection-panel"
-      className="flex h-[clamp(190px,28dvh,252px)] min-h-0 shrink-0 flex-col overflow-hidden border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2"
+      className="flex h-[clamp(150px,22dvh,210px)] min-h-0 shrink-0 flex-col overflow-hidden border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2"
       aria-label="Dreamy bot selection"
     >
       <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-xs font-semibold text-Cr-text-subtle-v2">
           <Bot size={14} className="shrink-0 text-dreamy-brand-hot-v2" />
-          <span className="truncate">Bot choice</span>
+          <span className="truncate">Choose bot</span>
         </div>
         <div className="flex min-w-0 items-center gap-1.5">
           <Pill tone="hot">{`${starterPresets.length + manualBotEntries.length} options`}</Pill>
@@ -3442,15 +3531,15 @@ function BotSelectionPanel({
         data-testid="bot-selection-scroll-region"
         className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1 [-webkit-overflow-scrolling:touch]"
       >
-        <div data-testid="manual-bot-id-panel" className="grid gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2">
-          <div className="flex items-center justify-between gap-2">
+        <details data-testid="manual-bot-id-panel" className="group rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 marker:hidden">
             <div className="flex min-w-0 items-center gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
               <SlidersHorizontal size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
               <span className="truncate">Manual bot IDs</span>
             </div>
             <Pill tone={manualBotEntries.length ? 'hot' : 'default'}>{`${manualBotEntries.length} queued`}</Pill>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_116px]">
+          </summary>
+          <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_116px]">
             <textarea
               data-testid="manual-bot-id-input"
               value={manualBotIdsText}
@@ -3507,16 +3596,16 @@ function BotSelectionPanel({
               ))}
             </div>
           )}
-        </div>
+        </details>
 
         {!!starterPresets.length && (
           <div data-testid="starter-presets" className="grid gap-2">
             <div className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
               <span className="inline-flex min-w-0 items-center gap-2">
               <Sparkles size={13} className="text-dreamy-brand-hot-v2" />
-                <span className="truncate">Agent route</span>
+              <span className="truncate">Verified workshop bots</span>
               </span>
-              {!!botPreviewCards.length && <Pill>{`${botPreviewCards.length} dreamy`}</Pill>}
+              <Pill>{`${starterPresets.length} verified`}</Pill>
             </div>
             <div data-testid="starter-visual-recommendations" className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
               {starterPresets.map((preset) => (
@@ -3528,13 +3617,13 @@ function BotSelectionPanel({
                   aria-pressed={activeStarterPresetId === preset.id}
                   disabled={submitting}
                   onClick={() => selectPreset(preset)}
-                  className={`group grid w-[136px] shrink-0 overflow-hidden rounded-lg-v2 border text-left transition-colors active:bg-Cr-beta-white-8-v2 disabled:opacity-50 ${
+                  className={`group grid w-[126px] shrink-0 overflow-hidden rounded-lg-v2 border text-left transition-colors active:bg-Cr-beta-white-8-v2 disabled:opacity-50 ${
                     activeStarterPresetId === preset.id
                       ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
                       : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2'
                   }`}
                 >
-                  <span className="relative block h-[46px] overflow-hidden border-b border-Cr-border-default-v2 bg-black/25">
+                  <span className="relative block h-[42px] overflow-hidden border-b border-Cr-border-default-v2 bg-black/25">
                     <img
                       data-testid="starter-bot-preview-image"
                       src={preset.visualUrl}
@@ -3550,7 +3639,7 @@ function BotSelectionPanel({
                     </span>
                     <span className="absolute bottom-0 left-0 h-0.5 w-2/3 animate-pulse rounded-r bg-dreamy-brand-hot-v2" />
                   </span>
-                  <span className="grid gap-1 p-2">
+                  <span className="grid gap-1 p-1.5">
                     <span className="flex items-center justify-between gap-2">
                       <span className="min-w-0 truncate text-xs font-semibold text-Cr-text-default-v2">{preset.title}</span>
                       {activeStarterPresetId === preset.id ? (
@@ -4541,17 +4630,38 @@ export default function Dreamy() {
 
   useEffect(() => {
     let cancelled = false;
-    void fetchStudioProjects(20).then((storedProjects) => {
+    void (async () => {
+      const storedProjects = await fetchStudioProjects(20).catch(() => []);
       if (cancelled) return;
-      if (!storedProjects.length) return;
       const lastProjectId = readLastStudioProjectId();
-      if (!lastProjectId) return;
-      const restored = storedProjects.find((item) => item.projectId === lastProjectId);
-      if (!restored) return;
-      setProject((current) => current || restored);
-      saveLastStudioProjectId(restored.projectId);
-      setMode(restored.mode || 'player');
-    }).catch(() => undefined);
+      const restored = lastProjectId ? storedProjects.find((item) => item.projectId === lastProjectId) : null;
+      if (restored) {
+        setProject((current) => (current?.projectId === VERIFIED_WORKSHOP_PROJECT_ID ? restored : current || restored));
+        saveLastStudioProjectId(restored.projectId);
+        setMode(restored.mode || 'player');
+        return;
+      }
+
+      const verifiedProject = await fetchVerifiedDreamyWorkshopProject().catch(() => createVerifiedWorkshopFallbackProject());
+      if (cancelled) return;
+      setProject((current) => current || verifiedProject);
+      saveLastStudioProjectId(verifiedProject.projectId);
+      setMode(verifiedProject.mode || 'player');
+      setMessages((current) =>
+        current.some((message) => message.id === 'verified-workshop-ready')
+          ? current
+          : [
+              ...current,
+              {
+                id: 'verified-workshop-ready',
+                role: 'assistant',
+                content: 'Two completed Dreamy workshop bot results are staged in the timeline. Add segment extends it; Export packages the sequence.',
+                createdAt: nowIso(),
+                segmentId: verifiedProject.selectedSegmentId || undefined,
+              },
+            ],
+      );
+    })().catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -6419,7 +6529,7 @@ export default function Dreamy() {
         className={`relative z-0 min-h-0 flex-1 overflow-hidden ${
           mode === 'canvas'
             ? 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(360px,430px)_minmax(0,1fr)]'
-            : 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(380px,440px)_minmax(0,1fr)]'
+            : 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)]'
         }`}
       >
         <section
@@ -6436,7 +6546,9 @@ export default function Dreamy() {
               <div>
                 <div className="text-sm font-semibold">{mode === 'canvas' ? 'Bot Selection' : 'Conversation'}</div>
                 <div className="text-[11px] text-Cr-text-subtler-v2">
-                  {project?.conversationId || 'No session'} · {selectedPreviewPreset?.title || selectedPage?.name || 'Dreamy Miniapp'} · {selectedAgent?.label || selectedAgentId} · {displayedHubJobs.length} jobs
+                  {selectedPreviewPreset?.title
+                    ? `Selected bot: ${selectedPreviewPreset.title}`
+                    : `${messages.length} messages · ${project?.segments.length || 0} segments`}
                 </div>
               </div>
             </div>
@@ -6445,7 +6557,6 @@ export default function Dreamy() {
 
           <BotSelectionPanel
             starterPresets={recommendedStarterPresets}
-            botPreviewCards={connectedBotPreviewCards}
             selectedStarterPresetId={selectedStarterPresetId}
             selectedStarterPreset={selectedStarterPreset}
             selectedSegment={selectedSegment}
@@ -6542,18 +6653,12 @@ export default function Dreamy() {
           <span className={`h-2 w-2 rounded-full ${previewDispatchReady ? 'bg-Cr-text-success-default-v2' : 'bg-dreamy-brand-hot-v2'}`} />
           {previewDispatchReady ? 'Ready' : 'Needs attention'}
         </span>
-        <Pill tone={healthPillTone(studioHealth?.status)}>{studioHealth ? `Health ${studioHealth.status}` : 'Health checking'}</Pill>
         <Pill tone={healthPillTone(studioHealth?.components?.liveGeneration?.status)}>
-          {studioHealth?.components?.liveGeneration
-            ? `Live ${studioHealth.components.liveGeneration.status}`
-            : 'Live checking'}
+          {liveGenerationLabel(studioHealth?.components?.liveGeneration?.status)}
         </Pill>
-        <Pill tone={healthPillTone(studioReadiness?.status)}>{studioReadiness ? `Delivery ${studioReadiness.status}` : 'Delivery checking'}</Pill>
-        <Pill tone={deliveryAudit?.summary?.actions ? 'hot' : 'default'}>{`${deliveryAudit?.summary?.actions || 0} actions`}</Pill>
-        <Pill>{`${studioOverview?.totals?.pages || overviewPages.length} pages`}</Pill>
+        <Pill>{`${project?.segments.length || 0} segments`}</Pill>
         <Pill>{`${displayedHubJobs.length} jobs`}</Pill>
-        {previewNavigationPath && <span className="shrink-0 truncate">{previewNavigationPath}</span>}
-        {!!previewMissingParams.length && <Pill tone="hot">{`Missing ${previewMissingParams.join(', ')}`}</Pill>}
+        {selectedPreviewPreset && <span className="shrink-0 truncate">{selectedPreviewPreset.title}</span>}
         <button
           type="button"
           onClick={() => setDeliveryDrawerOpen(true)}
@@ -6563,33 +6668,6 @@ export default function Dreamy() {
         >
           <PanelRightOpen size={12} />
           Evidence
-        </button>
-        <button
-          type="button"
-          disabled={dispatchBatchPlanning}
-          onClick={() => void planDispatchBatch({ excludeCovered: true })}
-          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-white/10 bg-white/[0.04] px-2 font-semibold text-Cr-text-subtle-v2 disabled:opacity-40"
-        >
-          <GitBranch size={12} />
-          Plan remaining
-        </button>
-        <button
-          type="button"
-          disabled={dispatchSessionRunning || !dispatchBatchPlan}
-          onClick={() => void startDispatchSession()}
-          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-white/10 bg-white/[0.04] px-2 font-semibold text-Cr-text-subtle-v2 disabled:opacity-40"
-        >
-          <Play size={12} />
-          Start queue
-        </button>
-        <button
-          type="button"
-          disabled={!displayedHubJobs.length || bulkActionRunning !== null}
-          onClick={() => void runBulkJobAction('retry')}
-          className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-white/10 bg-white/[0.04] px-2 font-semibold text-Cr-text-subtle-v2 disabled:opacity-40"
-        >
-          <RefreshCcw size={12} className={bulkActionRunning === 'retry' ? 'animate-spin' : ''} />
-          Retry
         </button>
       </footer>
     </div>

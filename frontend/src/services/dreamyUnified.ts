@@ -1339,6 +1339,12 @@ export async function fetchStudioProjects(limit = 50): Promise<StudioProject[]> 
   return body.projects || [];
 }
 
+export async function fetchVerifiedDreamyWorkshopProject(): Promise<StudioProject> {
+  const response = await fetch(getStudioRootEndpoint('/api/studio/dreamy-workshop-project'), { method: 'POST' });
+  if (!response.ok) throw new Error(`Dreamy workshop project ${response.status}: ${response.statusText}`);
+  return response.json();
+}
+
 export async function fetchStudioPages(): Promise<StudioPageAdapter[]> {
   const response = await fetch(getStudioRootEndpoint('/api/pages'));
   if (!response.ok) throw new Error(`Studio pages ${response.status}: ${response.statusText}`);
