@@ -138,6 +138,32 @@ scripts/configure_generation_secrets.sh \
 
 Without `--apply`, this command is a dry-run and does not upload values. With `--apply`, the script validates the init data shape, validates cookie JSON, probes MyShell Art API auth with the provided cookies, updates `myshell-dreamy-init-data` plus `myshell-cookies` in the explicit Google Cloud project, triggers Cloud Build, and runs `python -m generation_smoke --execute --require-live` against the public service. If the Art API probe is `UNAUTHORIZED`, no secrets are uploaded.
 
+To dry-run the complete post-credential finalization chain without spending generation capacity:
+
+```bash
+python scripts/complete_generation_chain.py \
+  --base-url https://art-chat-orchestrator-ju35f47zeq-ew.a.run.app \
+  --project k-project-481102
+```
+
+When valid Dreamy init data and MyShell Art cookies are ready, run the full chain explicitly:
+
+```bash
+python scripts/complete_generation_chain.py \
+  --base-url https://art-chat-orchestrator-ju35f47zeq-ew.a.run.app \
+  --project k-project-481102 \
+  --apply \
+  --configure-secrets \
+  --init-data-file /tmp/dreamy-init-data.txt \
+  --cookies-file /tmp/myshell-cookies.json \
+  --execute-live \
+  --execute-art-targets \
+  --import-dreamy-targets \
+  --materialize
+```
+
+The complete-chain runner is safe by default: it only prints a plan unless `--apply` is present, and live Dreamy generation plus Art target execution each require explicit flags.
+
 Target bot preview execution evidence is collected before materializing preview assets:
 
 ```bash
