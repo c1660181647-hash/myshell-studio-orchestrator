@@ -18,6 +18,7 @@ DEFAULT_SERVICE = "art-chat-orchestrator"
 DEFAULT_REGION = "europe-west1"
 ART_TARGET_OUTPUT = REPO_ROOT / ".studio-delivery-check" / "target-bot-preview-urls.json"
 DREAMY_TARGET_OUTPUT = REPO_ROOT / ".studio-delivery-check" / "dreamy-target-preview-urls.json"
+CLOUDBUILD_CONFIG = REPO_ROOT / "orchestrator" / "cloudbuild.yaml"
 
 
 class CommandResult(NamedTuple):
@@ -59,6 +60,35 @@ def _chain_check_command(*, base_url: str, project: str, service: str, region: s
     return command
 
 
+def _default_short_sha() -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10.0,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        return "local"
+    return completed.stdout.strip() or "local"
+
+
+def _deploy_command(*, project: str, short_sha: str) -> list[str]:
+    return [
+        "gcloud",
+        "builds",
+        "submit",
+        "--config",
+        str(CLOUDBUILD_CONFIG),
+        "--project",
+        project,
+        "--substitutions",
+        f"SHORT_SHA={short_sha}",
+        str(REPO_ROOT),
+    ]
+
+
 def _step(
     *,
     step_id: str,
@@ -95,11 +125,16 @@ def build_plan(
     execute_art_targets: bool = False,
     import_dreamy_targets: bool = False,
     materialize: bool = False,
+    deploy_after_materialize: bool = False,
     allow_partial: bool = False,
     short_sha: str = "",
 ) -> dict[str, Any]:
     if configure_secrets and (not init_data_file or not cookies_file):
         raise CompleteGenerationChainError("--configure-secrets requires --init-data-file and --cookies-file")
+    if deploy_after_materialize and not materialize:
+        raise CompleteGenerationChainError("--deploy-after-materialize requires --materialize")
+
+    active_short_sha = short_sha or _default_short_sha()
 
     configure_command = [
         _script("scripts/configure_generation_secrets.sh"),
@@ -210,6 +245,13 @@ def build_plan(
             timeout=900.0,
         ),
         _step(
+            step_id="deploy-after-materialize",
+            label="Deploy materialized preview manifest to Cloud Run",
+            command=_deploy_command(project=project, short_sha=active_short_sha),
+            enabled=deploy_after_materialize,
+            timeout=1800.0,
+        ),
+        _step(
             step_id="final-check",
             label="Require the public generation chain to be fully live",
             command=_chain_check_command(base_url=base_url, project=project, service=service, region=region, require_live=True),
@@ -230,6 +272,7 @@ def build_plan(
         "warnings": [
             "Default mode is a dry-run; pass --apply to run enabled steps.",
             "Live smoke and Art target preview execution spend real generation capacity and require explicit flags.",
+            "Post-materialize deployment is explicit; pass --deploy-after-materialize to publish manifest changes before the final public gate.",
         ],
     }
 
@@ -299,6 +342,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--execute-art-targets", action="store_true", help="Run real Art target bot previews.")
     parser.add_argument("--import-dreamy-targets", action="store_true", help="Import accepted Dreamy jobs as target preview evidence.")
     parser.add_argument("--materialize", action="store_true", help="Merge target preview evidence into the public manifest.")
+    parser.add_argument("--deploy-after-materialize", action="store_true", help="Deploy Cloud Run after manifest materialization.")
     parser.add_argument("--allow-partial", action="store_true", help="Allow partial Dreamy import evidence.")
     parser.add_argument("--short-sha", default="")
     args = parser.parse_args(argv)
@@ -317,6 +361,7 @@ def main(argv: list[str] | None = None) -> int:
             execute_art_targets=args.execute_art_targets,
             import_dreamy_targets=args.import_dreamy_targets,
             materialize=args.materialize,
+            deploy_after_materialize=args.deploy_after_materialize,
             allow_partial=args.allow_partial,
             short_sha=args.short_sha,
         )

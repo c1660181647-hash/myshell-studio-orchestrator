@@ -71,6 +71,39 @@ class CompleteGenerationChainTest(unittest.TestCase):
         self.assertIn("--project k-project-481102", final_command)
         self.assertIn("--require-live", final_command)
 
+    def test_deploy_after_materialize_runs_before_final_public_gate(self) -> None:
+        plan = complete_chain.build_plan(
+            base_url="https://studio.example",
+            project="k-project-481102",
+            apply=True,
+            execute_art_targets=True,
+            import_dreamy_targets=True,
+            materialize=True,
+            deploy_after_materialize=True,
+            short_sha="abc123",
+        )
+
+        enabled_steps = [step for step in plan["steps"] if step["enabled"]]
+        self.assertEqual(
+            [step["id"] for step in enabled_steps],
+            [
+                "precheck",
+                "art-target-previews",
+                "materialize-art-targets",
+                "dreamy-target-import",
+                "materialize-dreamy-targets",
+                "deploy-after-materialize",
+                "final-check",
+            ],
+        )
+        deploy_step = enabled_steps[-2]
+        self.assertTrue(deploy_step["willRun"])
+        self.assertEqual(deploy_step["command"][:3], ["gcloud", "builds", "submit"])
+        deploy_command = " ".join(deploy_step["command"])
+        self.assertIn("--project k-project-481102", deploy_command)
+        self.assertIn("orchestrator/cloudbuild.yaml", deploy_command)
+        self.assertIn("--substitutions SHORT_SHA=abc123", deploy_command)
+
     def test_art_target_step_reuses_supplied_cookie_file_without_cookie_values(self) -> None:
         plan = complete_chain.build_plan(
             base_url="https://studio.example",
