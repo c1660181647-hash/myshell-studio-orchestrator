@@ -196,6 +196,75 @@ class GenerationChainCheckTest(unittest.TestCase):
         blocking_ids = {item["id"] for item in report["blocking"]}
         self.assertIn("target-bot-preview-execution", blocking_ids)
 
+    def test_report_splits_art_and_dreamy_target_execution_gaps(self) -> None:
+        report = generation_chain_check.build_generation_chain_report(
+            base_url="https://studio.example",
+            project="project",
+            require_live=False,
+            fetcher=_fake_fetch(
+                {
+                    "/api/health": {
+                        "status": "ok",
+                        "components": {
+                            "dreamyApiAuth": {"status": "ready"},
+                            "myshellCookies": {"status": "ready"},
+                            "cookieInjection": {"status": "ready"},
+                            "chromeCdp": {"status": "ok"},
+                        },
+                    },
+                    "/api/studio/bot-previews": {
+                        "summary": {
+                            "ready": 40,
+                            "total": 40,
+                            "botSpecific": 40,
+                            "targetBotExecuted": 38,
+                            "dreamyBots": 2,
+                            "artBots": 38,
+                        },
+                        "previews": [
+                            {
+                                "pageId": "dreamy-miniapp",
+                                "status": "ready",
+                                "accepted": True,
+                                "targetBotExecuted": False,
+                            },
+                            {
+                                "pageId": "dreamy-miniapp",
+                                "status": "ready",
+                                "accepted": True,
+                                "targetBotExecuted": False,
+                            },
+                            *[
+                                {
+                                    "pageId": "myshell-art",
+                                    "status": "ready",
+                                    "accepted": True,
+                                    "targetBotExecuted": True,
+                                }
+                                for _ in range(38)
+                            ],
+                        ],
+                    },
+                    "/api/studio/generation-smoke": {
+                        "status": "done",
+                        "latest": {"accepted": True, "mediaUrl": "https://cdn.example/generated.png"},
+                    },
+                }
+            ),
+            runner=_fake_runner(existing_secrets=True),
+        )
+
+        self.assertEqual(report["summary"]["previewArtTargetBotExecuted"], 38)
+        self.assertEqual(report["summary"]["previewArtTargetBotTotal"], 38)
+        self.assertEqual(report["summary"]["previewDreamyTargetBotExecuted"], 0)
+        self.assertEqual(report["summary"]["previewDreamyTargetBotTotal"], 2)
+        target_execution = next(item for item in report["requirements"] if item["id"] == "target-bot-preview-execution")
+        self.assertEqual(target_execution["evidence"]["artTargetBotExecuted"], 38)
+        self.assertEqual(target_execution["evidence"]["dreamyTargetBotExecuted"], 0)
+        actions = " ".join(report["nextActions"]).lower()
+        self.assertIn("dreamy", actions)
+        self.assertNotIn("art target execution", actions)
+
     def test_report_next_actions_mentions_captcha_required(self) -> None:
         report = generation_chain_check.build_generation_chain_report(
             base_url="https://studio.example",

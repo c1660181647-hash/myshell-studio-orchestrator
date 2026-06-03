@@ -1,6 +1,9 @@
 import importlib.util
+import json
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 MODULE_PATH = Path(__file__).with_name("run_target_bot_previews.py")
@@ -98,6 +101,53 @@ class RunTargetBotPreviewsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entry["source"], "myshell-target-bot-api")
         self.assertEqual(entry["execution"]["executor"], "myshell-art-api")
         self.assertEqual(entry["execution"]["targetBotId"], "1751532766")
+
+    async def test_art_api_executor_uses_manifest_remote_source_for_image_inputs(self) -> None:
+        calls = []
+
+        async def fake_runner(**kwargs):
+            calls.append(kwargs)
+            return {
+                "status": "done",
+                "output_url": "https://cdn.example/seedream-output.png",
+                "task_id": "api-job-image-1",
+                "executor": "myshell-art-api",
+            }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manifest_path = Path(tmp_dir) / "manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "assets": [
+                            {
+                                "id": "seedream-multi-chart",
+                                "botSlug": "seedream-multi-chart",
+                                "originalRemoteUrl": "https://cdn.example/source-seedream.png",
+                            }
+                        ],
+                        "botPreviews": {"seedream-multi-chart": {"assetId": "seedream-multi-chart"}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(run_target, "DEFAULT_PREVIEW_MANIFEST", manifest_path):
+                report = await run_target.run_preview_batch(
+                    slugs=["seedream-multi-chart"],
+                    runner=fake_runner,
+                    include_dreamy=False,
+                    executor_mode="art-api",
+                    public_metadata_resolver=lambda _slug: {
+                        "targetBotId": "1785902750",
+                        "targetSlugId": "seedream-multi-chart",
+                        "template": "template1",
+                        "buttonText": "Generate",
+                    },
+                )
+
+        self.assertEqual(calls[0]["input_values"], ["https://cdn.example/source-seedream.png"])
+        self.assertEqual(calls[0]["image_data"], "")
+        self.assertEqual(report["previews"]["seedream-multi-chart"]["execution"]["targetBotId"], "1785902750")
 
     async def test_failed_target_run_does_not_mark_executed(self) -> None:
         async def fake_runner(**_kwargs):

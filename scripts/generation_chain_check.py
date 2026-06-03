@@ -173,6 +173,60 @@ def _generation_latest_accepted(generation_smoke: dict[str, Any]) -> bool:
     return bool(latest.get("accepted") and latest.get("mediaUrl"))
 
 
+def _int_value(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _target_execution_breakdown(previews: dict[str, Any], preview_summary: dict[str, Any]) -> dict[str, int]:
+    preview_items = previews.get("previews") if isinstance(previews.get("previews"), list) else []
+    if preview_items:
+        dreamy_total = 0
+        art_total = 0
+        dreamy_executed = 0
+        art_executed = 0
+        for preview in preview_items:
+            if not isinstance(preview, dict):
+                continue
+            is_dreamy = str(preview.get("pageId") or "") == "dreamy-miniapp"
+            is_executed = bool(
+                preview.get("status") == "ready" and preview.get("accepted") and preview.get("targetBotExecuted")
+            )
+            if is_dreamy:
+                dreamy_total += 1
+                if is_executed:
+                    dreamy_executed += 1
+            else:
+                art_total += 1
+                if is_executed:
+                    art_executed += 1
+        return {
+            "artTargetBotExecuted": art_executed,
+            "artTargetBotTotal": art_total,
+            "dreamyTargetBotExecuted": dreamy_executed,
+            "dreamyTargetBotTotal": dreamy_total,
+        }
+
+    art_total = _int_value(preview_summary.get("artBots"))
+    dreamy_total = _int_value(preview_summary.get("dreamyBots"))
+    art_executed = _int_value(preview_summary.get("artTargetBotExecuted"))
+    dreamy_executed = _int_value(preview_summary.get("dreamyTargetBotExecuted"))
+    if not art_executed and not dreamy_executed:
+        preview_total = _int_value(preview_summary.get("total"))
+        preview_target_executed = _int_value(preview_summary.get("targetBotExecuted"))
+        if preview_total and preview_target_executed == preview_total and art_total + dreamy_total == preview_total:
+            art_executed = art_total
+            dreamy_executed = dreamy_total
+    return {
+        "artTargetBotExecuted": art_executed,
+        "artTargetBotTotal": art_total,
+        "dreamyTargetBotExecuted": dreamy_executed,
+        "dreamyTargetBotTotal": dreamy_total,
+    }
+
+
 def _optional_fetch(fetcher: Callable[[str, str, float], dict[str, Any]], base_url: str, path: str) -> dict[str, Any]:
     try:
         return fetcher(base_url, path, 30.0)
@@ -204,6 +258,8 @@ def build_generation_chain_report(
     preview_total = int(preview_summary.get("total") or 0)
     preview_bot_specific = int(preview_summary.get("botSpecific") or 0)
     preview_target_executed = int(preview_summary.get("targetBotExecuted") or 0)
+    target_execution = _target_execution_breakdown(previews, preview_summary)
+    target_execution_evidence = {**preview_summary, **target_execution}
     secrets = _secret_status(project, runner)
     cloud_run = _cloud_run_status(project, service, region, runner)
     local_cookies = _local_cookie_status() if check_local_cookies else {"status": "skipped"}
@@ -233,7 +289,7 @@ def build_generation_chain_report(
             "id": "target-bot-preview-execution",
             "label": "Each preview has target bot execution evidence",
             "status": "ready" if preview_total and preview_target_executed == preview_total else "blocked",
-            "evidence": preview_summary,
+            "evidence": target_execution_evidence,
         },
         {
             "id": "cloud-run",
@@ -329,7 +385,18 @@ def build_generation_chain_report(
         if preview_bot_specific < preview_total:
             next_actions.append("Refresh bot preview assets until /api/studio/bot-previews summary.botSpecific equals summary.total.")
         if preview_target_executed < preview_total:
-            next_actions.append("Run each target MyShell bot adapter until /api/studio/bot-previews summary.targetBotExecuted equals summary.total.")
+            if target_execution["artTargetBotTotal"] and target_execution["artTargetBotExecuted"] < target_execution["artTargetBotTotal"]:
+                next_actions.append(
+                    "Run the MyShell Art target bot executor until Art target execution equals the Art bot total."
+                )
+            if target_execution["dreamyTargetBotTotal"] and target_execution["dreamyTargetBotExecuted"] < target_execution["dreamyTargetBotTotal"]:
+                next_actions.append(
+                    "Run real Dreamy target executions for the Dreamy preview bots and materialize only accepted media as targetBotExecuted."
+                )
+            if not target_execution["artTargetBotTotal"] and not target_execution["dreamyTargetBotTotal"]:
+                next_actions.append(
+                    "Run each target MyShell bot adapter until /api/studio/bot-previews summary.targetBotExecuted equals summary.total."
+                )
         if _component_status(health, "cookieInjection") == "captcha_required":
             next_actions.append("Resolve the MyShell/Cloudflare captcha in a verified browser session before rerunning target-bot execution.")
         if check_local_cookies and local_cookies.get("missingCookieNames"):
@@ -361,6 +428,10 @@ def build_generation_chain_report(
             "previewTotal": preview_total,
             "previewBotSpecific": preview_bot_specific,
             "previewTargetBotExecuted": preview_target_executed,
+            "previewArtTargetBotExecuted": target_execution["artTargetBotExecuted"],
+            "previewArtTargetBotTotal": target_execution["artTargetBotTotal"],
+            "previewDreamyTargetBotExecuted": target_execution["dreamyTargetBotExecuted"],
+            "previewDreamyTargetBotTotal": target_execution["dreamyTargetBotTotal"],
             "liveAccepted": latest_accepted,
         },
         "requirements": requirements,

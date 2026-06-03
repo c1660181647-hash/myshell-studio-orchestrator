@@ -29,6 +29,7 @@ from materialize_bot_preview_manifest import prompt_for_bot  # noqa: E402
 
 DEFAULT_OUTPUT = REPO_ROOT / ".studio-delivery-check" / "target-bot-preview-urls.json"
 DEFAULT_SOURCE_IMAGE = REPO_ROOT / "frontend" / "public" / "generated" / "bot-previews" / "ai-porn-generator.jpg"
+DEFAULT_PREVIEW_MANIFEST = REPO_ROOT / "frontend" / "public" / "generated" / "bot-previews" / "manifest.json"
 PUBLIC_ART_PAGE_BASE = "https://art.myshell.ai/creative"
 
 Runner = Callable[..., Awaitable[dict[str, Any]]]
@@ -138,9 +139,33 @@ def _resolve_public_metadata(slug: str, resolver: PublicMetadataResolver | None)
         return {"publicMetadataError": str(exc)}
 
 
-def _source_image_for(bot: dict[str, Any], explicit_source: Path | None) -> Path | None:
+def _manifest_remote_source_for(slug: str, manifest_path: Path | None = None) -> str:
+    active_manifest_path = manifest_path or DEFAULT_PREVIEW_MANIFEST
+    if not active_manifest_path.exists():
+        return ""
+    try:
+        with active_manifest_path.open(encoding="utf-8") as manifest_file:
+            manifest = json.load(manifest_file)
+    except (OSError, json.JSONDecodeError):
+        return ""
+    assets = manifest.get("assets") if isinstance(manifest.get("assets"), list) else []
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        if asset.get("botSlug") == slug or asset.get("targetBotSlug") == slug:
+            remote_url = str(asset.get("originalRemoteUrl") or "")
+            if remote_url.startswith(("http://", "https://")):
+                return remote_url
+    return ""
+
+
+def _source_image_for(bot: dict[str, Any], explicit_source: Path | None, prefer_remote: bool = False) -> Path | str | None:
     if str(bot.get("type") or "") == "text-to-image":
         return None
+    if prefer_remote:
+        remote_source = _manifest_remote_source_for(str(bot["slug"]))
+        if remote_source:
+            return remote_source
     if explicit_source:
         return explicit_source
     candidate = REPO_ROOT / "frontend" / "public" / "generated" / "bot-previews" / f"{bot['slug']}.jpg"
@@ -162,7 +187,7 @@ def build_run_plan(
     plan: list[dict[str, Any]] = []
     for bot in _selected_bots(slugs, include_dreamy=include_dreamy):
         requires_image = str(bot.get("type") or "") in {"image-to-image", "image-to-video"}
-        source = _source_image_for(bot, source_image) if requires_image else None
+        source = _source_image_for(bot, source_image, prefer_remote=executor_mode == "art-api") if requires_image else None
         public_metadata = (
             _resolve_public_metadata(str(bot["slug"]), public_metadata_resolver)
             if bot.get("pageId") != "dreamy-miniapp"
@@ -307,11 +332,12 @@ async def run_preview_batch(
             continue
         try:
             if item["executor"] == "myshell-art-api":
+                source_image_value = str(item.get("sourceImage") or "")
                 result = await active_runner(
                     bot_slug=slug,
                     prompt=item["prompt"],
                     gen_button=item["genButton"],
-                    image_data=_image_data(item["sourceImage"]),
+                    image_data="" if source_image_value.startswith(("http://", "https://")) else _image_data(source_image_value),
                     target_bot_id=item.get("targetBotId", ""),
                     input_values=_api_input_values(item),
                 )
