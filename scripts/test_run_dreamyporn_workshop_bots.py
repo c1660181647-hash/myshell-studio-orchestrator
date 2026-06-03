@@ -73,6 +73,13 @@ class DreamyPornWorkshopRunnerTest(unittest.TestCase):
                             "mediaUrl": "https://cdn.example/done.mp4",
                             "posterUrl": "https://cdn.example/done.jpg",
                         },
+                        {
+                            "slug": "image-bot",
+                            "name": "Image Bot",
+                            "status": "done",
+                            "taskId": "task-image",
+                            "mediaUrl": "https://cdn.example/image.png",
+                        },
                         {"slug": "active-bot", "name": "Active Bot", "status": "running", "taskId": "task-active"},
                         {"slug": "queued-bot", "name": "Queued Bot", "status": "queue_full", "articleId": "queued-bot"},
                         {"slug": "cancelled-bot", "name": "Cancelled Bot", "status": "cancelled", "taskId": "task-cancelled"},
@@ -85,6 +92,7 @@ class DreamyPornWorkshopRunnerTest(unittest.TestCase):
             output.unlink(missing_ok=True)
 
         self.assertIn("https://cdn.example/done.mp4", html)
+        self.assertIn('<img class="media"', html)
         self.assertIn("Active Bot", html)
         self.assertIn("queue_full", html)
         self.assertIn("Cancelled Bot", html)

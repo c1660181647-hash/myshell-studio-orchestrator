@@ -38,6 +38,7 @@ DEFAULT_HTML_OUTPUT = REPO_ROOT / ".studio-delivery-check" / "dreamyporn-worksho
 DEFAULT_DETAIL_BASE_URL = "https://dreamyporn.ai"
 NEXT_FLIGHT_RE = re.compile(r"self\.__next_f\.push\((.*?)\)</script>", re.S)
 VIDEO_SUFFIXES = (".mp4", ".mov", ".webm", ".m4v")
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 NON_TERMINAL_STATUSES = {"pending", "running", "processing", "queued", ""}
 
 
@@ -367,6 +368,17 @@ def _status_bucket(status: Any) -> str:
     return "waiting"
 
 
+def _media_markup(item: dict[str, Any]) -> str:
+    media_url = str(item.get("mediaUrl") or "")
+    poster_url = str(item.get("posterUrl") or "")
+    media_url_lower = media_url.lower().split("?", 1)[0]
+    if media_url_lower.endswith(VIDEO_SUFFIXES):
+        return f'<video controls preload="metadata" poster="{_html_attr(poster_url)}" src="{_html_attr(media_url)}"></video>'
+    if media_url_lower.endswith(IMAGE_SUFFIXES):
+        return f'<img class="media" alt="{_html_attr(item.get("name") or item.get("slug"))}" src="{_html_attr(media_url)}">'
+    return f'<a class="media-link" href="{_html_attr(media_url)}" target="_blank" rel="noreferrer">Open media</a>'
+
+
 def render_html_report(report: dict[str, Any], path: Path) -> None:
     results = [item for item in report.get("results", []) if isinstance(item, dict)]
     done_items = [item for item in results if item.get("status") == "done" and item.get("mediaUrl")]
@@ -385,7 +397,7 @@ def render_html_report(report: dict[str, Any], path: Path) -> None:
         "\n".join(
             [
                 f'<article class="card done"><header><h2>{_html_attr(item.get("name") or item.get("slug"))}</h2><span>{_html_attr(item.get("slug"))}</span></header>',
-                f'<video controls preload="metadata" poster="{_html_attr(item.get("posterUrl"))}" src="{_html_attr(item.get("mediaUrl"))}"></video>',
+                _media_markup(item),
                 f'<code>{_html_attr(item.get("taskId"))}</code>',
                 f'<a href="{_html_attr(item.get("mediaUrl"))}" target="_blank" rel="noreferrer">Open media</a></article>',
             ]
@@ -430,7 +442,8 @@ p {{ color:var(--muted); }}
 .card header {{ display:flex; justify-content:space-between; gap:12px; align-items:start; }}
 .card h2 {{ font-size:16px; line-height:1.2; }}
 .card span,.card code,li small {{ color:var(--muted); word-break:break-all; }}
-video {{ width:100%; aspect-ratio:16/9; background:#050506; border-radius:6px; display:block; }}
+video,.media {{ width:100%; aspect-ratio:16/9; object-fit:contain; background:#050506; border-radius:6px; display:block; }}
+.media-link {{ min-height:180px; border:1px solid var(--line); border-radius:6px; display:grid; place-items:center; background:#050506; }}
 a {{ color:var(--hot); text-decoration:none; }}
 .attention {{ border:1px solid var(--line); background:#121216; border-radius:8px; padding:14px; }}
 .attention h2 {{ font-size:17px; margin-bottom:10px; }}
