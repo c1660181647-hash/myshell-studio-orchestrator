@@ -1276,6 +1276,21 @@ class StudioApiTest(unittest.TestCase):
         self.assertTrue(requested_urls)
         self.assertEqual(requested_urls[0], "http://cdp.internal:9333/json")
 
+    def test_cookie_injection_loads_cookies_from_file_env(self) -> None:
+        import inject_cookies
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cookies_path = Path(tmp_dir) / "myshell-cookies.json"
+            cookies_path.write_text(
+                json.dumps([{"name": "ms_token", "value": "redacted", "domain": ".myshell.ai"}]),
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {"MYSHELL_COOKIES": "", "MYSHELL_COOKIES_FILE": str(cookies_path)}, clear=False):
+                cookies = inject_cookies._load_cookies()
+
+        self.assertEqual(cookies, [{"name": "ms_token", "value": "redacted", "domain": ".myshell.ai"}])
+
     def test_cookie_injection_classifies_cloudflare_captcha(self) -> None:
         import inject_cookies
 

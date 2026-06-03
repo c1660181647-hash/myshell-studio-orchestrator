@@ -155,6 +155,7 @@ Important backend settings:
 - `DREAMY_API_BASE_URL` - Dreamy API origin, default `https://api.myshell.fun`.
 - `DREAMY_SERVER_POLL_ATTEMPTS` / `DREAMY_SERVER_POLL_INTERVAL_SECONDS` - Fast server polling controls after Dreamy submit. Running jobs stay recoverable instead of being marked successful without media.
 - `MYSHELL_COOKIES` - JSON cookie array for MyShell Art CDP execution. If omitted, MyShell Art jobs report `auth_missing`.
+- `MYSHELL_COOKIES_FILE` - Local JSON cookie file path for MyShell Art CDP/API diagnostics. Prefer this over putting cookie JSON directly in shell history.
 - `MYSHELL_CDP_URL` - Chrome DevTools endpoint, default `http://127.0.0.1:9222`.
 - `MYSHELL_COOKIE_INJECTION_STATUS_PATH` - Optional path for the Chrome cookie injection result JSON. Defaults to backend `.studio/cookie-injection-status.json`.
 - `STUDIO_ROUTER_MODE=local|gemini` - local catalog matching by default; Gemini requires `GEMINI_API_KEY`.

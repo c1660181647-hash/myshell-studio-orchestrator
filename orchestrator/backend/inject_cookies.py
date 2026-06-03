@@ -90,14 +90,21 @@ def _load_cookies():
     env = os.environ.get("MYSHELL_COOKIES", "")
     if env:
         return _load_cookie_json("MYSHELL_COOKIES", lambda: json.loads(env))
+
+    # 2. Environment file path
+    cookie_file_env = os.environ.get("MYSHELL_COOKIES_FILE", "")
+    if cookie_file_env:
+        cookie_file_path = os.path.expanduser(cookie_file_env)
+        with open(cookie_file_path, encoding="utf-8") as f:
+            return _load_cookie_json("MYSHELL_COOKIES_FILE", lambda: json.load(f))
     
-    # 2. External file
+    # 3. External file
     cookie_file = os.path.join(os.path.dirname(__file__), "myshell-cookies.json")
     if os.path.exists(cookie_file):
         with open(cookie_file) as f:
             return _load_cookie_json("myshell-cookies.json", lambda: json.load(f))
     
-    # 3. Embedded fallback
+    # 4. Embedded fallback
     embedded_file = os.path.join(os.path.dirname(__file__), "myshell_cookies_embedded.json")
     if os.path.exists(embedded_file):
         with open(embedded_file) as f:
