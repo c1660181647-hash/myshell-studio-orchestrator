@@ -3631,6 +3631,24 @@ def _resolve_generated_media_path(url: str) -> Path | None:
     return candidate if candidate.exists() else None
 
 
+def _download_timeline_media(media_url: str, output_path: Path) -> None:
+    headers = {
+        "User-Agent": "MyShell-Studio-Timeline-Export/1.0",
+        "Accept": "video/mp4,video/*,*/*",
+    }
+    try:
+        with httpx.stream("GET", media_url, headers=headers, follow_redirects=True, timeout=90.0) as response:
+            response.raise_for_status()
+            with output_path.open("wb") as media_file:
+                for chunk in response.iter_bytes():
+                    if chunk:
+                        media_file.write(chunk)
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"failed to download timeline media: {_exception_message(exc)}") from exc
+    if not output_path.exists() or output_path.stat().st_size <= 0:
+        raise RuntimeError("downloaded timeline media was empty")
+
+
 def _prepare_timeline_video_input(media_url: str, target_dir: Path, index: int) -> Path:
     generated_path = _resolve_generated_media_path(media_url)
     suffix = Path(urlsplit(media_url).path).suffix or ".mp4"
@@ -3639,7 +3657,7 @@ def _prepare_timeline_video_input(media_url: str, target_dir: Path, index: int) 
         shutil.copyfile(generated_path, output_path)
         return output_path
     if media_url.startswith("http://") or media_url.startswith("https://"):
-        urlretrieve(media_url, output_path)
+        _download_timeline_media(media_url, output_path)
         return output_path
     raise ValueError(f"Unsupported timeline media URL: {media_url}")
 
@@ -3659,6 +3677,13 @@ def _compose_timeline_video(export_id: str, video_segments: list[dict[str, Any]]
         input_paths: list[Path] = []
         for index, segment in enumerate(video_segments, start=1):
             input_paths.append(_prepare_timeline_video_input(str(segment.get("mediaUrl") or ""), temp_dir, index))
+        if len(input_paths) == 1:
+            shutil.copyfile(input_paths[0], output_path)
+            return {
+                "status": "ready",
+                "mediaUrl": f"/generated/studio-exports/{output_path.name}",
+                "message": "Composed 1 video segment.",
+            }
         concat_path = temp_dir / "concat.txt"
         concat_path.write_text(
             "\n".join(f"file '{path.as_posix()}'" for path in input_paths) + "\n",
@@ -3704,7 +3729,10 @@ def _create_timeline_export(project: StudioProject, segment_ids: list[str] | Non
     try:
         compose_result = _compose_timeline_video(export_id, video_segments)
     except Exception as error:
-        compose_result = {"status": "manifest_ready", "message": f"Video compose skipped: {error}"}
+        compose_result = {
+            "status": "manifest_ready",
+            "message": f"Video compose skipped: {type(error).__name__}: {_exception_message(error)}",
+        }
 
     status = compose_result.get("status") or ("needs_media" if not video_segments else "manifest_ready")
     media_url = compose_result.get("mediaUrl") or ""
