@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 service="${CLOUD_RUN_SERVICE:-art-chat-orchestrator}"
 region="${CLOUD_RUN_REGION:-europe-west1}"
+project="${GOOGLE_CLOUD_PROJECT:-${GCP_PROJECT:-k-project-481102}}"
 base_url="${STUDIO_PUBLIC_URL:-https://art-chat-orchestrator-ju35f47zeq-ew.a.run.app}"
 dreamy_secret="${CLOUD_RUN_DREAMY_INIT_DATA_SECRET:-myshell-dreamy-init-data}"
 cookies_secret="${CLOUD_RUN_MYSHELL_COOKIES_SECRET:-myshell-cookies}"
@@ -27,6 +28,7 @@ Options:
   --init-data-file PATH   Read DREAMY_TELEGRAM_INIT_DATA from a local file.
   --no-deploy             Upload secrets without triggering Cloud Build deploy.
   --no-smoke              Skip live generation smoke after deploy.
+  --project PROJECT       Google Cloud project. Default: ${project}
   --base-url URL          Studio public URL. Default: ${base_url}
   --short-sha SHA         Image tag substitution. Default: current HEAD short SHA.
 
@@ -43,6 +45,7 @@ while [ "$#" -gt 0 ]; do
     --init-data-file) init_data_file="${2:?--init-data-file requires a path}"; shift ;;
     --no-deploy) deploy=0 ;;
     --no-smoke) run_smoke=0 ;;
+    --project) project="${2:?--project requires a value}"; shift ;;
     --base-url) base_url="${2:?--base-url requires a URL}"; shift ;;
     --short-sha) short_sha="${2:?--short-sha requires a value}"; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -77,15 +80,15 @@ upsert_secret() {
     echo "[dry-run] would create/update Secret Manager secret ${secret_name}"
     return 0
   fi
-  if gcloud secrets describe "${secret_name}" >/dev/null 2>&1; then
-    printf '%s' "${value}" | gcloud secrets versions add "${secret_name}" --data-file=-
+  if gcloud secrets describe "${secret_name}" --project "${project}" >/dev/null 2>&1; then
+    printf '%s' "${value}" | gcloud secrets versions add "${secret_name}" --project "${project}" --data-file=-
   else
-    printf '%s' "${value}" | gcloud secrets create "${secret_name}" --data-file=-
+    printf '%s' "${value}" | gcloud secrets create "${secret_name}" --project "${project}" --data-file=-
   fi
 }
 
 echo "[setup] repo=${repo_root}"
-echo "[setup] service=${service} region=${region}"
+echo "[setup] project=${project} service=${service} region=${region}"
 echo "[setup] image tag short_sha=${short_sha}"
 
 dreamy_init_data="$(read_secret_value DREAMY_TELEGRAM_INIT_DATA "${init_data_file}")"
@@ -153,11 +156,12 @@ if [ "${deploy}" -eq 1 ]; then
   echo "[setup] triggering Cloud Build deploy"
   gcloud builds submit \
     --config "${repo_root}/orchestrator/cloudbuild.yaml" \
+    --project "${project}" \
     --substitutions "SHORT_SHA=${short_sha}" \
     "${repo_root}"
 
   echo "[setup] waiting for Cloud Run service ${service}"
-  gcloud run services describe "${service}" --region "${region}" --format='value(status.latestReadyRevisionName,status.url)'
+  gcloud run services describe "${service}" --region "${region}" --project "${project}" --format='value(status.latestReadyRevisionName,status.url)'
 fi
 
 if [ "${run_smoke}" -eq 1 ]; then

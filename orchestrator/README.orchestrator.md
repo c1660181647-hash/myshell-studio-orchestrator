@@ -130,12 +130,13 @@ Then configure Secret Manager, deploy, and require a real media result:
 
 ```bash
 scripts/configure_generation_secrets.sh \
+  --project k-project-481102 \
   --init-data-file /tmp/dreamy-init-data.txt \
   --cookies-file /tmp/myshell-cookies.json \
   --apply
 ```
 
-Without `--apply`, this command is a dry-run and does not upload values. With `--apply`, the script validates the init data shape, validates cookie JSON, probes MyShell Art API auth with the provided cookies, updates `myshell-dreamy-init-data` plus `myshell-cookies`, triggers Cloud Build, and runs `python -m generation_smoke --execute --require-live` against the public service. If the Art API probe is `UNAUTHORIZED`, no secrets are uploaded.
+Without `--apply`, this command is a dry-run and does not upload values. With `--apply`, the script validates the init data shape, validates cookie JSON, probes MyShell Art API auth with the provided cookies, updates `myshell-dreamy-init-data` plus `myshell-cookies` in the explicit Google Cloud project, triggers Cloud Build, and runs `python -m generation_smoke --execute --require-live` against the public service. If the Art API probe is `UNAUTHORIZED`, no secrets are uploaded.
 
 Target bot preview execution evidence is collected before materializing preview assets:
 

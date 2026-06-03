@@ -70,6 +70,33 @@ class GenerationChainCheckTest(unittest.TestCase):
         self.assertIn("myshell-art-auth", blocking_ids)
         self.assertIn("live-generation-smoke", blocking_ids)
 
+    def test_report_next_actions_mentions_project_bound_secret_setup_command(self) -> None:
+        report = generation_chain_check.build_generation_chain_report(
+            base_url="https://studio.example",
+            project="k-project-481102",
+            require_live=True,
+            fetcher=_fake_fetch(
+                {
+                    "/api/health": {
+                        "status": "degraded",
+                        "components": {
+                            "dreamyApiAuth": {"status": "client_delegated"},
+                            "myshellCookies": {"status": "auth_missing"},
+                            "cookieInjection": {"status": "auth_missing"},
+                            "chromeCdp": {"status": "ok"},
+                        },
+                    },
+                    "/api/studio/bot-previews": {"summary": {"ready": 40, "total": 40, "botSpecific": 40, "targetBotExecuted": 0}},
+                    "/api/studio/generation-smoke": {"status": "needs_configuration", "latest": {"accepted": False}},
+                }
+            ),
+            runner=_fake_runner(existing_secrets=False),
+        )
+
+        actions = " ".join(report["nextActions"])
+        self.assertIn("scripts/configure_generation_secrets.sh", actions)
+        self.assertIn("--project k-project-481102", actions)
+
     def test_report_ready_when_generation_media_is_accepted(self) -> None:
         report = generation_chain_check.build_generation_chain_report(
             base_url="https://studio.example",

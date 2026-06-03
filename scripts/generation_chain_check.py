@@ -410,7 +410,12 @@ def build_generation_chain_report(
                 "Refresh local MyShell login/cookies and rerun the local Art API probe; do not upload cookies until the probe is ready."
             )
         if secrets.get("status") not in {"ready", "skipped"}:
-            next_actions.append("Create or update Secret Manager secrets myshell-dreamy-init-data and myshell-cookies.")
+            project_arg = f" --project {project}" if project else ""
+            next_actions.append(
+                "Create or update generation secrets with "
+                f"scripts/configure_generation_secrets.sh{project_arg} "
+                "--init-data-file <dreamy-init-data.txt> --cookies-file <myshell-cookies.json> --apply."
+            )
         if _component_status(health, "dreamyApiAuth") != "ready" or _component_status(health, "myshellCookies") != "ready":
             next_actions.append("Redeploy Cloud Run so DREAMY_TELEGRAM_INIT_DATA and MYSHELL_COOKIES are injected.")
         if not latest_accepted:
