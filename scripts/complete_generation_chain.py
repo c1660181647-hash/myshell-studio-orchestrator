@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -25,7 +26,7 @@ class CommandResult(NamedTuple):
     stderr: str
 
 
-Runner = Callable[[list[str], float], CommandResult]
+Runner = Callable[[list[str], float, dict[str, str]], CommandResult]
 
 
 class CompleteGenerationChainError(RuntimeError):
@@ -66,6 +67,7 @@ def _step(
     enabled: bool,
     generating: bool = False,
     timeout: float = 300.0,
+    env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": step_id,
@@ -75,6 +77,7 @@ def _step(
         "generating": generating,
         "timeout": timeout,
         "command": command,
+        "env": dict(env or {}),
     }
 
 
@@ -122,6 +125,7 @@ def build_plan(
     ]
     if allow_partial:
         dreamy_command.append("--allow-partial")
+    art_target_env = {"MYSHELL_COOKIES_FILE": str(cookies_file)} if cookies_file else {}
 
     steps = [
         _step(
@@ -170,6 +174,7 @@ def build_plan(
             enabled=execute_art_targets,
             generating=True,
             timeout=3600.0,
+            env=art_target_env,
         ),
         _step(
             step_id="materialize-art-targets",
@@ -229,8 +234,15 @@ def build_plan(
     }
 
 
-def _run_command(command: list[str], timeout: float) -> CommandResult:
-    completed = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout)
+def _run_command(command: list[str], timeout: float, env: dict[str, str]) -> CommandResult:
+    completed = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env={**os.environ, **env} if env else None,
+    )
     return CommandResult(returncode=completed.returncode, stdout=completed.stdout, stderr=completed.stderr)
 
 
@@ -245,7 +257,11 @@ def run_plan(plan: dict[str, Any], *, runner: Runner = _run_command) -> dict[str
             step_report["status"] = "skipped"
             report_steps.append(step_report)
             continue
-        result = runner([str(part) for part in step["command"]], float(step.get("timeout") or 300.0))
+        result = runner(
+            [str(part) for part in step["command"]],
+            float(step.get("timeout") or 300.0),
+            {str(key): str(value) for key, value in dict(step.get("env") or {}).items()},
+        )
         step_report.update(
             {
                 "ran": True,

@@ -162,7 +162,7 @@ python scripts/complete_generation_chain.py \
   --materialize
 ```
 
-The complete-chain runner is safe by default: it only prints a plan unless `--apply` is present, and live Dreamy generation plus Art target execution each require explicit flags.
+The complete-chain runner is safe by default: it only prints a plan unless `--apply` is present, and live Dreamy generation plus Art target execution each require explicit flags. When `--cookies-file` is supplied, the Art target execution step receives it as `MYSHELL_COOKIES_FILE` so the same probed cookie file is reused without printing cookie values.
 
 Target bot preview execution evidence is collected before materializing preview assets:
 

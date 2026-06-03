@@ -71,6 +71,19 @@ class CompleteGenerationChainTest(unittest.TestCase):
         self.assertIn("--project k-project-481102", final_command)
         self.assertIn("--require-live", final_command)
 
+    def test_art_target_step_reuses_supplied_cookie_file_without_cookie_values(self) -> None:
+        plan = complete_chain.build_plan(
+            base_url="https://studio.example",
+            project="k-project-481102",
+            apply=True,
+            cookies_file=Path("/tmp/myshell-cookies.json"),
+            execute_art_targets=True,
+        )
+
+        art_step = next(step for step in plan["steps"] if step["id"] == "art-target-previews")
+        self.assertEqual(art_step["env"], {"MYSHELL_COOKIES_FILE": "/tmp/myshell-cookies.json"})
+        self.assertNotIn("MYSHELL_COOKIES", art_step["env"])
+
     def test_run_plan_executes_only_enabled_steps_and_stops_on_failure(self) -> None:
         plan = complete_chain.build_plan(
             base_url="https://studio.example",
@@ -80,8 +93,8 @@ class CompleteGenerationChainTest(unittest.TestCase):
         )
         calls = []
 
-        def fake_runner(command, timeout):
-            calls.append((command, timeout))
+        def fake_runner(command, timeout, env):
+            calls.append((command, timeout, env))
             if any("generation_smoke" in part for part in command):
                 return complete_chain.CommandResult(returncode=9, stdout="", stderr="smoke failed")
             return complete_chain.CommandResult(returncode=0, stdout="{}", stderr="")
@@ -93,6 +106,26 @@ class CompleteGenerationChainTest(unittest.TestCase):
         self.assertEqual(report["failedStep"]["id"], "live-smoke")
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0][0][0], sys.executable)
+
+    def test_run_plan_passes_art_cookie_file_env_to_runner(self) -> None:
+        plan = complete_chain.build_plan(
+            base_url="https://studio.example",
+            project="k-project-481102",
+            apply=True,
+            cookies_file=Path("/tmp/myshell-cookies.json"),
+            execute_art_targets=True,
+        )
+        calls = []
+
+        def fake_runner(command, timeout, env):
+            calls.append((command, timeout, env))
+            return complete_chain.CommandResult(returncode=0, stdout="{}", stderr="")
+
+        report = complete_chain.run_plan(plan, runner=fake_runner)
+
+        self.assertEqual(report["status"], "ok")
+        art_call = next(call for call in calls if "run_target_bot_previews.py" in " ".join(call[0]))
+        self.assertEqual(art_call[2], {"MYSHELL_COOKIES_FILE": "/tmp/myshell-cookies.json"})
 
 
 if __name__ == "__main__":
