@@ -133,7 +133,13 @@ Without `--apply`, this command is a dry-run and does not upload values. With `-
 Target bot preview execution evidence is collected before materializing preview assets:
 
 ```bash
-python scripts/run_target_bot_previews.py --plan-only --slug brat-generator --resolve-public-metadata
+python scripts/run_target_bot_previews.py --plan-only --slug brat-generator --executor art-api
+MYSHELL_COOKIES_FILE=/tmp/myshell-cookies.json \
+  python scripts/run_target_bot_previews.py \
+  --slug brat-generator \
+  --executor art-api \
+  --output .studio-delivery-check/target-bot-preview-urls.json \
+  --merge-existing
 MYSHELL_CDP_URL=http://127.0.0.1:9222 \
   python scripts/run_target_bot_previews.py \
   --slug brat-generator \
@@ -143,7 +149,7 @@ MYSHELL_CDP_URL=http://127.0.0.1:9222 \
 python scripts/materialize_bot_preview_manifest.py --input .studio-delivery-check/target-bot-preview-urls.json
 ```
 
-The runner reuses the MyShell Art CDP bridge and only marks `targetBotExecuted: true` after the target page returns a fresh output URL. With `--resolve-public-metadata`, the plan/report also records the exact public-page `targetBotId`, `targetSlugId`, template, and generate button text. If health or runner evidence reports `captcha_required`, the browser reached a MyShell/Cloudflare challenge page after cookie injection; use a verified browser session or complete the challenge before rerunning target-bot execution.
+The runner prefers `--executor art-api`, which resolves public Art metadata and calls the target bot API directly with the public-page `targetBotId`. It reads cookies from `MYSHELL_COOKIES`, `MYSHELL_COOKIES_FILE`, or backend-local cookie files, and only marks `targetBotExecuted: true` after the target bot returns a fresh output URL. The default CDP executor remains available for browser-session fallback; with `--resolve-public-metadata`, the plan/report also records the exact public-page `targetBotId`, `targetSlugId`, template, and generate button text. `GET /api/studio/art-api-auth-smoke` verifies deployed Art API auth without printing secret values. If health or runner evidence reports `captcha_required`, the browser reached a MyShell/Cloudflare challenge page after cookie injection; use a verified browser session or complete the challenge before rerunning target-bot execution.
 
 ## Tests
 

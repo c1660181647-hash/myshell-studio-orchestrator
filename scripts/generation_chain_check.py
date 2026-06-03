@@ -154,6 +154,13 @@ def _generation_latest_accepted(generation_smoke: dict[str, Any]) -> bool:
     return bool(latest.get("accepted") and latest.get("mediaUrl"))
 
 
+def _optional_fetch(fetcher: Callable[[str, str, float], dict[str, Any]], base_url: str, path: str) -> dict[str, Any]:
+    try:
+        return fetcher(base_url, path, 30.0)
+    except Exception as exc:
+        return {"status": "unavailable", "message": str(exc)}
+
+
 def build_generation_chain_report(
     *,
     base_url: str,
@@ -168,6 +175,7 @@ def build_generation_chain_report(
     health = fetcher(base_url, "/api/health", 30.0)
     previews = fetcher(base_url, "/api/studio/bot-previews", 30.0)
     generation_smoke = fetcher(base_url, "/api/studio/generation-smoke", 30.0)
+    art_api_auth = _optional_fetch(fetcher, base_url, "/api/studio/art-api-auth-smoke")
 
     preview_summary = previews.get("summary") if isinstance(previews.get("summary"), dict) else {}
     preview_ready = int(preview_summary.get("ready") or 0)
@@ -178,6 +186,12 @@ def build_generation_chain_report(
     cloud_run = _cloud_run_status(project, service, region, runner)
     local_cookies = _local_cookie_status() if check_local_cookies else {"status": "skipped"}
     latest_accepted = _generation_latest_accepted(generation_smoke)
+    art_api_ready = bool(art_api_auth.get("ready") or art_api_auth.get("status") == "ready")
+    cdp_art_ready = (
+        _component_status(health, "myshellCookies") == "ready"
+        and _component_status(health, "cookieInjection") == "ready"
+        and _component_status(health, "chromeCdp") == "ok"
+    )
 
     requirements = [
         {
@@ -218,16 +232,14 @@ def build_generation_chain_report(
         },
         {
             "id": "myshell-art-auth",
-            "label": "MyShell Art cookies and CDP auth are ready",
-            "status": "ready"
-            if _component_status(health, "myshellCookies") == "ready"
-            and _component_status(health, "cookieInjection") == "ready"
-            and _component_status(health, "chromeCdp") == "ok"
-            else "blocked",
+            "label": "MyShell Art API or CDP auth is ready",
+            "status": "ready" if art_api_ready or cdp_art_ready else "blocked",
             "evidence": {
                 "myshellCookies": _component_status(health, "myshellCookies"),
                 "cookieInjection": _component_status(health, "cookieInjection"),
                 "chromeCdp": _component_status(health, "chromeCdp"),
+                "artApiAuth": art_api_auth.get("status"),
+                "artApiReady": art_api_ready,
             },
         },
         {

@@ -22,8 +22,9 @@ from sse_starlette.sse import EventSourceResponse
 
 from bot_catalog import MYSHELL_BOTS, get_bot_by_slug
 from bot_previews import list_bot_previews
+import myshell_art_api
 from studio_registry import get_page, list_studio_agents, list_studio_pages, page_for_dispatch
-from studio_runtime import adapter_auth_status, dreamy_api_base_url, dreamy_init_data, runtime_health
+from studio_runtime import adapter_auth_status, cookie_source_status, dreamy_api_base_url, dreamy_init_data, runtime_health
 from studio_store import STUDIO_STORE
 
 try:
@@ -4263,6 +4264,34 @@ def register_studio_routes(app) -> None:
         prerequisites = (health.get("components") or {}).get("liveGeneration") or {}
         latest_job = _latest_generation_smoke_job()
         return _generation_smoke_summary(prerequisites=prerequisites, latest_job=latest_job)
+
+    @app.get("/api/studio/art-api-auth-smoke")
+    async def get_studio_art_api_auth_smoke():
+        cookie_source = cookie_source_status()
+        if cookie_source.get("status") != "ready":
+            return {
+                "status": "auth_missing",
+                "ready": False,
+                "message": str(cookie_source.get("message") or "MyShell cookies are not configured."),
+                "cookieSource": {
+                    "status": cookie_source.get("status"),
+                    "mode": cookie_source.get("mode"),
+                    "cookieCount": cookie_source.get("cookieCount", 0),
+                    "missingCookieNames": cookie_source.get("missingCookieNames", []),
+                    "artApiAuthCookieStatus": cookie_source.get("artApiAuthCookieStatus", ""),
+                },
+            }
+        probe = await myshell_art_api.probe_art_api_auth()
+        return {
+            **probe,
+            "cookieSource": {
+                "status": cookie_source.get("status"),
+                "mode": cookie_source.get("mode"),
+                "cookieCount": cookie_source.get("cookieCount", 0),
+                "missingCookieNames": cookie_source.get("missingCookieNames", []),
+                "artApiAuthCookieStatus": cookie_source.get("artApiAuthCookieStatus", ""),
+            },
+        }
 
     @app.post("/api/studio/generation-smoke")
     async def post_studio_generation_smoke(payload: Optional[dict[str, Any]] = Body(None)):

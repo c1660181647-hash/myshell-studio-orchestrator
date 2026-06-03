@@ -100,6 +100,42 @@ class GenerationChainCheckTest(unittest.TestCase):
         self.assertTrue(report["readyForDelivery"])
         self.assertEqual(report["blocking"], [])
 
+    def test_report_accepts_ready_myshell_art_api_auth_smoke(self) -> None:
+        report = generation_chain_check.build_generation_chain_report(
+            base_url="https://studio.example",
+            project="project",
+            require_live=True,
+            fetcher=_fake_fetch(
+                {
+                    "/api/health": {
+                        "status": "ok",
+                        "components": {
+                            "dreamyApiAuth": {"status": "ready"},
+                            "myshellCookies": {"status": "ready"},
+                            "cookieInjection": {"status": "auth_missing"},
+                            "chromeCdp": {"status": "unavailable"},
+                        },
+                    },
+                    "/api/studio/bot-previews": {"summary": {"ready": 40, "total": 40, "botSpecific": 40, "targetBotExecuted": 40}},
+                    "/api/studio/generation-smoke": {
+                        "status": "done",
+                        "latest": {"accepted": True, "mediaUrl": "https://cdn.example/generated.png"},
+                    },
+                    "/api/studio/art-api-auth-smoke": {
+                        "status": "ready",
+                        "ready": True,
+                        "authProbe": {"httpStatus": 200},
+                    },
+                }
+            ),
+            runner=_fake_runner(existing_secrets=True),
+        )
+
+        self.assertEqual(report["status"], "ready")
+        self.assertTrue(report["readyForDelivery"])
+        art_auth = next(item for item in report["requirements"] if item["id"] == "myshell-art-auth")
+        self.assertEqual(art_auth["evidence"]["artApiAuth"], "ready")
+
     def test_report_blocks_representative_preview_assets(self) -> None:
         report = generation_chain_check.build_generation_chain_report(
             base_url="https://studio.example",

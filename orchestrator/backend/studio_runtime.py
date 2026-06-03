@@ -12,6 +12,7 @@ import httpx
 DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 DEFAULT_COOKIE_INJECTION_STATUS_PATH = os.path.join(os.path.dirname(__file__), ".studio", "cookie-injection-status.json")
 COOKIE_FILE_NAMES = ("myshell-cookies.json", "myshell_cookies_embedded.json")
+COOKIE_FILE_ENV = "MYSHELL_COOKIES_FILE"
 DREAMY_INIT_DATA_ENV_NAMES = ("DREAMY_TELEGRAM_INIT_DATA", "MYSHELL_DREAMY_INIT_DATA")
 DREAMY_DEFAULT_API_BASE_URL = "https://api.myshell.fun"
 MYSHELL_ART_REQUIRED_COOKIE_NAMES = ("ms_token",)
@@ -89,6 +90,29 @@ def _cookie_payload_status(payload: Any, *, mode: str, source: str) -> dict[str,
     }
 
 
+def cookie_source_payload() -> list[dict[str, Any]]:
+    env = os.environ.get("MYSHELL_COOKIES")
+    if env:
+        payload = json.loads(env)
+        return payload if isinstance(payload, list) else []
+
+    cookie_file_path = os.environ.get(COOKIE_FILE_ENV)
+    if cookie_file_path:
+        with open(os.path.expanduser(cookie_file_path), encoding="utf-8") as cookie_file:
+            payload = json.load(cookie_file)
+        return payload if isinstance(payload, list) else []
+
+    base = os.path.dirname(__file__)
+    for filename in COOKIE_FILE_NAMES:
+        path = os.path.join(base, filename)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as cookie_file:
+            payload = json.load(cookie_file)
+        return payload if isinstance(payload, list) else []
+    return []
+
+
 def cookie_source_status() -> dict[str, Any]:
     env = os.environ.get("MYSHELL_COOKIES")
     if env:
@@ -100,6 +124,19 @@ def cookie_source_status() -> dict[str, Any]:
                 "mode": "env",
                 "source": "MYSHELL_COOKIES",
                 "message": f"MYSHELL_COOKIES must be valid JSON: {exc}",
+            }
+
+    cookie_file_path = os.environ.get(COOKIE_FILE_ENV)
+    if cookie_file_path:
+        try:
+            with open(os.path.expanduser(cookie_file_path), encoding="utf-8") as cookie_file:
+                return _cookie_payload_status(json.load(cookie_file), mode="file-env", source=COOKIE_FILE_ENV)
+        except Exception as exc:
+            return {
+                "status": "error",
+                "mode": "file-env",
+                "source": COOKIE_FILE_ENV,
+                "message": f"{COOKIE_FILE_ENV} must point to a valid JSON cookie array: {exc}",
             }
 
     base = os.path.dirname(__file__)

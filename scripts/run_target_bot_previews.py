@@ -33,6 +33,7 @@ PUBLIC_ART_PAGE_BASE = "https://art.myshell.ai/creative"
 
 Runner = Callable[..., Awaitable[dict[str, Any]]]
 PublicMetadataResolver = Callable[[str], dict[str, Any] | None]
+EXECUTOR_MODES = {"cdp", "art-api"}
 
 
 class TargetBotPreviewError(RuntimeError):
@@ -154,7 +155,10 @@ def build_run_plan(
     include_dreamy: bool = False,
     source_image: Path | None = None,
     public_metadata_resolver: PublicMetadataResolver | None = None,
+    executor_mode: str = "cdp",
 ) -> list[dict[str, Any]]:
+    if executor_mode not in EXECUTOR_MODES:
+        raise TargetBotPreviewError(f"Unknown executor mode: {executor_mode}")
     plan: list[dict[str, Any]] = []
     for bot in _selected_bots(slugs, include_dreamy=include_dreamy):
         requires_image = str(bot.get("type") or "") in {"image-to-image", "image-to-video"}
@@ -171,7 +175,13 @@ def build_run_plan(
                 "botName": bot.get("name"),
                 "botType": bot.get("type"),
                 "pageId": bot.get("pageId") or "myshell-art",
-                "executor": "myshell-art-cdp" if bot.get("pageId") != "dreamy-miniapp" else "dreamy-server",
+                "executor": (
+                    "dreamy-server"
+                    if bot.get("pageId") == "dreamy-miniapp"
+                    else "myshell-art-api"
+                    if executor_mode == "art-api"
+                    else "myshell-art-cdp"
+                ),
                 "prompt": prompt_for_bot(bot),
                 "genButton": gen_button,
                 "requiresImage": requires_image,
@@ -202,13 +212,39 @@ def _default_runner() -> Runner:
     return generate_via_bot
 
 
+def _default_art_api_runner() -> Runner:
+    from myshell_art_api import generate_via_art_api
+
+    async def runner(**kwargs):
+        target_bot_id = str(kwargs.get("target_bot_id") or "")
+        input_values = kwargs.get("input_values") if isinstance(kwargs.get("input_values"), list) else []
+        if not target_bot_id:
+            return {"status": "error", "message": "MyShell Art API executor requires target_bot_id from public metadata."}
+        if not input_values:
+            return {"status": "error", "message": "MyShell Art API executor has no form input values to submit."}
+        return await generate_via_art_api(bot_id=target_bot_id, input_values=[str(value) for value in input_values])
+
+    return runner
+
+
+def _api_input_values(plan_item: dict[str, Any]) -> list[str]:
+    if not plan_item.get("requiresImage"):
+        return [str(plan_item["prompt"])]
+    source = str(plan_item.get("sourceImage") or "")
+    if source.startswith("http://") or source.startswith("https://"):
+        return [source]
+    return []
+
+
 def _entry_from_result(plan_item: dict[str, Any], result: dict[str, Any], checked_at: str) -> dict[str, Any] | None:
     output_url = str(result.get("output_url") or result.get("mediaUrl") or result.get("remoteUrl") or "")
     if str(result.get("status") or "") != "done" or not output_url:
         return None
+    executor = str(result.get("executor") or plan_item["executor"])
+    source = "myshell-target-bot-api" if executor == "myshell-art-api" else "myshell-target-bot-cdp"
     return {
         "remoteUrl": output_url,
-        "source": "myshell-target-bot-cdp",
+        "source": source,
         "sourceWidgetId": "",
         "sourceWidgetName": "",
         "prompt": plan_item["prompt"],
@@ -216,7 +252,7 @@ def _entry_from_result(plan_item: dict[str, Any], result: dict[str, Any], checke
         "targetBotExecuted": True,
         "execution": {
             "status": "done",
-            "executor": plan_item["executor"],
+            "executor": executor,
             "targetPageUrl": plan_item.get("targetPageUrl") or f"{PUBLIC_ART_PAGE_BASE}/{plan_item['botSlug']}",
             "targetBotId": plan_item.get("targetBotId", ""),
             "targetSlugId": plan_item.get("targetSlugId", plan_item["botSlug"]),
@@ -237,15 +273,22 @@ async def run_preview_batch(
     runner: Runner | None = None,
     continue_on_error: bool = True,
     resolve_public_metadata: bool = False,
+    public_metadata_resolver: PublicMetadataResolver | None = None,
+    executor_mode: str = "cdp",
 ) -> dict[str, Any]:
     checked_at = _now_iso()
-    active_runner = runner or _default_runner()
-    public_metadata_resolver = fetch_public_art_metadata if resolve_public_metadata else None
+    if executor_mode not in EXECUTOR_MODES:
+        raise TargetBotPreviewError(f"Unknown executor mode: {executor_mode}")
+    active_runner = runner or (_default_art_api_runner() if executor_mode == "art-api" else _default_runner())
+    active_public_metadata_resolver = public_metadata_resolver or (
+        fetch_public_art_metadata if resolve_public_metadata or executor_mode == "art-api" else None
+    )
     plan = build_run_plan(
         slugs=slugs,
         include_dreamy=include_dreamy,
         source_image=source_image,
-        public_metadata_resolver=public_metadata_resolver,
+        public_metadata_resolver=active_public_metadata_resolver,
+        executor_mode=executor_mode,
     )
     previews: dict[str, dict[str, Any]] = {}
     results: list[dict[str, Any]] = []
@@ -263,12 +306,22 @@ async def run_preview_batch(
                 raise TargetBotPreviewError(result["message"])
             continue
         try:
-            result = await active_runner(
-                bot_slug=slug,
-                prompt=item["prompt"],
-                gen_button=item["genButton"],
-                image_data=_image_data(item["sourceImage"]),
-            )
+            if item["executor"] == "myshell-art-api":
+                result = await active_runner(
+                    bot_slug=slug,
+                    prompt=item["prompt"],
+                    gen_button=item["genButton"],
+                    image_data=_image_data(item["sourceImage"]),
+                    target_bot_id=item.get("targetBotId", ""),
+                    input_values=_api_input_values(item),
+                )
+            else:
+                result = await active_runner(
+                    bot_slug=slug,
+                    prompt=item["prompt"],
+                    gen_button=item["genButton"],
+                    image_data=_image_data(item["sourceImage"]),
+                )
         except Exception as exc:
             result = {"status": "error", "message": str(exc)}
             if not continue_on_error:
@@ -316,12 +369,13 @@ async def async_main(argv: list[str] | None = None) -> int:
     parser.add_argument("--continue-on-error", action="store_true", default=True)
     parser.add_argument("--merge-existing", action="store_true", help="Merge successful runs into an existing output file.")
     parser.add_argument("--resolve-public-metadata", action="store_true", help="Fetch each public art page and include exact target bot metadata in the plan/report.")
+    parser.add_argument("--executor", choices=sorted(EXECUTOR_MODES), default="cdp", help="Execution transport for MyShell Art bots.")
     args = parser.parse_args(argv)
 
     try:
         slugs = args.slug or None
         if args.plan_only:
-            public_metadata_resolver = fetch_public_art_metadata if args.resolve_public_metadata else None
+            public_metadata_resolver = fetch_public_art_metadata if args.resolve_public_metadata or args.executor == "art-api" else None
             print(
                 json.dumps(
                     {
@@ -330,6 +384,7 @@ async def async_main(argv: list[str] | None = None) -> int:
                             include_dreamy=args.include_dreamy,
                             source_image=args.source_image,
                             public_metadata_resolver=public_metadata_resolver,
+                            executor_mode=args.executor,
                         )
                     },
                     indent=2,
@@ -343,6 +398,7 @@ async def async_main(argv: list[str] | None = None) -> int:
             source_image=args.source_image,
             continue_on_error=args.continue_on_error,
             resolve_public_metadata=args.resolve_public_metadata,
+            executor_mode=args.executor,
         )
         if args.merge_existing:
             merged = _load_existing(args.output)

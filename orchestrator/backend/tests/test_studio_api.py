@@ -570,6 +570,52 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(executed.json()["status"], "needs_configuration")
         self.assertEqual(self.client.get("/api/studio/jobs").json()["count"], 0)
 
+    def test_art_api_auth_smoke_reports_missing_cookies_without_api_call(self) -> None:
+        import studio
+
+        async def forbidden_probe(**_kwargs):
+            raise AssertionError("unexpected MyShell Art API probe")
+
+        with (
+            patch.dict(os.environ, {"MYSHELL_COOKIES": ""}, clear=False),
+            patch.object(studio.myshell_art_api, "probe_art_api_auth", side_effect=forbidden_probe),
+        ):
+            response = self.client.get("/api/studio/art-api-auth-smoke")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "auth_missing")
+        self.assertFalse(body["ready"])
+        self.assertIn("cookies", body["message"].lower())
+
+    def test_art_api_auth_smoke_reports_ready_probe(self) -> None:
+        import studio
+
+        async def fake_probe(**_kwargs):
+            return {
+                "status": "ready",
+                "ready": True,
+                "message": "MyShell Art API auth is ready.",
+                "authProbe": {"httpStatus": 200, "success": True, "dataKeys": ["userId"]},
+                "runningTasksProbe": {"httpStatus": 200, "success": True, "dataKeys": []},
+            }
+
+        with (
+            patch.dict(
+                os.environ,
+                {"MYSHELL_COOKIES": json.dumps([{"name": "ms_token", "value": "redacted", "domain": ".myshell.ai"}])},
+                clear=False,
+            ),
+            patch.object(studio.myshell_art_api, "probe_art_api_auth", side_effect=fake_probe),
+        ):
+            response = self.client.get("/api/studio/art-api-auth-smoke")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "ready")
+        self.assertTrue(body["ready"])
+        self.assertEqual(body["authProbe"]["httpStatus"], 200)
+
     def test_generation_smoke_executes_dreamy_and_persists_accepted_evidence(self) -> None:
         import studio
 
@@ -901,6 +947,28 @@ class StudioApiTest(unittest.TestCase):
         art_auth = page_by_id["myshell-art"]["authStatus"]
         self.assertEqual(art_auth["status"], "auth_missing")
         self.assertEqual(art_auth["injectionStatus"], "error")
+
+    def test_health_accepts_myshell_cookies_file_without_exposing_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cookies_path = Path(tmp_dir) / "myshell-cookies.json"
+            cookies_path.write_text(
+                json.dumps([{"name": "ms_token", "value": "redacted", "domain": ".myshell.ai"}]),
+                encoding="utf-8",
+            )
+
+            with patch.dict(
+                os.environ,
+                {"MYSHELL_COOKIES": "", "MYSHELL_COOKIES_FILE": str(cookies_path)},
+                clear=False,
+            ):
+                health = self.client.get("/api/health")
+
+        self.assertEqual(health.status_code, 200)
+        myshell_cookies = health.json()["components"]["myshellCookies"]
+        self.assertEqual(myshell_cookies["status"], "ready")
+        self.assertEqual(myshell_cookies["mode"], "file-env")
+        self.assertEqual(myshell_cookies["source"], "MYSHELL_COOKIES_FILE")
+        self.assertNotIn(str(cookies_path), json.dumps(myshell_cookies))
 
     def test_health_reports_missing_myshell_art_ms_token_cookie(self) -> None:
         with patch.dict(

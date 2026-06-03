@@ -67,6 +67,38 @@ class RunTargetBotPreviewsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(entry["targetBotExecuted"])
         self.assertEqual(entry["execution"]["status"], "done")
 
+    async def test_art_api_executor_passes_target_metadata_and_input_values(self) -> None:
+        calls = []
+
+        async def fake_runner(**kwargs):
+            calls.append(kwargs)
+            return {
+                "status": "done",
+                "output_url": "https://cdn.example/brat-api.png",
+                "task_id": "api-job-1",
+                "executor": "myshell-art-api",
+            }
+
+        report = await run_target.run_preview_batch(
+            slugs=["brat-generator"],
+            runner=fake_runner,
+            include_dreamy=False,
+            executor_mode="art-api",
+            public_metadata_resolver=lambda _slug: {
+                "targetBotId": "1751532766",
+                "targetSlugId": "brat-generator",
+                "template": "template1",
+                "buttonText": "Generate Brat Cover",
+            },
+        )
+
+        self.assertEqual(calls[0]["target_bot_id"], "1751532766")
+        self.assertEqual(calls[0]["input_values"], [report["previews"]["brat-generator"]["prompt"]])
+        entry = report["previews"]["brat-generator"]
+        self.assertEqual(entry["source"], "myshell-target-bot-api")
+        self.assertEqual(entry["execution"]["executor"], "myshell-art-api")
+        self.assertEqual(entry["execution"]["targetBotId"], "1751532766")
+
     async def test_failed_target_run_does_not_mark_executed(self) -> None:
         async def fake_runner(**_kwargs):
             return {"status": "error", "message": "Generate button not found"}
