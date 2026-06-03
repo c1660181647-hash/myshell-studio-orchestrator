@@ -81,6 +81,312 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(project["selectedSegmentId"], execution["segmentId"])
         self.assertEqual(project["jobs"][0]["jobId"], execution["jobId"])
 
+    def test_run_stream_preserves_manual_dreamy_bot_id_for_client_execution(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={
+                "message": "manual bot id should drive generation",
+                "mode": "player",
+                "action": "generate",
+                "page_id": "dreamy-miniapp",
+                "bot_id": "manual_bot_123",
+                "bot_slug": "manual-slug",
+                "bot_name": "Manual Bot",
+                "bot_type": "text-to-image",
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        execution = next(payload for name, payload in events if name == "execution_request")
+        self.assertEqual(execution["executor"], "client")
+        self.assertEqual(execution["botId"], "manual_bot_123")
+        self.assertEqual(execution["botSlug"], "manual-slug")
+        self.assertEqual(execution["botName"], "Manual Bot")
+        self.assertEqual(execution["segment"]["botId"], "manual_bot_123")
+
+        project = next(payload["project"] for name, payload in events if name == "project")
+        self.assertEqual(project["segments"][0]["botId"], "manual_bot_123")
+        self.assertEqual(project["jobs"][0]["botId"], "manual_bot_123")
+
+    def test_run_stream_manual_bot_id_server_adapter_skips_slug_lookup(self) -> None:
+        import studio
+
+        calls: list[tuple[str, dict]] = []
+
+        async def fake_dreamy_request(endpoint: str, body: dict, init_data: str) -> dict:
+            calls.append((endpoint, body))
+            self.assertEqual(init_data, "query_id=server-auth")
+            if endpoint.endswith("/get-by-slug"):
+                raise AssertionError("manual bot_id should not require get-by-slug")
+            if endpoint.endswith("/generate"):
+                return {"outputJobId": "manual_dreamy_job", "queuePosition": 0}
+            if endpoint.endswith("/generate/result"):
+                return {
+                    "tasks": [
+                        {
+                            "status": "done",
+                            "jobId": "manual_dreamy_job",
+                            "result": json.dumps(
+                                {
+                                    "outputImg": "https://cdn.example.test/manual.mp4",
+                                    "outputPreview": "https://cdn.example.test/manual-poster.jpg",
+                                }
+                            ),
+                        }
+                    ]
+                }
+            raise AssertionError(endpoint)
+
+        with (
+            patch.dict(os.environ, {"DREAMY_TELEGRAM_INIT_DATA": "query_id=server-auth"}, clear=False),
+            patch.object(studio, "_dreamy_api_request", side_effect=fake_dreamy_request),
+            self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={
+                    "message": "run exact manual bot",
+                    "action": "extend",
+                    "page_id": "dreamy-miniapp",
+                    "bot_id": "manual_bot_server",
+                    "bot_slug": "manual-server-slug",
+                    "bot_name": "Manual Server Bot",
+                    "bot_type": "image-to-video",
+                },
+            ) as response,
+        ):
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        endpoints = [endpoint for endpoint, _body in calls]
+        self.assertNotIn("/v1/telegram/miniapp/dreamy/get-by-slug", endpoints)
+        generate_call = next(body for endpoint, body in calls if endpoint.endswith("/generate"))
+        self.assertEqual(generate_call["bot_id"], "manual_bot_server")
+        self.assertEqual(generate_call["article_id"], "manual-server-slug")
+
+        execution = next(payload for name, payload in events if name == "execution_request")
+        self.assertEqual(execution["executor"], "server")
+        self.assertEqual(execution["botId"], "manual_bot_server")
+
+        final_job = [payload["job"] for name, payload in events if name == "job"][-1]
+        self.assertEqual(final_job["status"], "done")
+        self.assertEqual(final_job["botId"], "manual_bot_server")
+        self.assertEqual(final_job["mediaUrl"], "https://cdn.example.test/manual.mp4")
+
+    def test_dreamyporn_web_cookies_make_dreamy_server_ready(self) -> None:
+        import studio_runtime
+
+        cookies = [
+            {
+                "name": "ms_token",
+                "value": "web-cookie-token",
+                "domain": ".dreamyporn.ai",
+                "path": "/",
+            }
+        ]
+        with patch.dict(os.environ, {"MYSHELL_COOKIES": json.dumps(cookies)}, clear=True):
+            status = studio_runtime.dreamy_api_auth_status()
+            live = studio_runtime.live_generation_status(
+                credential_setup={"status": "needs_configuration", "missingEnv": ["DREAMY_TELEGRAM_INIT_DATA"]},
+                cookie_source=studio_runtime.cookie_source_status(),
+            )
+
+        self.assertEqual(status["status"], "ready")
+        self.assertEqual(status["mode"], "dreamyporn-web-cookies")
+        self.assertEqual(live["status"], "ready")
+        self.assertEqual(live["checks"]["dreamyServer"]["status"], "ready")
+
+    def test_run_stream_manual_bot_id_uses_dreamyporn_web_when_cookie_ready(self) -> None:
+        import studio
+
+        calls: list[tuple[str, dict]] = []
+
+        async def fake_input_images(**_kwargs) -> list[str]:
+            return ["https://cdn.example.test/source.png"]
+
+        async def fake_web_request(endpoint: str, body: dict) -> dict:
+            calls.append((endpoint, body))
+            if endpoint.endswith("/generate"):
+                self.assertEqual(body["botId"], "1779936515")
+                self.assertEqual(body["articleId"], "ai-oil-massage")
+                self.assertEqual(body["inputImg"], ["https://cdn.example.test/source.png"])
+                return {"outputJobId": "web_dreamy_job"}
+            if endpoint.endswith("/generate_result"):
+                return {
+                    "tasks": [
+                        {
+                            "status": "done",
+                            "jobId": "web_dreamy_job",
+                            "queuePosition": "0",
+                            "result": {
+                                "outputImg": "https://cdn.example.test/web-dreamy.mp4",
+                                "outputPreview": "https://cdn.example.test/web-dreamy-preview.mp4",
+                                "outputPoster": "https://cdn.example.test/web-dreamy-poster.jpg",
+                            },
+                        }
+                    ]
+                }
+            raise AssertionError(endpoint)
+
+        ready_auth = {
+            "status": "ready",
+            "mode": "dreamyporn-web-cookies",
+            "message": "ready",
+        }
+        with (
+            patch.object(studio, "dreamy_init_data", return_value=""),
+            patch.object(studio, "dreamyporn_web_cookie_status", return_value=ready_auth),
+            patch.object(studio, "adapter_auth_status", return_value=ready_auth),
+            patch.object(studio, "_dreamyporn_web_input_images", side_effect=fake_input_images),
+            patch.object(studio, "_dreamyporn_web_request", side_effect=fake_web_request),
+            self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={
+                    "message": "run DreamyPorn web bot",
+                    "action": "generate",
+                    "page_id": "dreamy-miniapp",
+                    "bot_id": "1779936515",
+                    "bot_slug": "ai-oil-massage",
+                    "bot_name": "AI Oil Massage",
+                    "bot_type": "image-to-video",
+                    "article_id": "ai-oil-massage",
+                },
+            ) as response,
+        ):
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        endpoints = [endpoint for endpoint, _body in calls]
+        self.assertIn("/v1/homepage/porn/generate", endpoints)
+        self.assertIn("/v1/homepage/porn/generate_result", endpoints)
+        execution = next(payload for name, payload in events if name == "execution_request")
+        self.assertEqual(execution["executor"], "server")
+        self.assertEqual(execution["botId"], "1779936515")
+
+        final_job = [payload["job"] for name, payload in events if name == "job"][-1]
+        self.assertEqual(final_job["status"], "done")
+        self.assertEqual(final_job["taskId"], "web_dreamy_job")
+        self.assertEqual(final_job["mediaUrl"], "https://cdn.example.test/web-dreamy.mp4")
+        self.assertEqual(final_job["evidence"]["executor"], "dreamyporn-web")
+
+    def test_run_stream_accepts_manual_bot_sequence_as_continuous_segments(self) -> None:
+        sequence = [
+            {
+                "botId": "manual_image_bot",
+                "botSlug": "manual-image",
+                "botName": "Manual Image Bot",
+                "botType": "text-to-image",
+                "action": "generate",
+            },
+            {
+                "botId": "manual_video_bot",
+                "botSlug": "manual-video",
+                "botName": "Manual Video Bot",
+                "botType": "image-to-video",
+                "action": "extend",
+            },
+        ]
+        with self.client.stream(
+            "POST",
+            "/api/studio/run",
+            data={
+                "message": "make a two step manual chain",
+                "mode": "player",
+                "action": "generate",
+                "page_id": "dreamy-miniapp",
+                "bot_sequence": json.dumps(sequence),
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        executions = [payload for name, payload in events if name == "execution_request"]
+        self.assertEqual(len(executions), 2)
+        self.assertEqual([item["botId"] for item in executions], ["manual_image_bot", "manual_video_bot"])
+        self.assertEqual([item["action"] for item in executions], ["generate", "extend"])
+        self.assertIsNone(executions[0]["segment"].get("parentSegmentId"))
+        self.assertEqual(executions[1]["segment"].get("parentSegmentId"), executions[0]["segmentId"])
+
+        project = next(payload["project"] for name, payload in events if name == "project")
+        self.assertEqual(len(project["segments"]), 2)
+        self.assertEqual(project["selectedSegmentId"], executions[1]["segmentId"])
+        self.assertEqual(project["segments"][1]["parentSegmentId"], executions[0]["segmentId"])
+        self.assertEqual([job["botId"] for job in project["jobs"]], ["manual_image_bot", "manual_video_bot"])
+
+    def test_run_stream_executes_manual_bot_sequence_when_dreamy_server_is_ready(self) -> None:
+        import studio
+
+        sequence = [
+            {
+                "botId": "manual_image_bot",
+                "botSlug": "manual-image",
+                "botName": "Manual Image Bot",
+                "botType": "text-to-image",
+                "action": "generate",
+            },
+            {
+                "botId": "manual_video_bot",
+                "botSlug": "manual-video",
+                "botName": "Manual Video Bot",
+                "botType": "image-to-video",
+                "action": "extend",
+            },
+        ]
+        generate_calls: list[dict] = []
+
+        async def fake_dreamy_request(endpoint: str, body: dict, init_data: str) -> dict:
+            self.assertEqual(init_data, "query_id=server-auth")
+            if endpoint.endswith("/get-by-slug"):
+                raise AssertionError("manual sequence bot ids should not require slug lookup")
+            if endpoint.endswith("/generate"):
+                generate_calls.append(body)
+                return {"outputJobId": f"{body['bot_id']}_job"}
+            if endpoint.endswith("/generate/result"):
+                output_job_id = body["output_job_id"]
+                return {
+                    "tasks": [
+                        {
+                            "status": "done",
+                            "jobId": output_job_id,
+                            "result": json.dumps(
+                                {
+                                    "outputImg": f"https://cdn.example.test/{output_job_id}.mp4",
+                                    "outputPreview": f"https://cdn.example.test/{output_job_id}-poster.jpg",
+                                }
+                            ),
+                        }
+                    ]
+                }
+            raise AssertionError(endpoint)
+
+        with (
+            patch.dict(os.environ, {"DREAMY_TELEGRAM_INIT_DATA": "query_id=server-auth"}, clear=False),
+            patch.object(studio, "_dreamy_api_request", side_effect=fake_dreamy_request),
+            self.client.stream(
+                "POST",
+                "/api/studio/run",
+                data={
+                    "message": "run two real manual steps",
+                    "mode": "player",
+                    "action": "generate",
+                    "page_id": "dreamy-miniapp",
+                    "bot_sequence": json.dumps(sequence),
+                },
+            ) as response,
+        ):
+            self.assertEqual(response.status_code, 200)
+            events = _sse_events("".join(response.iter_text()))
+
+        final_jobs = [payload["job"] for name, payload in events if name == "job" and payload["job"]["status"] == "done"]
+        self.assertEqual(len(final_jobs), 2)
+        self.assertEqual([job["botId"] for job in final_jobs], ["manual_image_bot", "manual_video_bot"])
+        self.assertEqual(len(generate_calls), 2)
+        self.assertEqual(generate_calls[0]["bot_id"], "manual_image_bot")
+        self.assertEqual(generate_calls[1]["bot_id"], "manual_video_bot")
+        self.assertEqual(generate_calls[1]["input_img"][0], "https://cdn.example.test/manual_image_bot_job.mp4")
+
     def test_client_result_updates_existing_segment(self) -> None:
         with self.client.stream(
             "POST",
@@ -689,6 +995,107 @@ class StudioApiTest(unittest.TestCase):
         requirements = {item["id"]: item for item in audit.json()["requirements"]}
         self.assertEqual(requirements["live-generation-smoke"]["status"], "ready")
         self.assertTrue(requirements["live-generation-smoke"]["evidence"]["latest"]["accepted"])
+
+    def test_dreamy_workshop_smoke_reports_missing_credentials_without_running(self) -> None:
+        import studio
+
+        called = False
+
+        async def fake_dreamy_request(endpoint: str, body: dict, init_data: str) -> dict:
+            nonlocal called
+            called = True
+            raise AssertionError(endpoint)
+
+        async def fake_runtime_health(store_path: str) -> dict:
+            return {
+                "status": "needs_configuration",
+                "components": {
+                    "liveGeneration": {
+                        "status": "needs_configuration",
+                        "checks": {"dreamyServer": {"status": "auth_missing"}},
+                    }
+                },
+            }
+
+        with (
+            patch.object(studio, "_dreamy_api_request", side_effect=fake_dreamy_request),
+            patch.object(studio, "runtime_health", side_effect=fake_runtime_health),
+        ):
+            response = self.client.post("/api/studio/dreamy-workshop-smoke", json={"execute": True})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "needs_configuration")
+        self.assertEqual(body["count"], 0)
+        self.assertFalse(called)
+
+    def test_dreamy_workshop_smoke_executes_all_seed_bots_and_chains_video_source(self) -> None:
+        import studio
+        from bot_previews import DREAMY_BOTS
+
+        calls: list[tuple[str, dict]] = []
+
+        async def fake_dreamy_request(endpoint: str, body: dict, init_data: str) -> dict:
+            calls.append((endpoint, body))
+            self.assertEqual(init_data, "query_id=server-auth")
+            if endpoint.endswith("/get-by-slug"):
+                slug = body["slug_id"]
+                return {"info": {"botId": f"bot_{slug}", "slugId": slug}}
+            if endpoint.endswith("/generate"):
+                slug = str(body["bot_id"]).replace("bot_", "", 1)
+                return {"outputJobId": f"job_{slug}"}
+            if endpoint.endswith("/generate/result"):
+                output_job_id = body["output_job_id"]
+                return {
+                    "tasks": [
+                        {
+                            "status": "done",
+                            "jobId": output_job_id,
+                            "result": json.dumps(
+                                {
+                                    "outputImg": f"https://cdn.example.test/{output_job_id}.mp4",
+                                    "outputPreview": f"https://cdn.example.test/{output_job_id}-poster.jpg",
+                                }
+                            ),
+                        }
+                    ]
+                }
+            raise AssertionError(endpoint)
+
+        async def fake_runtime_health(store_path: str) -> dict:
+            return {
+                "status": "ok",
+                "components": {
+                    "liveGeneration": {
+                        "status": "ready",
+                        "checks": {"dreamyServer": {"status": "ready"}},
+                    }
+                },
+            }
+
+        with (
+            patch.dict(os.environ, {"DREAMY_TELEGRAM_INIT_DATA": "query_id=server-auth"}, clear=False),
+            patch.object(studio, "_dreamy_api_request", side_effect=fake_dreamy_request),
+            patch.object(studio, "runtime_health", side_effect=fake_runtime_health),
+        ):
+            response = self.client.post(
+                "/api/studio/dreamy-workshop-smoke",
+                json={"execute": True, "prompt": "workshop smoke prompt"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "done")
+        self.assertEqual(body["count"], len(DREAMY_BOTS))
+        self.assertEqual(body["acceptedCount"], len(DREAMY_BOTS))
+        self.assertEqual(body["botSlugs"], [bot["slug"] for bot in DREAMY_BOTS])
+        self.assertEqual(len(body["project"]["segments"]), len(DREAMY_BOTS))
+
+        get_slug_calls = [call_body["slug_id"] for endpoint, call_body in calls if endpoint.endswith("/get-by-slug")]
+        self.assertEqual(get_slug_calls, [bot["slug"] for bot in DREAMY_BOTS])
+        generate_calls = [call_body for endpoint, call_body in calls if endpoint.endswith("/generate")]
+        aurora_generate = next(call for call in generate_calls if call["bot_id"] == "bot_aurora-dusk")
+        self.assertEqual(aurora_generate["input_img"][0], "https://cdn.example.test/job_scarlet-bloom.mp4")
 
     def test_dreamy_server_auth_status_uses_configured_init_data(self) -> None:
         with patch.dict(os.environ, {"DREAMY_TELEGRAM_INIT_DATA": "query_id=server-auth"}, clear=False):

@@ -16,6 +16,8 @@ COOKIE_FILE_ENV = "MYSHELL_COOKIES_FILE"
 DREAMY_INIT_DATA_ENV_NAMES = ("DREAMY_TELEGRAM_INIT_DATA", "MYSHELL_DREAMY_INIT_DATA")
 DREAMY_DEFAULT_API_BASE_URL = "https://api.myshell.fun"
 MYSHELL_ART_REQUIRED_COOKIE_NAMES = ("ms_token",)
+DREAMYPORN_WEB_REQUIRED_COOKIE_NAMES = ("ms_token",)
+DREAMYPORN_WEB_DOMAIN_FRAGMENT = "dreamyporn.ai"
 SECRET_BINDINGS = (
     {
         "env": "DREAMY_TELEGRAM_INIT_DATA",
@@ -113,6 +115,49 @@ def cookie_source_payload() -> list[dict[str, Any]]:
     return []
 
 
+def dreamyporn_web_cookie_status() -> dict[str, Any]:
+    source = cookie_source_status()
+    if source.get("status") != "ready":
+        return {
+            "status": source.get("status") or "auth_missing",
+            "mode": source.get("mode") or "env-or-file",
+            "message": str(source.get("message") or "DreamyPorn web cookies are not configured"),
+            "cookieCount": source.get("cookieCount", 0),
+            "missingCookieNames": list(DREAMYPORN_WEB_REQUIRED_COOKIE_NAMES),
+        }
+    try:
+        payload = cookie_source_payload()
+    except Exception as exc:
+        return {
+            "status": "error",
+            "mode": source.get("mode") or "env-or-file",
+            "message": f"DreamyPorn cookies could not be read: {exc}",
+            "cookieCount": 0,
+            "missingCookieNames": list(DREAMYPORN_WEB_REQUIRED_COOKIE_NAMES),
+        }
+    domain_cookies = [
+        cookie
+        for cookie in payload
+        if isinstance(cookie, dict) and DREAMYPORN_WEB_DOMAIN_FRAGMENT in str(cookie.get("domain") or "")
+    ]
+    names = sorted({str(cookie.get("name") or "") for cookie in domain_cookies if cookie.get("name")})
+    missing = [name for name in DREAMYPORN_WEB_REQUIRED_COOKIE_NAMES if name not in names]
+    return {
+        "status": "ready" if domain_cookies and not missing else "auth_missing",
+        "mode": source.get("mode") or "env-or-file",
+        "source": source.get("source", ""),
+        "cookieCount": len(domain_cookies),
+        "cookieNames": names,
+        "requiredCookieNames": list(DREAMYPORN_WEB_REQUIRED_COOKIE_NAMES),
+        "missingCookieNames": missing,
+        "message": (
+            "DreamyPorn web cookies are configured; Studio can call api.dreamyporn.ai directly."
+            if domain_cookies and not missing
+            else "DreamyPorn web cookies are missing required login cookies."
+        ),
+    }
+
+
 def cookie_source_status() -> dict[str, Any]:
     env = os.environ.get("MYSHELL_COOKIES")
     if env:
@@ -178,6 +223,10 @@ def dreamy_api_base_url() -> str:
     return (os.environ.get("DREAMY_API_BASE_URL") or DREAMY_DEFAULT_API_BASE_URL).rstrip("/")
 
 
+def dreamyporn_web_api_base_url() -> str:
+    return (os.environ.get("DREAMYPORN_API_BASE_URL") or "https://api.dreamyporn.ai").rstrip("/")
+
+
 def dreamy_api_auth_status() -> dict[str, Any]:
     configured_env = next((name for name in DREAMY_INIT_DATA_ENV_NAMES if os.environ.get(name)), "")
     if dreamy_init_data():
@@ -187,6 +236,16 @@ def dreamy_api_auth_status() -> dict[str, Any]:
             "message": "Server-side Dreamy init data is configured; Studio can run Dreamy generation from the backend.",
             "source": configured_env,
             "baseUrl": dreamy_api_base_url(),
+        }
+    web_cookie_status = dreamyporn_web_cookie_status()
+    if web_cookie_status.get("status") == "ready":
+        return {
+            "status": "ready",
+            "mode": "dreamyporn-web-cookies",
+            "message": "DreamyPorn web cookies are configured; Studio can run Dreamy generation from the backend.",
+            "source": web_cookie_status.get("source", ""),
+            "cookieCount": web_cookie_status.get("cookieCount", 0),
+            "baseUrl": dreamyporn_web_api_base_url(),
         }
     return {
         "status": "client_delegated",
@@ -276,16 +335,16 @@ def live_generation_status(
             "message": "Chrome CDP is reachable" if cdp_ready else "Chrome CDP is not reachable",
             "required": True,
         }
-    if missing_env:
-        return {
-            "status": "needs_configuration",
-            "mode": "live-generation-smoke",
-            "endpoint": "/api/studio/generation-smoke",
-            "message": "Live generation smoke needs Cloud Run secrets before it can prove real media output.",
-            "missingEnv": missing_env,
-            "checks": checks,
-        }
     if dreamy_auth.get("status") != "ready":
+        if missing_env:
+            return {
+                "status": "needs_configuration",
+                "mode": "live-generation-smoke",
+                "endpoint": "/api/studio/generation-smoke",
+                "message": "Live generation smoke needs Cloud Run secrets or DreamyPorn web cookies before it can prove real media output.",
+                "missingEnv": missing_env,
+                "checks": checks,
+            }
         return {
             "status": "auth_missing",
             "mode": "live-generation-smoke",
@@ -312,6 +371,7 @@ def live_generation_status(
         "mode": "live-generation-smoke",
         "endpoint": "/api/studio/generation-smoke",
         "message": "Live Dreamy generation and MyShell Art authentication prerequisites are ready to verify.",
+        "missingEnv": missing_env,
         "checks": checks,
     }
 
@@ -422,7 +482,7 @@ async def runtime_health(store_path: str) -> dict[str, Any]:
         not storage_ready
         or not cdp_ready
         or str(injection_status.get("status") or "") in {"auth_missing", "error", "pending", "captcha_required"}
-        or credential_setup.get("status") == "needs_configuration"
+        or generation_status.get("status") != "ready"
     )
     overall = "degraded" if degraded_component else "ok"
     return {

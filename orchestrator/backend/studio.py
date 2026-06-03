@@ -24,7 +24,16 @@ from bot_catalog import MYSHELL_BOTS, get_bot_by_slug
 from bot_previews import DREAMY_BOTS, get_dreamy_bot_by_slug, list_bot_previews
 import myshell_art_api
 from studio_registry import get_page, list_studio_agents, list_studio_pages, page_for_dispatch
-from studio_runtime import adapter_auth_status, cookie_source_status, dreamy_api_base_url, dreamy_init_data, runtime_health
+from studio_runtime import (
+    adapter_auth_status,
+    cookie_source_payload,
+    cookie_source_status,
+    dreamy_api_base_url,
+    dreamy_init_data,
+    dreamyporn_web_api_base_url,
+    dreamyporn_web_cookie_status,
+    runtime_health,
+)
 from studio_store import STUDIO_STORE
 
 try:
@@ -2754,9 +2763,11 @@ async def _dispatch_preview(
     project_id: str | None = None,
     source_segment_id: str | None = None,
     has_image: bool = False,
+    bot_id: str | None = None,
     bot_slug: str | None = None,
     bot_name: str | None = None,
     bot_type: str | None = None,
+    article_id: str | None = None,
 ) -> dict[str, Any]:
     normalized_action = _normalize_action(action)
     preferred_page = get_page(page_id)
@@ -2775,8 +2786,15 @@ async def _dispatch_preview(
     source_segment = _resolve_source_segment(project, source_segment_id)
     resolved_source_segment_id = source_segment.get("id") if source_segment else source_segment_id
     route = (
-        _dreamy_bot_route(bot_slug=bot_slug, bot_name=bot_name, bot_type=bot_type, message=prompt)
-        if page_id == "dreamy-miniapp" and bot_slug
+        _dreamy_bot_route(
+            bot_id=bot_id,
+            bot_slug=bot_slug,
+            bot_name=bot_name,
+            bot_type=bot_type,
+            article_id=article_id,
+            message=prompt,
+        )
+        if page_id == "dreamy-miniapp" and (bot_slug or bot_id)
         else None
     )
     if route is None:
@@ -2967,17 +2985,21 @@ def _slug_from_dreamy_goto_link(goto_link: str) -> str:
 
 def _dreamy_bot_route(
     *,
+    bot_id: str | None = None,
     bot_slug: str | None,
     bot_name: str | None = None,
     bot_type: str | None = None,
+    article_id: str | None = None,
     message: str = "",
 ) -> dict[str, Any] | None:
-    slug = (bot_slug or "").strip()
+    explicit_bot_id = (bot_id or "").strip()
+    slug = (bot_slug or explicit_bot_id).strip()
     if not slug:
         return None
     seed = get_dreamy_bot_by_slug(slug) or {}
     resolved_type = _normalize_dreamy_bot_type(bot_type or seed.get("type"))
-    name = (bot_name or seed.get("name") or slug).strip()
+    name = (bot_name or seed.get("name") or explicit_bot_id or slug).strip()
+    resolved_article_id = (article_id or slug).strip()
     description = str(seed.get("desc") or "Selected from the Dreamy miniapp bot catalog.")
     return {
         "intent": "image-to-video" if resolved_type == "image-to-video" else "text-to-image",
@@ -2985,15 +3007,74 @@ def _dreamy_bot_route(
         "optimizedPrompt": message or "Create a polished Dreamy media segment.",
         "reason": "Pinned by the left-side Dreamy bot selection.",
         "bot": {
+            "id": explicit_bot_id,
             "slug": slug,
             "name": name,
             "type": resolved_type,
+            "articleId": resolved_article_id,
             "rating": seed.get("rating", 4.6),
             "description": description,
             "pageUrl": f"/bot?slug_id={quote(slug)}",
         },
         "executor": "client",
     }
+
+
+def _manual_bot_sequence_items(bot_sequence: str | None, default_action: str) -> list[dict[str, str]]:
+    raw = (bot_sequence or "").strip()
+    if not raw:
+        return []
+    parsed: Any
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = [item for item in re.split(r"[\s,]+", raw) if item]
+    if isinstance(parsed, dict):
+        parsed = parsed.get("bots") or parsed.get("sequence") or parsed.get("items") or []
+    if not isinstance(parsed, list):
+        return []
+
+    items: list[dict[str, str]] = []
+    for index, item in enumerate(parsed[:12]):
+        if isinstance(item, str):
+            item_data: dict[str, Any] = {"botId": item, "botSlug": item}
+        elif isinstance(item, dict):
+            item_data = item
+        else:
+            continue
+        bot_id = str(item_data.get("botId") or item_data.get("bot_id") or item_data.get("id") or "").strip()
+        bot_slug = str(item_data.get("botSlug") or item_data.get("bot_slug") or item_data.get("slug") or bot_id).strip()
+        if not bot_id and not bot_slug:
+            continue
+        bot_name = str(
+            item_data.get("botName")
+            or item_data.get("bot_name")
+            or item_data.get("name")
+            or bot_slug
+            or bot_id
+        ).strip()
+        bot_type = str(item_data.get("botType") or item_data.get("bot_type") or item_data.get("type") or "").strip()
+        article_id = str(
+            item_data.get("articleId")
+            or item_data.get("article_id")
+            or item_data.get("article")
+            or bot_slug
+            or bot_id
+        ).strip()
+        action = _normalize_action(str(item_data.get("action") or ("extend" if index else default_action)))
+        prompt = str(item_data.get("prompt") or item_data.get("message") or "").strip()
+        items.append(
+            {
+                "botId": bot_id,
+                "botSlug": bot_slug,
+                "botName": bot_name,
+                "botType": bot_type,
+                "articleId": article_id,
+                "action": action,
+                "prompt": prompt,
+            }
+        )
+    return items
 
 
 def _keyword_route(message: str, has_image: bool, action: str) -> dict[str, Any]:
@@ -3133,7 +3214,10 @@ def _evidence(
 
 
 def _sync_project_jobs(project: StudioProject) -> None:
-    project["jobs"] = [_job_with_evidence(job) for job in STUDIO_STORE.list_jobs(project["projectId"])]
+    segment_order = {str(segment.get("id") or ""): index for index, segment in enumerate(project.get("segments", []))}
+    jobs = [_job_with_evidence(job) for job in STUDIO_STORE.list_jobs(project["projectId"])]
+    jobs.sort(key=lambda job: segment_order.get(str(job.get("segmentId") or ""), len(segment_order)))
+    project["jobs"] = jobs
     _save_project(project)
 
 
@@ -3395,6 +3479,7 @@ def _timeline_segment_manifest(segment: StudioSegment, index: int) -> dict[str, 
         "status": segment.get("status") or "",
         "prompt": segment.get("prompt") or "",
         "action": segment.get("action") or "",
+        "botId": segment.get("botId") or "",
         "botName": segment.get("botName") or "",
         "botSlug": segment.get("botSlug") or "",
         "taskId": segment.get("taskId") or "",
@@ -3548,6 +3633,15 @@ def _create_timeline_export(project: StudioProject, segment_ids: list[str] | Non
 
 
 DREAMY_API_PREFIX = "/v1/telegram/miniapp/dreamy"
+DREAMYPORN_WEB_GENERATE_PREFIX = "/v1/homepage/porn"
+DREAMYPORN_UPLOAD_PREFIX = "/v1/resource"
+DREAMYPORN_COOKIE_DOMAIN_FRAGMENT = "dreamyporn.ai"
+DREAMYPORN_UPLOAD_CONTENT_TYPES = {
+    "image/png": 3,
+    "image/jpeg": 4,
+    "image/jpg": 4,
+    "image/webp": 12,
+}
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 100) -> int:
@@ -3590,6 +3684,322 @@ async def _dreamy_api_request(endpoint: str, body: dict[str, Any], init_data: st
     return payload if isinstance(payload, dict) else {"data": payload}
 
 
+def _dreamyporn_timestamp(now_ms: int) -> int:
+    base = (now_ms - now_ms % 10) // 10
+    alternate = False
+    checksum = 0
+    value = base
+    while value:
+        digit = value % 10
+        checksum += (5 if alternate else 2) * digit
+        value = (value - digit) // 10
+        alternate = not alternate
+    return 10 * base + checksum % 10
+
+
+def _dreamyporn_cookie_header() -> str:
+    cookies = cookie_source_payload()
+    return "; ".join(
+        f"{cookie.get('name')}={cookie.get('value')}"
+        for cookie in cookies
+        if isinstance(cookie, dict)
+        and cookie.get("name")
+        and cookie.get("value") is not None
+        and DREAMYPORN_COOKIE_DOMAIN_FRAGMENT in str(cookie.get("domain") or "")
+    )
+
+
+async def _dreamyporn_web_request(endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
+    cookie_header = _dreamyporn_cookie_header()
+    if not cookie_header:
+        raise RuntimeError("DreamyPorn web cookies are missing; no external generation request was sent.")
+    timeout = _env_float("DREAMYPORN_API_TIMEOUT_SECONDS", 30.0, minimum=1.0, maximum=120.0)
+    url = f"{dreamyporn_web_api_base_url()}{endpoint}"
+    now_ms = int(datetime.now(UTC).timestamp() * 1000)
+    headers = {
+        "Content-Type": "application/json",
+        "myshell-service-name": "organics-api",
+        "platform": "web",
+        "version": "1.0.0",
+        "Accept-Language": os.environ.get("DREAMY_ACCEPT_LANGUAGE") or "en",
+        "myshell-client-version": os.environ.get("DREAMYPORN_CLIENT_VERSION") or "v1.6.4",
+        "timestamp": str(_dreamyporn_timestamp(now_ms)),
+        "Cookie": cookie_header,
+    }
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(url, headers=headers, json=body)
+    text = response.text
+    if response.status_code >= 400:
+        message = text[:500] if text else response.reason_phrase
+        raise RuntimeError(f"DreamyPorn web API {response.status_code} {endpoint}: {message}")
+    if not text.strip():
+        return {}
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise RuntimeError(f"DreamyPorn web API returned invalid JSON for {endpoint}: {exc}") from exc
+    return payload if isinstance(payload, dict) else {"data": payload}
+
+
+def _dreamyporn_default_input_image_file() -> Path | None:
+    configured = os.environ.get("DREAMYPORN_DEFAULT_INPUT_IMAGE_FILE")
+    candidates = [Path(configured)] if configured else []
+    backend_path = Path(__file__).resolve()
+    candidates.extend(
+        [
+            backend_path.parents[2] / "frontend" / "public" / "generated" / "bot-previews" / "seedance-free.jpg",
+            backend_path.parents[2] / "frontend" / "dist" / "generated" / "bot-previews" / "seedance-free.jpg",
+            Path("/app/frontend/dist/generated/bot-previews/seedance-free.jpg"),
+        ]
+    )
+    return next((path for path in candidates if path and path.exists()), None)
+
+
+def _guess_image_content_type(filename: str, fallback: str = "image/jpeg") -> str:
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".png":
+        return "image/png"
+    if suffix == ".webp":
+        return "image/webp"
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    return fallback
+
+
+async def _dreamyporn_upload_image(
+    image_bytes: bytes,
+    *,
+    filename: str,
+    content_type: str,
+) -> str:
+    content_type = content_type or _guess_image_content_type(filename)
+    content_type_id = DREAMYPORN_UPLOAD_CONTENT_TYPES.get(content_type, DREAMYPORN_UPLOAD_CONTENT_TYPES["image/jpeg"])
+    presign = await _dreamyporn_web_request(
+        f"{DREAMYPORN_UPLOAD_PREFIX}/get_put_object_pre_sign_url",
+        {
+            "file_info": {
+                "scenario": 19,
+                "content_type": content_type_id,
+                "file_name": filename or "studio-source.jpg",
+                "content_length": str(len(image_bytes)),
+            }
+        },
+    )
+    upload_url = str(presign.get("uploadUrl") or presign.get("upload_url") or "")
+    object_access_url = str(presign.get("objectAccessUrl") or presign.get("object_access_url") or "")
+    expires_at = str(presign.get("expiresAt") or presign.get("expires_at") or "")
+    presign_content_type = str(presign.get("contentType") or presign.get("content_type") or content_type)
+    if not upload_url or not object_access_url:
+        raise RuntimeError("DreamyPorn upload presign response did not include uploadUrl/objectAccessUrl")
+    headers = {"Content-Type": presign_content_type}
+    if expires_at:
+        headers["Expires"] = expires_at
+    async with httpx.AsyncClient(timeout=_env_float("DREAMYPORN_UPLOAD_TIMEOUT_SECONDS", 60.0, minimum=1.0, maximum=180.0)) as client:
+        response = await client.put(upload_url, headers=headers, content=image_bytes)
+    if response.status_code >= 400:
+        raise RuntimeError(f"DreamyPorn upload failed: HTTP {response.status_code}")
+    return object_access_url
+
+
+def _dreamyporn_source_media_url(source_segment: StudioSegment | None) -> str:
+    if not source_segment:
+        return ""
+    candidate = str(source_segment.get("url") or "")
+    if candidate.startswith("http") and ".mp4" not in candidate.lower():
+        return candidate
+    poster = str(source_segment.get("posterUrl") or "")
+    return poster if poster.startswith("http") else ""
+
+
+async def _dreamyporn_web_input_images(
+    *,
+    source_segment: StudioSegment | None,
+    input_image_bytes: bytes | None,
+    input_image_filename: str,
+    input_image_content_type: str,
+) -> list[str]:
+    source_url = _dreamyporn_source_media_url(source_segment)
+    if source_url:
+        return [source_url]
+    configured_url = os.environ.get("DREAMYPORN_DEFAULT_INPUT_IMAGE_URL", "").strip()
+    if configured_url:
+        return [configured_url]
+    if input_image_bytes:
+        return [
+            await _dreamyporn_upload_image(
+                input_image_bytes,
+                filename=input_image_filename or "studio-source.jpg",
+                content_type=input_image_content_type or _guess_image_content_type(input_image_filename),
+            )
+        ]
+    default_file = _dreamyporn_default_input_image_file()
+    if default_file:
+        return [
+            await _dreamyporn_upload_image(
+                default_file.read_bytes(),
+                filename=default_file.name,
+                content_type=_guess_image_content_type(default_file.name),
+            )
+        ]
+    raise RuntimeError("DreamyPorn web generation requires a source image, source segment, or DREAMYPORN_DEFAULT_INPUT_IMAGE_URL.")
+
+
+def _dreamyporn_web_task_media(result: dict[str, Any], output_job_id: str) -> dict[str, str]:
+    tasks = result.get("tasks") if isinstance(result.get("tasks"), list) else []
+    task = next(
+        (
+            candidate
+            for candidate in tasks
+            if isinstance(candidate, dict)
+            and str(candidate.get("jobId") or candidate.get("job_id") or candidate.get("taskId") or "") == output_job_id
+        ),
+        {},
+    )
+    parsed_result = _json_object(task.get("result"))
+    media_url = (
+        parsed_result.get("outputImg")
+        or parsed_result.get("output_img")
+        or parsed_result.get("outputPreview")
+        or parsed_result.get("output_preview")
+        or ""
+    )
+    poster_url = parsed_result.get("outputPoster") or parsed_result.get("output_poster") or parsed_result.get("outputPreview") or media_url or ""
+    task_status = str(task.get("status") or result.get("status") or "running")
+    queue_position = str(task.get("queuePosition") or task.get("queue_position") or "")
+    return {
+        "status": task_status,
+        "taskId": output_job_id,
+        "mediaUrl": str(media_url or ""),
+        "posterUrl": str(poster_url or ""),
+        "queuePosition": queue_position,
+    }
+
+
+async def _poll_dreamyporn_web_job_result(job: dict[str, Any]) -> tuple[dict[str, Any], StudioProject | None]:
+    project = _get_project(str(job.get("projectId") or ""))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    segment = _find_segment(project, str(job.get("segmentId") or ""))
+    if not segment:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    task_id = str(job.get("taskId") or segment.get("taskId") or "")
+    if not task_id:
+        raise HTTPException(status_code=409, detail="Dreamy job has no task id to poll")
+    auth_status = adapter_auth_status("dreamy-miniapp")
+    result = await _dreamyporn_web_request(f"{DREAMYPORN_WEB_GENERATE_PREFIX}/generate_result", {})
+    media = _dreamyporn_web_task_media(result, task_id)
+    job = _apply_dreamy_media_to_job(
+        project,
+        segment,
+        job,
+        media,
+        auth_status=auth_status,
+        message_prefix="DreamyPorn web poll.",
+    )
+    return job, project
+
+
+async def _run_dreamyporn_web_adapter(
+    *,
+    project: StudioProject,
+    segment: StudioSegment,
+    job: dict[str, Any],
+    route: dict[str, Any],
+    prompt: str,
+    source_segment: StudioSegment | None,
+    input_image_bytes: bytes | None = None,
+    input_image_filename: str = "",
+    input_image_content_type: str = "",
+) -> dict[str, Any]:
+    auth_status = adapter_auth_status("dreamy-miniapp")
+    if dreamyporn_web_cookie_status().get("status") != "ready":
+        segment["status"] = "auth_missing"
+        segment["authStatus"] = auth_status
+        segment["evidence"] = _evidence(
+            "auth_missing",
+            "dreamy-miniapp",
+            message="DreamyPorn web cookies are missing; no external generation request was sent.",
+        )
+        segment["updatedAt"] = now_iso()
+        job = _update_job(job, status="auth_missing", authStatus=auth_status, evidence=segment["evidence"])
+        _set_graph_status(project, route, segment)
+        _save_project(project)
+        _sync_project_jobs(project)
+        return job
+
+    bot_id = str(route["bot"].get("id") or route["bot"].get("botId") or job.get("botId") or segment.get("botId") or "").strip()
+    article_id = str(route["bot"].get("articleId") or job.get("articleId") or segment.get("articleId") or route["bot"].get("slug") or "").strip()
+    if not bot_id or not article_id:
+        raise RuntimeError("DreamyPorn web generation requires explicit botId and articleId from the selected Dreamy bot.")
+
+    segment["status"] = "running"
+    segment["authStatus"] = auth_status
+    segment["updatedAt"] = now_iso()
+    running_evidence = _evidence(
+        "running",
+        "dreamy-miniapp",
+        message="DreamyPorn web generation submitted from Studio.",
+    )
+    job = _update_job(job, status="running", authStatus=auth_status, evidence=running_evidence)
+    _set_graph_status(project, route, segment)
+    _save_project(project)
+    _sync_project_jobs(project)
+
+    input_images = await _dreamyporn_web_input_images(
+        source_segment=source_segment,
+        input_image_bytes=input_image_bytes,
+        input_image_filename=input_image_filename,
+        input_image_content_type=input_image_content_type,
+    )
+    response = await _dreamyporn_web_request(
+        f"{DREAMYPORN_WEB_GENERATE_PREFIX}/generate",
+        {
+            "botId": bot_id,
+            "inputImg": input_images,
+            "articleId": article_id,
+        },
+    )
+    output_job_id = str(response.get("outputJobId") or response.get("output_job_id") or "")
+    if not output_job_id:
+        raise RuntimeError("DreamyPorn web generate response did not include outputJobId")
+
+    poll_attempts = _env_int("DREAMY_SERVER_POLL_ATTEMPTS", 3, minimum=1, maximum=20)
+    poll_interval = _env_float("DREAMY_SERVER_POLL_INTERVAL_SECONDS", 0.75, minimum=0.0, maximum=30.0)
+    media: dict[str, str] = {"status": "running", "taskId": output_job_id, "mediaUrl": "", "posterUrl": ""}
+    for attempt in range(poll_attempts):
+        if attempt and poll_interval:
+            await asyncio.sleep(poll_interval)
+        result = await _dreamyporn_web_request(f"{DREAMYPORN_WEB_GENERATE_PREFIX}/generate_result", {})
+        media = _dreamyporn_web_task_media(result, output_job_id)
+        if media.get("mediaUrl") and media.get("status") in {"completed", "success", "done"}:
+            break
+
+    media["taskId"] = media.get("taskId") or output_job_id
+    job = _apply_dreamy_media_to_job(
+        project,
+        segment,
+        job,
+        media,
+        auth_status=auth_status,
+        message_prefix="DreamyPorn web submit.",
+    )
+    evidence = job.get("evidence") if isinstance(job.get("evidence"), dict) else {}
+    evidence.update(
+        {
+            "executor": "dreamyporn-web",
+            "articleId": article_id,
+            "botId": bot_id,
+            "queuePosition": media.get("queuePosition", ""),
+            "inputImageCount": len(input_images),
+        }
+    )
+    segment["evidence"] = evidence
+    job = _update_job(job, evidence=evidence)
+    _save_project(project)
+    _sync_project_jobs(project)
+    return job
+
+
 def _dreamy_floor_defaults() -> list[dict[str, str]]:
     return [
         {"title": "Celebrity Style", "floorUrl": "celeb-sex"},
@@ -3625,6 +4035,36 @@ def _dreamy_catalog_bot_from_image(item: dict[str, Any], floor: dict[str, Any]) 
 async def _dreamy_catalog_bots() -> tuple[list[dict[str, Any]], str]:
     init_data = dreamy_init_data()
     auth_status = adapter_auth_status("dreamy-miniapp")
+    if not init_data and dreamyporn_web_cookie_status().get("status") == "ready":
+        bots: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for floor in _dreamy_floor_defaults():
+            floor_url = str(floor.get("floorUrl") or "")
+            if not floor_url:
+                continue
+            try:
+                payload = await _dreamyporn_web_request(
+                    f"{DREAMYPORN_WEB_GENERATE_PREFIX}/explore",
+                    {"floorUrl": floor_url, "page": 1, "pageSize": 100},
+                )
+            except Exception:
+                continue
+            response_floors = payload.get("floors") if isinstance(payload.get("floors"), list) else []
+            for response_floor in response_floors:
+                if not isinstance(response_floor, dict):
+                    continue
+                images = response_floor.get("images") if isinstance(response_floor.get("images"), list) else []
+                merged_floor = {**floor, **response_floor}
+                for image in images:
+                    if not isinstance(image, dict):
+                        continue
+                    bot = _dreamy_catalog_bot_from_image(image, merged_floor)
+                    if not bot or bot["slug"] in seen:
+                        continue
+                    seen.add(bot["slug"])
+                    bots.append(bot)
+        return (bots or DREAMY_BOTS), "live-dreamyporn-web-explore" if bots else "seed-empty-web"
+
     if not init_data or auth_status.get("status") != "ready":
         return DREAMY_BOTS, "seed-auth-missing"
 
@@ -3786,6 +4226,7 @@ def _apply_dreamy_media_to_job(
     task_status = (media.get("status") or "running").lower()
     media_url = media.get("mediaUrl") or ""
     poster_url = media.get("posterUrl") or segment.get("posterUrl") or media_url
+    queue_position = media.get("queuePosition") or ""
 
     if media_url and task_status in {"completed", "success", "done"}:
         normalized_status = "done"
@@ -3824,6 +4265,11 @@ def _apply_dreamy_media_to_job(
         )
         job_patch = {"status": "running", "taskId": output_job_id, "posterUrl": poster_url}
 
+    if queue_position:
+        evidence["queuePosition"] = queue_position
+    if task_status:
+        evidence["rawTaskStatus"] = task_status
+
     evidence = _evidence_with_job_context(job, evidence)
     segment["status"] = normalized_status
     segment["taskId"] = output_job_id
@@ -3855,6 +4301,9 @@ async def _poll_dreamy_job_result(job: dict[str, Any]) -> tuple[dict[str, Any], 
 
     task_id = str(job.get("taskId") or segment.get("taskId") or "")
     auth_status = adapter_auth_status("dreamy-miniapp")
+    if not dreamy_init_data() and dreamyporn_web_cookie_status().get("status") == "ready":
+        return await _poll_dreamyporn_web_job_result(job)
+
     if not dreamy_init_data() or auth_status.get("status") != "ready":
         evidence = _evidence_with_job_context(
             job,
@@ -3904,9 +4353,25 @@ async def _run_dreamy_server_adapter(
     route: dict[str, Any],
     prompt: str,
     source_segment: StudioSegment | None,
+    input_image_bytes: bytes | None = None,
+    input_image_filename: str = "",
+    input_image_content_type: str = "",
 ) -> dict[str, Any]:
     init_data = dreamy_init_data()
     auth_status = adapter_auth_status("dreamy-miniapp")
+    if not init_data and dreamyporn_web_cookie_status().get("status") == "ready":
+        return await _run_dreamyporn_web_adapter(
+            project=project,
+            segment=segment,
+            job=job,
+            route=route,
+            prompt=prompt,
+            source_segment=source_segment,
+            input_image_bytes=input_image_bytes,
+            input_image_filename=input_image_filename,
+            input_image_content_type=input_image_content_type,
+        )
+
     if not init_data or auth_status.get("status") != "ready":
         segment["status"] = "auth_missing"
         segment["authStatus"] = auth_status
@@ -3935,11 +4400,22 @@ async def _run_dreamy_server_adapter(
     _save_project(project)
     _sync_project_jobs(project)
 
-    slug = route["bot"]["slug"]
-    detail = await _dreamy_api_request(f"{DREAMY_API_PREFIX}/get-by-slug", {"slug_id": slug}, init_data)
-    info = detail.get("info") if isinstance(detail.get("info"), dict) else {}
-    bot_id = str(info.get("botId") or info.get("bot_id") or slug)
-    article_id = str(info.get("slugId") or info.get("slug_id") or slug)
+    slug = str(route["bot"].get("slug") or "")
+    explicit_bot_id = str(
+        route["bot"].get("id")
+        or route["bot"].get("botId")
+        or job.get("botId")
+        or segment.get("botId")
+        or ""
+    ).strip()
+    if explicit_bot_id:
+        bot_id = explicit_bot_id
+        article_id = str(route["bot"].get("articleId") or job.get("articleId") or segment.get("articleId") or slug or bot_id)
+    else:
+        detail = await _dreamy_api_request(f"{DREAMY_API_PREFIX}/get-by-slug", {"slug_id": slug}, init_data)
+        info = detail.get("info") if isinstance(detail.get("info"), dict) else {}
+        bot_id = str(info.get("botId") or info.get("bot_id") or slug)
+        article_id = str(info.get("slugId") or info.get("slug_id") or slug)
     generate_body = {
         "bot_id": bot_id,
         "input_img": _dreamy_input_images(prompt, source_segment),
@@ -3984,6 +4460,8 @@ def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dic
         "url": job.get("mediaUrl", ""),
         "posterUrl": job.get("posterUrl", ""),
         "prompt": job.get("prompt", ""),
+        "botId": job.get("botId", ""),
+        "articleId": job.get("articleId", ""),
         "botSlug": job.get("botSlug", ""),
         "botName": job.get("botName", ""),
         "action": job.get("action", "generate"),
@@ -3997,18 +4475,22 @@ def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dic
         "updatedAt": job.get("updatedAt", now_iso()),
     }
     bot = get_dreamy_bot_by_slug(job.get("botSlug", "")) or get_bot_by_slug(job.get("botSlug", "")) or {
+        "id": job.get("botId", ""),
         "slug": job.get("botSlug", ""),
         "name": job.get("botName", ""),
         "type": job.get("botType", segment.get("type", "image")),
+        "articleId": job.get("articleId", ""),
         "rating": 4.5,
         "desc": "",
     }
     source_segment = _find_segment(project, segment.get("parentSegmentId"))
     route = {
         "bot": {
+            "id": bot.get("id") or job.get("botId", ""),
             "slug": bot.get("slug") or job.get("botSlug"),
             "name": bot.get("name") or job.get("botName"),
             "type": bot.get("type") or job.get("botType"),
+            "articleId": bot.get("articleId") or job.get("articleId", ""),
             "rating": bot.get("rating", 4.5),
             "description": bot.get("desc", ""),
             "pageUrl": (
@@ -4035,6 +4517,8 @@ def _build_execution_request(project: StudioProject, job: dict[str, Any]) -> dic
         "missingRouteParams": _missing_route_params(page, navigation_path),
         "jobId": job["jobId"],
         "segmentId": job["segmentId"],
+        "botId": job.get("botId", ""),
+        "articleId": job.get("articleId", ""),
         "botSlug": job.get("botSlug", ""),
         "botName": job.get("botName", ""),
         "botType": job.get("botType", ""),
@@ -4081,6 +4565,8 @@ def _create_job(
         **_navigation_contract(page, route, source_segment),
         "status": status,
         "action": segment["action"],
+        "botId": segment.get("botId", ""),
+        "articleId": segment.get("articleId", ""),
         "botSlug": segment["botSlug"],
         "botName": segment["botName"],
         "botType": route["bot"].get("type"),
@@ -4244,6 +4730,134 @@ async def _execute_generation_smoke(prompt: str) -> dict[str, Any]:
     return {"project": project, "job": refreshed, "segment": segment}
 
 
+def _dreamy_server_page() -> dict[str, Any]:
+    return {
+        **get_page("dreamy-miniapp"),
+        "executor": "server",
+        "dispatchMode": "execute-server",
+    }
+
+
+def _prepare_dreamy_server_route(
+    *,
+    bot: dict[str, Any],
+    prompt: str,
+    action: str,
+    source_segment_id: str | None,
+    source_segment: StudioSegment | None,
+    agent_id: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    route = _dreamy_bot_route(
+        bot_id=str(bot.get("id") or bot.get("botId") or "").strip(),
+        bot_slug=str(bot.get("slug") or bot.get("botSlug") or bot.get("id") or "").strip(),
+        bot_name=str(bot.get("name") or bot.get("botName") or "").strip(),
+        bot_type=str(bot.get("type") or bot.get("botType") or "").strip(),
+        article_id=str(bot.get("articleId") or bot.get("article_id") or bot.get("slug") or bot.get("id") or "").strip(),
+        message=prompt,
+    )
+    if route is None:
+        raise RuntimeError("Dreamy bot route could not be resolved")
+    page = _dreamy_server_page()
+    route["action"] = action
+    route["sourceSegmentId"] = source_segment_id
+    route["sourceSummary"] = f"Using segment {source_segment_id}" if source_segment_id else "Starting from prompt"
+    route["page"] = page
+    route["api"] = page["id"]
+    route["executor"] = page["executor"]
+    route["agentId"] = _agent_id_for_dispatch(page, agent_id)
+    route.update(_navigation_contract(page, route, source_segment))
+    navigation_path = route.get("navigationPath", "")
+    missing_route_params = _missing_route_params(page, navigation_path)
+    route["routeParams"] = page.get("routeParams") or []
+    route["missingRouteParams"] = missing_route_params
+    return route, page, missing_route_params
+
+
+async def _execute_dreamy_workshop_smoke(prompt: str, limit: int | None = None) -> dict[str, Any]:
+    project = _project(None, "player")
+    base_prompt = prompt.strip() or "Create a short cinematic neon city media segment for Dreamy workshop verification."
+    _append_message(project, "user", base_prompt, action="generate", hasImage=False)
+    selected_bots = DREAMY_BOTS[: max(1, min(limit or len(DREAMY_BOTS), len(DREAMY_BOTS)))]
+    results: list[dict[str, Any]] = []
+    source_segment: StudioSegment | None = None
+    source_segment_id: str | None = None
+
+    for index, bot in enumerate(selected_bots):
+        bot_type = str(bot.get("type") or "")
+        step_action = "extend" if bot_type == "image-to-video" and source_segment else "generate"
+        step_prompt = f"{base_prompt} Step {index + 1}: {bot.get('name') or bot.get('slug')}."
+        route, page, _missing = _prepare_dreamy_server_route(
+            bot=bot,
+            prompt=step_prompt,
+            action=step_action,
+            source_segment_id=source_segment_id if step_action == "extend" else None,
+            source_segment=source_segment if step_action == "extend" else None,
+        )
+        segment = _append_queued_segment(
+            project,
+            route,
+            route.get("optimizedPrompt") or step_prompt,
+            step_action,
+            route.get("sourceSegmentId"),
+        )
+        job = _create_job(project, segment, route, page, source_segment if step_action == "extend" else None, agent_id=route["agentId"])
+        smoke_context = {
+            "generationSmoke": True,
+            "dreamyWorkshopSmoke": True,
+            "probeId": make_id("dreamy_workshop_smoke"),
+            "probeType": "dreamy-workshop-server-live",
+            "botIndex": index,
+            "botSlug": route["bot"]["slug"],
+            "prompt": route.get("optimizedPrompt") or step_prompt,
+        }
+        job["evidence"] = {**(job.get("evidence") or {}), **smoke_context}
+        STUDIO_STORE.save_job(job)
+        STUDIO_STORE.save_evidence(job, job["evidence"])
+        try:
+            job = await _run_dreamy_server_adapter(
+                project=project,
+                segment=segment,
+                job=job,
+                route=route,
+                prompt=route.get("optimizedPrompt") or step_prompt,
+                source_segment=source_segment if step_action == "extend" else None,
+            )
+        except Exception as exc:
+            segment["status"] = "error"
+            segment["evidence"] = _evidence("error", "dreamy-miniapp", message=str(exc))
+            segment["updatedAt"] = now_iso()
+            job = _update_job(job, status="error", evidence=segment["evidence"])
+            _set_graph_status(project, route, segment)
+            _save_project(project)
+            _sync_project_jobs(project)
+
+        refreshed = STUDIO_STORE.get_job(job["jobId"]) or job
+        evidence = {
+            **(refreshed.get("evidence") if isinstance(refreshed.get("evidence"), dict) else {}),
+            **smoke_context,
+        }
+        refreshed = _update_job(refreshed, evidence=evidence)
+        segment["evidence"] = evidence
+        segment["updatedAt"] = now_iso()
+        _save_project(project)
+        _sync_project_jobs(project)
+        results.append(_job_with_evidence(refreshed) or refreshed)
+        if segment.get("status") == "done" and (segment.get("evidence") or {}).get("accepted"):
+            source_segment = segment
+            source_segment_id = segment["id"]
+
+    accepted_count = sum(1 for item in results if ((item.get("evidence") or {}).get("accepted") or item.get("status") == "done"))
+    status = "done" if results and accepted_count == len(results) else "partial" if accepted_count else "error"
+    return {
+        "status": status,
+        "project": project,
+        "jobs": results,
+        "count": len(results),
+        "acceptedCount": accepted_count,
+        "botSlugs": [str(bot.get("slug") or "") for bot in selected_bots],
+    }
+
+
 def _append_queued_segment(
     project: StudioProject,
     route: dict[str, Any],
@@ -4258,6 +4872,8 @@ def _append_queued_segment(
         "url": "",
         "posterUrl": PLACEHOLDER_POSTERS.get(action, PLACEHOLDER_POSTERS["generate"]),
         "prompt": prompt,
+        "botId": str(bot.get("id") or bot.get("botId") or ""),
+        "articleId": str(bot.get("articleId") or bot.get("slug") or ""),
         "botSlug": bot["slug"],
         "botName": bot["name"],
         "action": action,
@@ -4300,7 +4916,7 @@ def register_studio_routes(app) -> None:
         dreamy_bots, catalog_source = await _dreamy_catalog_bots()
         response = list_bot_previews(dreamy_bots=dreamy_bots)
         response["dreamyCatalogSource"] = catalog_source
-        response["dreamyCatalogReady"] = catalog_source == "live-dreamy-explore"
+        response["dreamyCatalogReady"] = catalog_source in {"live-dreamy-explore", "live-dreamyporn-web-explore"}
         return response
 
     @app.get("/api/studio/overview")
@@ -4488,6 +5104,72 @@ def register_studio_routes(app) -> None:
             project=executed["project"],
         )
 
+    @app.get("/api/studio/dreamy-workshop-smoke")
+    async def get_studio_dreamy_workshop_smoke():
+        health = await runtime_health(STUDIO_STORE.path)
+        prerequisites = (health.get("components") or {}).get("liveGeneration") or {}
+        dreamy_check = ((prerequisites.get("checks") or {}).get("dreamyServer") or {}).get("status")
+        return {
+            "status": "ready" if dreamy_check == "ready" else "needs_configuration",
+            "ready": dreamy_check == "ready",
+            "endpoint": "/api/studio/dreamy-workshop-smoke",
+            "message": (
+                "Pass execute=true to run every Dreamy workshop bot from backend credentials."
+                if dreamy_check == "ready"
+                else "Dreamy server credentials are missing; no live generation request will be sent."
+            ),
+            "bots": [
+                {
+                    "slug": bot.get("slug"),
+                    "name": bot.get("name"),
+                    "type": bot.get("type"),
+                    "pageId": bot.get("pageId"),
+                }
+                for bot in DREAMY_BOTS
+            ],
+            "count": len(DREAMY_BOTS),
+            "prerequisites": prerequisites,
+        }
+
+    @app.post("/api/studio/dreamy-workshop-smoke")
+    async def post_studio_dreamy_workshop_smoke(payload: Optional[dict[str, Any]] = Body(None)):
+        body = payload or {}
+        execute = _payload_bool(body.get("execute", False))
+        prompt = str(body.get("prompt") or "").strip()
+        limit_value = body.get("limit")
+        try:
+            limit = int(limit_value) if limit_value is not None else len(DREAMY_BOTS)
+        except (TypeError, ValueError):
+            limit = len(DREAMY_BOTS)
+        limit = max(1, min(limit, len(DREAMY_BOTS)))
+        health = await runtime_health(STUDIO_STORE.path)
+        prerequisites = (health.get("components") or {}).get("liveGeneration") or {}
+        dreamy_check = ((prerequisites.get("checks") or {}).get("dreamyServer") or {}).get("status")
+        if not execute:
+            return {
+                "status": "ready" if dreamy_check == "ready" else "needs_configuration",
+                "ready": dreamy_check == "ready",
+                "message": "Pass execute=true to run every Dreamy workshop bot.",
+                "count": limit,
+                "prerequisites": prerequisites,
+            }
+        if dreamy_check != "ready":
+            return {
+                "status": "needs_configuration",
+                "ready": False,
+                "message": "Dreamy server credentials are missing; no live generation request was sent.",
+                "count": 0,
+                "acceptedCount": 0,
+                "bots": [],
+                "prerequisites": prerequisites,
+            }
+        executed = await _execute_dreamy_workshop_smoke(prompt, limit=limit)
+        return {
+            **executed,
+            "ready": executed["status"] == "done",
+            "prerequisites": prerequisites,
+        }
+
     @app.get("/api/studio/delivery-audit")
     async def get_studio_delivery_audit(
         project_id: Optional[str] = Query(None),
@@ -4514,9 +5196,11 @@ def register_studio_routes(app) -> None:
         page_id: str = Query("dreamy-miniapp"),
         agent_id: Optional[str] = Query(None),
         has_image: bool = Query(False),
+        bot_id: Optional[str] = Query(None),
         bot_slug: Optional[str] = Query(None),
         bot_name: Optional[str] = Query(None),
         bot_type: Optional[str] = Query(None),
+        article_id: Optional[str] = Query(None),
     ):
         return await _dispatch_preview(
             message=message,
@@ -4526,9 +5210,11 @@ def register_studio_routes(app) -> None:
             project_id=project_id,
             source_segment_id=source_segment_id,
             has_image=has_image,
+            bot_id=bot_id,
             bot_slug=bot_slug,
             bot_name=bot_name,
             bot_type=bot_type,
+            article_id=article_id,
         )
 
     @app.post("/api/studio/run")
@@ -4540,9 +5226,12 @@ def register_studio_routes(app) -> None:
         source_segment_id: Optional[str] = Form(None),
         page_id: str = Form("dreamy-miniapp"),
         agent_id: Optional[str] = Form(None),
+        bot_id: Optional[str] = Form(None),
         bot_slug: Optional[str] = Form(None),
         bot_name: Optional[str] = Form(None),
         bot_type: Optional[str] = Form(None),
+        article_id: Optional[str] = Form(None),
+        bot_sequence: Optional[str] = Form(None),
         agent_graph: Optional[str] = Form(None),
         image: Optional[UploadFile] = File(None),
     ):
@@ -4565,11 +5254,18 @@ def register_studio_routes(app) -> None:
                 pass
 
         image_data = None
+        image_bytes: bytes | None = None
+        image_filename = ""
+        image_content_type = ""
         if image is not None:
-            image_data = base64.b64encode(await image.read()).decode()
+            image_bytes = await image.read()
+            image_data = base64.b64encode(image_bytes).decode()
+            image_filename = image.filename or "studio-source.jpg"
+            image_content_type = image.content_type or _guess_image_content_type(image_filename)
         has_image = image_data is not None
         source_segment = _resolve_source_segment(project, source_segment_id)
         resolved_source_segment_id = source_segment.get("id") if source_segment else source_segment_id
+        manual_bot_sequence = _manual_bot_sequence_items(bot_sequence, normalized_action)
         _append_message(
             project,
             "user",
@@ -4589,9 +5285,165 @@ def register_studio_routes(app) -> None:
                 },
             )
 
+            if manual_bot_sequence:
+                yield _event(
+                    "progress",
+                    {
+                        "step": "manual-bot-sequence",
+                        "message": f"Queueing {len(manual_bot_sequence)} manual Dreamy bot steps",
+                        "progress": 18,
+                    },
+                )
+                sequence_source_segment = source_segment
+                sequence_source_segment_id = resolved_source_segment_id
+                last_segment: StudioSegment | None = None
+                last_job: dict[str, Any] | None = None
+                for index, manual_bot in enumerate(manual_bot_sequence):
+                    step_prompt = manual_bot.get("prompt") or prompt
+                    step_action = manual_bot.get("action") or ("extend" if index else normalized_action)
+                    route = _dreamy_bot_route(
+                        bot_id=manual_bot.get("botId"),
+                        bot_slug=manual_bot.get("botSlug"),
+                        bot_name=manual_bot.get("botName"),
+                        bot_type=manual_bot.get("botType"),
+                        article_id=manual_bot.get("articleId"),
+                        message=step_prompt,
+                    )
+                    if route is None:
+                        continue
+                    page = page_for_dispatch(route["bot"], page_id, step_prompt)
+                    if page["id"] == "dreamy-miniapp" and adapter_auth_status("dreamy-miniapp").get("status") == "ready":
+                        page = {
+                            **page,
+                            "executor": "server",
+                            "dispatchMode": "execute-server",
+                        }
+                    route["action"] = step_action
+                    route["sourceSegmentId"] = sequence_source_segment_id
+                    route["sourceSummary"] = (
+                        f"Using segment {sequence_source_segment_id}" if sequence_source_segment_id else "Starting from prompt"
+                    )
+                    route["page"] = page
+                    route["api"] = page["id"]
+                    route["executor"] = page["executor"]
+                    route["agentId"] = _agent_id_for_dispatch(page, agent_id)
+                    route.update(_navigation_contract(page, route, sequence_source_segment))
+                    navigation_path = route.get("navigationPath", "")
+                    missing_route_params = _missing_route_params(page, navigation_path)
+                    route["routeParams"] = page.get("routeParams") or []
+                    route["missingRouteParams"] = missing_route_params
+                    yield _event("route", route)
+                    yield _event(
+                        "progress",
+                        {
+                            "step": "manual-bot-sequence",
+                            "message": f"Queued manual bot {index + 1}/{len(manual_bot_sequence)}",
+                            "progress": min(85, 25 + index * 10),
+                        },
+                    )
+
+                    segment = _append_queued_segment(
+                        project,
+                        route,
+                        route.get("optimizedPrompt") or step_prompt,
+                        step_action,
+                        sequence_source_segment_id,
+                    )
+                    job = _create_job(project, segment, route, page, sequence_source_segment, agent_id=route["agentId"])
+                    graph = _set_graph_status(project, route, segment)
+                    _append_message(
+                        project,
+                        "assistant",
+                        f"Queued {route['bot']['name']} as manual sequence step {index + 1}/{len(manual_bot_sequence)}.",
+                        route=route,
+                        segmentId=segment["id"],
+                        jobId=job["jobId"],
+                    )
+                    yield _event(
+                        "execution_request",
+                        {
+                            "executor": route["executor"],
+                            "api": page["id"],
+                            "page": page,
+                            "agentId": job["agentId"],
+                            **_navigation_contract(page, route, sequence_source_segment),
+                            "routeParams": page.get("routeParams") or [],
+                            "missingRouteParams": missing_route_params,
+                            "jobId": job["jobId"],
+                            "segmentId": segment["id"],
+                            "botId": route["bot"].get("id") or "",
+                            "articleId": route["bot"].get("articleId") or "",
+                            "botSlug": route["bot"]["slug"],
+                            "botName": route["bot"]["name"],
+                            "botType": route["bot"]["type"],
+                            "prompt": route.get("optimizedPrompt") or step_prompt,
+                            "action": step_action,
+                            "sourceSegment": sequence_source_segment,
+                            "agentGraph": graph,
+                            "segment": segment,
+                            "authStatus": job["authStatus"],
+                            "evidence": job["evidence"],
+                        },
+                    )
+                    yield _event("job", {"job": job})
+                    if page["id"] == "dreamy-miniapp" and page["executor"] == "server":
+                        yield _event(
+                            "progress",
+                            {
+                                "step": "manual-bot-sequence",
+                                "message": f"Running Dreamy bot {index + 1}/{len(manual_bot_sequence)} from the Studio backend",
+                                "progress": min(95, 35 + index * 10),
+                            },
+                        )
+                        try:
+                            job = await _run_dreamy_server_adapter(
+                                project=project,
+                                segment=segment,
+                                job=job,
+                                route=route,
+                                prompt=route.get("optimizedPrompt") or step_prompt,
+                                source_segment=sequence_source_segment,
+                                input_image_bytes=image_bytes if index == 0 else None,
+                                input_image_filename=image_filename,
+                                input_image_content_type=image_content_type,
+                            )
+                        except Exception as exc:
+                            segment["status"] = "error"
+                            segment["evidence"] = _evidence("error", "dreamy-miniapp", message=str(exc))
+                            segment["updatedAt"] = now_iso()
+                            job = _update_job(job, status="error", evidence=segment["evidence"])
+                            _set_graph_status(project, route, segment)
+                            _save_project(project)
+                            _sync_project_jobs(project)
+                        job = STUDIO_STORE.get_job(job["jobId"]) or job
+                        yield _event("job", {"job": job})
+                    sequence_source_segment = segment
+                    sequence_source_segment_id = segment["id"]
+                    last_segment = segment
+                    last_job = job
+
+                yield _event("project", {"project": project})
+                yield _event(
+                    "done",
+                    {
+                        "status": (last_segment or {}).get("status", "queued"),
+                        "projectId": project["projectId"],
+                        "segmentId": (last_segment or {}).get("id"),
+                        "jobId": (last_job or {}).get("jobId"),
+                    },
+                )
+                return
+
             route = (
-                _dreamy_bot_route(bot_slug=bot_slug, bot_name=bot_name, bot_type=bot_type, message=prompt)
-                if page_id == "dreamy-miniapp" and bot_slug
+                _dreamy_bot_route(
+                    bot_id=bot_id,
+                    bot_slug=bot_slug,
+                    bot_name=bot_name,
+                    bot_type=bot_type,
+                    article_id=article_id,
+                    message=prompt,
+                )
+                if page_id == "dreamy-miniapp" and (bot_slug or bot_id)
                 else None
             )
             if route is None:
@@ -4662,6 +5514,8 @@ def register_studio_routes(app) -> None:
                     "missingRouteParams": missing_route_params,
                     "jobId": job["jobId"],
                     "segmentId": segment["id"],
+                    "botId": route["bot"].get("id") or "",
+                    "articleId": route["bot"].get("articleId") or "",
                     "botSlug": route["bot"]["slug"],
                     "botName": route["bot"]["name"],
                     "botType": route["bot"]["type"],
@@ -4693,6 +5547,9 @@ def register_studio_routes(app) -> None:
                         route=route,
                         prompt=route.get("optimizedPrompt") or prompt,
                         source_segment=source_segment,
+                        input_image_bytes=image_bytes,
+                        input_image_filename=image_filename,
+                        input_image_content_type=image_content_type,
                     )
                 except Exception as exc:
                     segment["status"] = "error"
@@ -4943,6 +5800,8 @@ def register_studio_routes(app) -> None:
                 "url": "",
                 "posterUrl": "",
                 "prompt": payload.get("prompt") or "",
+                "botId": payload.get("botId") or "",
+                "articleId": payload.get("articleId") or route_bot_slug,
                 "botSlug": bot["slug"],
                 "botName": bot["name"],
                 "action": payload.get("action") or "generate",
@@ -4975,6 +5834,8 @@ def register_studio_routes(app) -> None:
             "url",
             "posterUrl",
             "prompt",
+            "botId",
+            "articleId",
             "botSlug",
             "botName",
             "action",
@@ -5036,6 +5897,8 @@ def register_studio_routes(app) -> None:
             job = _update_job(
                 job,
                 status=normalized_status,
+                botId=segment.get("botId") or job.get("botId"),
+                articleId=segment.get("articleId") or job.get("articleId"),
                 taskId=segment.get("taskId") or job.get("taskId"),
                 mediaUrl=segment.get("url") or job.get("mediaUrl"),
                 posterUrl=segment.get("posterUrl") or job.get("posterUrl"),

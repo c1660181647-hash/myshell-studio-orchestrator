@@ -21,10 +21,17 @@ export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'conversation-workspace-panel',
   'bot-selection-panel',
   'bot-selection-scroll-region',
+  'manual-bot-id-panel',
+  'manual-bot-id-input',
+  'manual-bot-sequence-list',
+  'manual-bot-run-selected',
+  'manual-bot-run-sequence',
+  'manual-bot-sequence-run',
   'studio-chat-region',
   'studio-composer',
   'preview-workspace-panel',
   'studio-layout-no-overlap',
+  'studio-left-sections-readable',
   'ai-recommendation-agent',
   'ai-recommendation-run',
   'starter-presets',
@@ -308,6 +315,7 @@ async function checkStudioLayoutGeometry(checks, page, timeoutMs) {
   const locators = {
     left: page.getByTestId('conversation-workspace-panel'),
     bot: page.getByTestId('bot-selection-panel'),
+    chatRegion: page.getByTestId('studio-chat-region'),
     chat: page.getByTestId('studio-chat-log'),
     composer: page.getByTestId('studio-composer'),
     preview: page.getByTestId('preview-workspace-panel'),
@@ -316,11 +324,11 @@ async function checkStudioLayoutGeometry(checks, page, timeoutMs) {
     await Promise.all(
       Object.values(locators).map((locator) => locator.first().waitFor({ state: 'visible', timeout: timeoutMs })),
     );
-    const [left, bot, chat, composer, preview] = await Promise.all(
+    const [left, bot, chatRegion, chat, composer, preview] = await Promise.all(
       Object.values(locators).map((locator) => locator.first().boundingBox()),
     );
-    const missing = { left, bot, chat, composer, preview };
-    if (!left || !bot || !chat || !composer || !preview) {
+    const missing = { left, bot, chatRegion, chat, composer, preview };
+    if (!left || !bot || !chatRegion || !chat || !composer || !preview) {
       checks.push({
         id: 'studio-layout-no-overlap',
         label: 'Studio layout sections do not overlap',
@@ -333,8 +341,8 @@ async function checkStudioLayoutGeometry(checks, page, timeoutMs) {
       return;
     }
     const failures = [];
-    if (bot.y + bot.height > chat.y + 1) failures.push('bot selection overlaps chat log');
-    if (chat.y + chat.height > composer.y + 1) failures.push('chat log overlaps composer');
+    if (bot.y + bot.height > chatRegion.y + 1) failures.push('bot selection overlaps chat region');
+    if (chatRegion.y + chatRegion.height > composer.y + 1) failures.push('chat region overlaps composer');
     if (composer.y + composer.height > left.y + left.height + 1) failures.push('composer is clipped by left panel');
     if (left.x + left.width > preview.x + 1) failures.push('left panel overlaps preview panel');
     checks.push({
@@ -343,10 +351,29 @@ async function checkStudioLayoutGeometry(checks, page, timeoutMs) {
       ok: failures.length === 0,
       message: failures.length ? failures.join('; ') : undefined,
     });
+
+    const readableFailures = [];
+    const maxBotHeight = Math.min(260, Math.max(180, left.height * 0.34));
+    if (bot.height > maxBotHeight + 1) readableFailures.push(`bot selection too tall (${Math.round(bot.height)}px)`);
+    if (chat.height < 180) readableFailures.push(`chat log too short (${Math.round(chat.height)}px)`);
+    if (composer.height < 86) readableFailures.push(`composer clipped (${Math.round(composer.height)}px)`);
+    if (preview.width < left.width) readableFailures.push('right preview is narrower than left control column');
+    checks.push({
+      id: 'studio-left-sections-readable',
+      label: 'Left Studio sections stay readable and bounded',
+      ok: readableFailures.length === 0,
+      message: readableFailures.length ? readableFailures.join('; ') : undefined,
+    });
   } catch (error) {
     checks.push({
       id: 'studio-layout-no-overlap',
       label: 'Studio layout sections do not overlap',
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    checks.push({
+      id: 'studio-left-sections-readable',
+      label: 'Left Studio sections stay readable and bounded',
       ok: false,
       message: error instanceof Error ? error.message : String(error),
     });
@@ -419,6 +446,60 @@ export async function runStudioFrontendSmoke(options = {}) {
       page.getByTestId('bot-selection-scroll-region'),
       timeoutMs,
     );
+    await checkVisible(
+      checks,
+      page,
+      'manual-bot-id-panel',
+      'Manual bot id panel',
+      page.getByTestId('manual-bot-id-panel'),
+      timeoutMs,
+    );
+    const manualBotInput = page.getByTestId('manual-bot-id-input');
+    await checkVisible(checks, page, 'manual-bot-id-input', 'Manual bot id input', manualBotInput, timeoutMs);
+    await manualBotInput.fill(
+      [
+        'manual_image_bot|Manual Image Bot|text-to-image|manual-image',
+        'manual_video_bot|Manual Video Bot|image-to-video|manual-video',
+      ].join('\n'),
+    );
+    await checkVisible(
+      checks,
+      page,
+      'manual-bot-sequence-list',
+      'Manual bot sequence list',
+      page.getByTestId('manual-bot-sequence-list'),
+      timeoutMs,
+    );
+    await checkEnabled(
+      checks,
+      page,
+      'manual-bot-run-selected',
+      'Manual selected bot run control',
+      page.getByTestId('manual-bot-run-selected'),
+      timeoutMs,
+    );
+    const manualSequenceButton = page.getByTestId('manual-bot-run-sequence');
+    await checkEnabled(checks, page, 'manual-bot-run-sequence', 'Manual bot sequence run control', manualSequenceButton, timeoutMs);
+    try {
+      await manualSequenceButton.click({ timeout: timeoutMs });
+      await page.waitForFunction(
+        () => document.body.textContent?.includes('Manual Video Bot') && document.body.textContent?.includes('Manual Image Bot'),
+        undefined,
+        { timeout: timeoutMs },
+      );
+      checks.push({
+        id: 'manual-bot-sequence-run',
+        label: 'Manual bot sequence creates visible chained jobs',
+        ok: true,
+      });
+    } catch (error) {
+      checks.push({
+        id: 'manual-bot-sequence-run',
+        label: 'Manual bot sequence creates visible chained jobs',
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
     await checkVisible(
       checks,
       page,

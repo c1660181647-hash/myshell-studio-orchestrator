@@ -105,14 +105,19 @@ test('runStudioFrontendSmoke records non-overlapping Studio workspace layout', (
     'conversation-workspace-panel',
     'bot-selection-panel',
     'bot-selection-scroll-region',
+    'manual-bot-id-panel',
+    'manual-bot-id-input',
+    'manual-bot-run-sequence',
+    'manual-bot-sequence-run',
     'studio-chat-region',
     'studio-composer',
     'preview-workspace-panel',
     'studio-layout-no-overlap',
+    'studio-left-sections-readable',
   ];
   for (const id of layoutChecks) {
     assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes(id), `${id} should be required`);
-    if (id === 'studio-layout-no-overlap') {
+    if (id === 'studio-layout-no-overlap' || id === 'studio-left-sections-readable') {
       assert.match(runStudioFrontendSmoke.toString(), /checkStudioLayoutGeometry/);
     } else {
       assert.match(runStudioFrontendSmoke.toString(), new RegExp(id));

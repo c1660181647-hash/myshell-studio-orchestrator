@@ -70,7 +70,9 @@ export interface StreamOrchestratorOptions {
 }
 
 export interface DreamyMiniappJobInput {
-  slugId: string;
+  slugId?: string;
+  botId?: string;
+  articleId?: string;
   prompt: string;
   imageFile?: File | null;
   imageUrl?: string;
@@ -115,6 +117,8 @@ export interface StudioEvidence {
 
 export interface StudioBotPreview {
   botSlug: string;
+  botId?: string;
+  articleId?: string;
   botName: string;
   botType?: string;
   pageId?: StudioApi | string;
@@ -832,6 +836,8 @@ export interface StudioJob {
   status: StudioStatus;
   action: StudioAction;
   botSlug: string;
+  botId?: string;
+  articleId?: string;
   botName: string;
   botType?: string;
   prompt: string;
@@ -853,6 +859,8 @@ export interface StudioSegment {
   posterUrl?: string;
   prompt: string;
   botSlug: string;
+  botId?: string;
+  articleId?: string;
   botName: string;
   action: StudioAction;
   parentSegmentId?: string;
@@ -872,6 +880,7 @@ export interface StudioTimelineExportSegment {
   status: StudioStatus | string;
   prompt?: string;
   action?: StudioAction | string;
+  botId?: string;
   botName?: string;
   botSlug?: string;
   taskId?: string;
@@ -948,9 +957,11 @@ export interface StudioRouteEvent {
   studioReturnPath?: string;
   page?: StudioPageAdapter;
   bot: {
+    id?: string;
     slug: string;
     name: string;
     type: string;
+    articleId?: string;
     rating?: number;
     description?: string;
     pageUrl?: string;
@@ -978,6 +989,8 @@ export interface StudioExecutionRequest {
   jobId: string;
   segmentId: string;
   botSlug: string;
+  botId?: string;
+  articleId?: string;
   botName: string;
   botType: string;
   prompt: string;
@@ -1032,8 +1045,19 @@ export interface StreamStudioRunOptions {
   pageId?: StudioApi | string;
   agentId?: string;
   botSlug?: string;
+  botId?: string;
+  articleId?: string;
   botName?: string;
   botType?: string;
+  botSequence?: Array<{
+    botId?: string;
+    botSlug?: string;
+    botName?: string;
+    botType?: string;
+    articleId?: string;
+    action?: StudioAction;
+    prompt?: string;
+  }>;
   agentGraph?: StudioAgentNode[];
   imageFile?: File | null;
   signal?: AbortSignal;
@@ -1047,6 +1071,8 @@ export interface StudioClientResultInput {
   url?: string;
   posterUrl?: string;
   prompt?: string;
+  botId?: string;
+  articleId?: string;
   botSlug?: string;
   botName?: string;
   action?: StudioAction;
@@ -1217,8 +1243,11 @@ export async function streamStudioRun({
   pageId,
   agentId,
   botSlug,
+  botId,
+  articleId,
   botName,
   botType,
+  botSequence,
   agentGraph,
   imageFile,
   signal,
@@ -1232,9 +1261,12 @@ export async function streamStudioRun({
   if (sourceSegmentId) formData.append('source_segment_id', sourceSegmentId);
   if (pageId) formData.append('page_id', pageId);
   if (agentId) formData.append('agent_id', agentId);
+  if (botId) formData.append('bot_id', botId);
+  if (articleId) formData.append('article_id', articleId);
   if (botSlug) formData.append('bot_slug', botSlug);
   if (botName) formData.append('bot_name', botName);
   if (botType) formData.append('bot_type', botType);
+  if (botSequence?.length) formData.append('bot_sequence', JSON.stringify(botSequence));
   if (agentGraph) formData.append('agent_graph', JSON.stringify(agentGraph));
   if (imageFile) formData.append('image', imageFile);
 
@@ -1576,6 +1608,8 @@ export async function fetchStudioDispatchPreview(
     sourceSegmentId?: string;
     pageId?: StudioApi | string;
     agentId?: string;
+    botId?: string;
+    articleId?: string;
     botSlug?: string;
     botName?: string;
     botType?: string;
@@ -1589,6 +1623,8 @@ export async function fetchStudioDispatchPreview(
   if (options.sourceSegmentId) params.set('source_segment_id', options.sourceSegmentId);
   if (options.pageId) params.set('page_id', options.pageId);
   if (options.agentId) params.set('agent_id', options.agentId);
+  if (options.botId) params.set('bot_id', options.botId);
+  if (options.articleId) params.set('article_id', options.articleId);
   if (options.botSlug) params.set('bot_slug', options.botSlug);
   if (options.botName) params.set('bot_name', options.botName);
   if (options.botType) params.set('bot_type', options.botType);
@@ -1722,20 +1758,24 @@ export async function resetStudioProject(projectId: string): Promise<void> {
 
 export async function submitDreamyMiniappJob({
   slugId,
+  botId,
+  articleId,
   prompt,
   imageFile,
   imageUrl,
 }: DreamyMiniappJobInput): Promise<DreamyMiniappJobResult> {
-  const detail = await fetchBotDetail(slugId);
-  const botId = detail?.info?.botId || slugId;
-  const articleId = detail?.info?.slugId || slugId;
+  const lookupSlug = slugId || articleId || botId || '';
+  const detail = botId ? null : await fetchBotDetail(lookupSlug);
+  const resolvedBotId = botId || detail?.info?.botId || lookupSlug;
+  const resolvedArticleId = articleId || detail?.info?.slugId || lookupSlug || resolvedBotId;
+  if (!resolvedBotId) throw new Error('Dreamy bot id is required');
   const uploadedImageUrl = imageFile ? await uploadImage(imageFile) : imageUrl;
   const inputImg = uploadedImageUrl ? [uploadedImageUrl, prompt] : [prompt];
-  const response = await generate(botId, inputImg, articleId);
+  const response = await generate(resolvedBotId, inputImg, resolvedArticleId);
   return {
     uploadedImageUrl,
-    botId,
-    articleId,
+    botId: resolvedBotId,
+    articleId: resolvedArticleId,
     response,
   };
 }
