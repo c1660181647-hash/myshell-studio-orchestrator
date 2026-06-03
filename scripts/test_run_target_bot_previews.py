@@ -1,6 +1,8 @@
 import importlib.util
 import json
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -96,11 +98,40 @@ class RunTargetBotPreviewsTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(calls[0]["target_bot_id"], "1751532766")
+        self.assertEqual(calls[0]["target_article_id"], "brat-generator")
         self.assertEqual(calls[0]["input_values"], [report["previews"]["brat-generator"]["prompt"]])
         entry = report["previews"]["brat-generator"]
         self.assertEqual(entry["source"], "myshell-target-bot-api")
         self.assertEqual(entry["execution"]["executor"], "myshell-art-api")
         self.assertEqual(entry["execution"]["targetBotId"], "1751532766")
+
+    async def test_default_art_api_runner_passes_article_id_and_poll_options(self) -> None:
+        calls = []
+
+        async def fake_generate_via_art_api(**kwargs):
+            calls.append(kwargs)
+            return {
+                "status": "done",
+                "output_url": "https://cdn.example/brat-api.png",
+                "task_id": "api-job-1",
+                "executor": "myshell-art-api",
+            }
+
+        fake_module = types.SimpleNamespace(generate_via_art_api=fake_generate_via_art_api)
+
+        with patch.dict(sys.modules, {"myshell_art_api": fake_module}):
+            runner = run_target._default_art_api_runner(poll_attempts=7, poll_interval=2.5)
+            result = await runner(
+                target_bot_id="1751532766",
+                target_article_id="brat-generator",
+                input_values=["lime green brat album cover text"],
+            )
+
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(calls[0]["bot_id"], "1751532766")
+        self.assertEqual(calls[0]["article_id"], "brat-generator")
+        self.assertEqual(calls[0]["poll_attempts"], 7)
+        self.assertEqual(calls[0]["poll_interval"], 2.5)
 
     async def test_art_api_executor_uses_manifest_remote_source_for_image_inputs(self) -> None:
         calls = []

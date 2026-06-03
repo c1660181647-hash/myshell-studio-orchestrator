@@ -28,6 +28,9 @@ DEFAULT_WIDGET_NAME = "GPT4o Image"
 DEFAULT_ASSET_DIR = REPO_ROOT / "frontend" / "public" / "generated" / "bot-previews"
 DEFAULT_MANIFEST = DEFAULT_ASSET_DIR / "manifest.json"
 SAFE_SLUG_RE = re.compile(r"[^a-z0-9-]+")
+BOT_PROMPT_OVERRIDES = {
+    "brat-generator": "studio mode",
+}
 
 
 class PreviewManifestError(RuntimeError):
@@ -52,6 +55,9 @@ def _all_bots() -> list[dict[str, Any]]:
 
 
 def prompt_for_bot(bot: dict[str, Any]) -> str:
+    override = BOT_PROMPT_OVERRIDES.get(str(bot.get("slug") or ""))
+    if override:
+        return override
     bot_name = str(bot.get("name") or bot.get("slug") or "MyShell bot")
     bot_type = str(bot.get("type") or "image")
     description = str(bot.get("desc") or "")
@@ -69,7 +75,7 @@ def _load_url_map(path: Path) -> dict[str, dict[str, Any]]:
         payload = json.load(handle)
     entries: dict[str, dict[str, Any]] = {}
     if isinstance(payload, dict):
-        source_items = payload.get("previews") if isinstance(payload.get("previews"), list) else payload
+        source_items = payload.get("previews") if isinstance(payload.get("previews"), (dict, list)) else payload
         if isinstance(source_items, dict):
             for slug, value in source_items.items():
                 if isinstance(value, str):

@@ -1,6 +1,6 @@
 {
   "version": "2026-06-03-myshell-bot-specific-preview",
-  "generatedAt": "2026-06-03T00:19:29Z",
+  "generatedAt": "2026-06-03T03:20:40Z",
   "source": "myshell-openapi-widget",
   "assets": [
     {
@@ -53,14 +53,14 @@
       "title": "Brat Cover Generator",
       "mediaUrl": "/generated/bot-previews/brat-generator.jpg",
       "thumbnailUrl": "/generated/bot-previews/brat-generator.jpg",
-      "originalRemoteUrl": "https://www.myshellstatic.com/image/chat/embed_obj/202606022322/2b954c0e1de74629bbd383a087747e14.jpeg",
-      "source": "myshell-openapi-widget",
+      "originalRemoteUrl": "https://www.myshellstatic.com/image/chat/embed_obj/202606030320/838da840adb94019b1618c8b001ed028.jpeg",
+      "source": "myshell-target-bot-api",
       "sourceWidgetId": "1912154065390264321",
       "sourceWidgetName": "GPT4o Image",
-      "prompt": "Create a safe 16:9 bot-specific preview image for MyShell Studio. Bot: Brat Cover Generator. Workflow: text-to-image. Capability: Create iconic Brat album covers from text. Visual cues: brat, album, cover, green, text. Make it look like a polished generated result from this bot, high detail, thumbnail friendly, no logos, no UI chrome, no watermarks, and no readable brand text.",
-      "checkedAt": "2026-06-03T00:19:29Z",
+      "prompt": "studio mode",
+      "checkedAt": "2026-06-03T03:19:40Z",
       "botSpecific": true,
-      "targetBotExecuted": false,
+      "targetBotExecuted": true,
       "localPath": "public/generated/bot-previews/brat-generator.jpg"
     },
     {
@@ -818,7 +818,7 @@
     "brat-generator": {
       "assetId": "brat-generator",
       "botSpecific": true,
-      "targetBotExecuted": false
+      "targetBotExecuted": true
     },
     "ai-tattoo-generator": {
       "assetId": "ai-tattoo-generator",

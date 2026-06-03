@@ -237,17 +237,24 @@ def _default_runner() -> Runner:
     return generate_via_bot
 
 
-def _default_art_api_runner() -> Runner:
+def _default_art_api_runner(poll_attempts: int = 24, poll_interval: float = 5.0) -> Runner:
     from myshell_art_api import generate_via_art_api
 
     async def runner(**kwargs):
         target_bot_id = str(kwargs.get("target_bot_id") or "")
+        target_article_id = str(kwargs.get("target_article_id") or "")
         input_values = kwargs.get("input_values") if isinstance(kwargs.get("input_values"), list) else []
         if not target_bot_id:
             return {"status": "error", "message": "MyShell Art API executor requires target_bot_id from public metadata."}
         if not input_values:
             return {"status": "error", "message": "MyShell Art API executor has no form input values to submit."}
-        return await generate_via_art_api(bot_id=target_bot_id, input_values=[str(value) for value in input_values])
+        return await generate_via_art_api(
+            bot_id=target_bot_id,
+            input_values=[str(value) for value in input_values],
+            article_id=target_article_id,
+            poll_attempts=poll_attempts,
+            poll_interval=poll_interval,
+        )
 
     return runner
 
@@ -300,11 +307,20 @@ async def run_preview_batch(
     resolve_public_metadata: bool = False,
     public_metadata_resolver: PublicMetadataResolver | None = None,
     executor_mode: str = "cdp",
+    art_api_poll_attempts: int = 24,
+    art_api_poll_interval: float = 5.0,
 ) -> dict[str, Any]:
     checked_at = _now_iso()
     if executor_mode not in EXECUTOR_MODES:
         raise TargetBotPreviewError(f"Unknown executor mode: {executor_mode}")
-    active_runner = runner or (_default_art_api_runner() if executor_mode == "art-api" else _default_runner())
+    active_runner = runner or (
+        _default_art_api_runner(
+            poll_attempts=art_api_poll_attempts,
+            poll_interval=art_api_poll_interval,
+        )
+        if executor_mode == "art-api"
+        else _default_runner()
+    )
     active_public_metadata_resolver = public_metadata_resolver or (
         fetch_public_art_metadata if resolve_public_metadata or executor_mode == "art-api" else None
     )
@@ -339,6 +355,7 @@ async def run_preview_batch(
                     gen_button=item["genButton"],
                     image_data="" if source_image_value.startswith(("http://", "https://")) else _image_data(source_image_value),
                     target_bot_id=item.get("targetBotId", ""),
+                    target_article_id=item.get("targetSlugId", ""),
                     input_values=_api_input_values(item),
                 )
             else:
@@ -396,6 +413,8 @@ async def async_main(argv: list[str] | None = None) -> int:
     parser.add_argument("--merge-existing", action="store_true", help="Merge successful runs into an existing output file.")
     parser.add_argument("--resolve-public-metadata", action="store_true", help="Fetch each public art page and include exact target bot metadata in the plan/report.")
     parser.add_argument("--executor", choices=sorted(EXECUTOR_MODES), default="cdp", help="Execution transport for MyShell Art bots.")
+    parser.add_argument("--art-api-poll-attempts", type=int, default=24, help="Poll attempts for Art API generation result.")
+    parser.add_argument("--art-api-poll-interval", type=float, default=5.0, help="Seconds between Art API generation result polls.")
     args = parser.parse_args(argv)
 
     try:
@@ -425,6 +444,8 @@ async def async_main(argv: list[str] | None = None) -> int:
             continue_on_error=args.continue_on_error,
             resolve_public_metadata=args.resolve_public_metadata,
             executor_mode=args.executor,
+            art_api_poll_attempts=args.art_api_poll_attempts,
+            art_api_poll_interval=args.art_api_poll_interval,
         )
         if args.merge_existing:
             merged = _load_existing(args.output)

@@ -1,4 +1,6 @@
 import importlib.util
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -11,6 +13,30 @@ spec.loader.exec_module(materialize)
 
 
 class MaterializeBotPreviewManifestTest(unittest.TestCase):
+    def test_load_url_map_accepts_target_runner_preview_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "target-report.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": "target-run",
+                        "summary": {"planned": 1, "executed": 1},
+                        "previews": {
+                            "brat-generator": {
+                                "remoteUrl": "https://cdn.example/brat.jpg",
+                                "targetBotExecuted": True,
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            url_map = materialize._load_url_map(path)
+
+        self.assertEqual(list(url_map), ["brat-generator"])
+        self.assertTrue(url_map["brat-generator"]["targetBotExecuted"])
+
     def test_build_manifest_marks_entries_bot_specific(self) -> None:
         manifest = materialize.build_manifest(
             {
@@ -70,6 +96,11 @@ class MaterializeBotPreviewManifestTest(unittest.TestCase):
         self.assertIn("brat-generator", slugs)
         self.assertIn("sora-video-generator", slugs)
         self.assertIn("MyShell Studio", materialize.prompt_for_bot(bots[0]))
+
+    def test_brat_generator_prompt_is_short_album_text(self) -> None:
+        bot = next(bot for bot in materialize._all_bots() if bot["slug"] == "brat-generator")
+
+        self.assertEqual(materialize.prompt_for_bot(bot), "studio mode")
 
 
 if __name__ == "__main__":
