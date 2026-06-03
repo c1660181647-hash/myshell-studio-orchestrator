@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -65,6 +66,49 @@ class GenerationSecretToolsTest(unittest.TestCase):
         self.assertIn("validated 1 MyShell cookies", combined)
         self.assertNotIn("super-secret-cookie", combined)
         self.assertNotIn("fakehash", combined)
+
+    def test_configure_generation_secrets_apply_requires_art_api_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            init_data = "query_id=fake&user=%7B%22id%22%3A1%7D&auth_date=1700000000&hash=fakehash"
+            cookies = '[{"name":"ms_token","value":"super-secret-cookie","domain":".myshell.ai","path":"/","secure":true}]'
+            init_path = temp_path / "init.txt"
+            cookies_path = temp_path / "cookies.json"
+            gcloud_path = temp_path / "gcloud"
+            probe_path = temp_path / "probe.sh"
+            init_path.write_text(init_data, encoding="utf-8")
+            cookies_path.write_text(cookies, encoding="utf-8")
+            gcloud_path.write_text("#!/usr/bin/env bash\necho gcloud should not run >&2\nexit 99\n", encoding="utf-8")
+            probe_path.write_text("#!/usr/bin/env bash\necho '{\"status\":\"blocked\"}'\nexit 1\n", encoding="utf-8")
+            gcloud_path.chmod(0o755)
+            probe_path.chmod(0o755)
+
+            completed = subprocess.run(
+                [
+                    str(CONFIGURE_SCRIPT),
+                    "--apply",
+                    "--init-data-file",
+                    str(init_path),
+                    "--cookies-file",
+                    str(cookies_path),
+                    "--no-deploy",
+                    "--no-smoke",
+                ],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    "PATH": f"{temp_path}:{os.environ.get('PATH', '')}",
+                    "MYSHELL_ART_API_PROBE_CMD": str(probe_path),
+                },
+            )
+
+        combined = completed.stdout + completed.stderr
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("MyShell Art API auth probe failed", combined)
+        self.assertNotIn("super-secret-cookie", combined)
+        self.assertNotIn("gcloud should not run", combined)
 
 
 if __name__ == "__main__":

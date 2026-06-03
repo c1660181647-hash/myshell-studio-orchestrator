@@ -6,7 +6,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -163,9 +163,22 @@ def _accepted_media_from_result(response: dict[str, Any]) -> str:
     return ""
 
 
-def run_probe(cookies: list[dict[str, Any]], *, bot_id: str = "", execute: bool = False, poll_attempts: int = 3) -> dict[str, Any]:
-    auth = post_json("/v1/user/get_info", {}, cookies)
-    running = post_json("/v1/homepage/art/task/running", {}, cookies)
+Poster = Callable[[str, dict[str, Any], list[dict[str, Any]], float], dict[str, Any]]
+Sleeper = Callable[[float], None]
+
+
+def run_probe(
+    cookies: list[dict[str, Any]],
+    *,
+    bot_id: str = "",
+    execute: bool = False,
+    input_values: list[str] | None = None,
+    poll_attempts: int = 3,
+    poster: Poster = post_json,
+    sleep: Sleeper = time.sleep,
+) -> dict[str, Any]:
+    auth = poster("/v1/user/get_info", {}, cookies, 30.0)
+    running = poster("/v1/homepage/art/task/running", {}, cookies, 30.0)
     report: dict[str, Any] = {
         "status": "ready" if auth.get("httpStatus") == 200 else "blocked",
         "authProbe": safe_http_summary(auth),
@@ -174,9 +187,12 @@ def run_probe(cookies: list[dict[str, Any]], *, bot_id: str = "", execute: bool 
     }
     if not execute:
         return report
+    if report["status"] != "ready" or running.get("httpStatus") == 401:
+        report["message"] = "MyShell Art API auth probe failed; generation was not submitted."
+        return report
     if not bot_id:
         raise MyShellArtApiProbeError("--bot-id is required with --execute")
-    generation = post_json("/v1/homepage/art/generate", generate_body(bot_id, []), cookies, timeout=60.0)
+    generation = poster("/v1/homepage/art/generate", generate_body(bot_id, input_values or []), cookies, 60.0)
     output_job_id = _output_job_id(generation)
     report["generation"] = {
         **safe_http_summary(generation),
@@ -188,11 +204,11 @@ def run_probe(cookies: list[dict[str, Any]], *, bot_id: str = "", execute: bool 
     latest_result: dict[str, Any] = {}
     accepted_media = ""
     for _attempt in range(max(1, poll_attempts)):
-        latest_result = post_json("/v1/homepage/art/generate_result", {"outputJobId": output_job_id}, cookies, timeout=60.0)
+        latest_result = poster("/v1/homepage/art/generate_result", {"outputJobId": output_job_id}, cookies, 60.0)
         accepted_media = _accepted_media_from_result(latest_result)
         if accepted_media:
             break
-        time.sleep(1.0)
+        sleep(1.0)
     report["generationResult"] = {
         **safe_http_summary(latest_result),
         "acceptedMedia": bool(accepted_media),
@@ -206,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Probe MyShell Art homepage API with a local cookie file without printing secrets.")
     parser.add_argument("--cookies-file", type=Path, required=True)
     parser.add_argument("--bot-id", default="")
+    parser.add_argument("--input-value", action="append", default=[], help="Value to send in the Art API inputImg array. Repeat in form order.")
     parser.add_argument("--execute", action="store_true", help="Submit a real generation request. Default only probes auth and running tasks.")
     parser.add_argument("--poll-attempts", type=int, default=3)
     args = parser.parse_args(argv)
@@ -214,6 +231,7 @@ def main(argv: list[str] | None = None) -> int:
             load_cookies(args.cookies_file.expanduser()),
             bot_id=args.bot_id,
             execute=args.execute,
+            input_values=args.input_value,
             poll_attempts=args.poll_attempts,
         )
     except MyShellArtApiProbeError as exc:

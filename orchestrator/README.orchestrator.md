@@ -115,7 +115,7 @@ The summary is value-safe: it includes cookie names, profile coverage, and missi
 python scripts/probe_myshell_art_api.py --cookies-file /tmp/myshell-cookies.json
 ```
 
-This default probe calls non-generating auth/task endpoints only. Use `--execute --bot-id <targetBotId>` only when a real Art generation run is intended.
+This default probe calls non-generating auth/task endpoints only. Use `--execute --bot-id <targetBotId> --input-value <form-value>` only when a real Art generation run is intended. The script probes auth first and will not submit generation if MyShell returns `UNAUTHORIZED`.
 
 Get `DREAMY_TELEGRAM_INIT_DATA` from a real Telegram Miniapp session. It must look like Telegram WebApp `initData` and include `auth_date` plus `hash`.
 
@@ -128,7 +128,7 @@ scripts/configure_generation_secrets.sh \
   --apply
 ```
 
-Without `--apply`, this command is a dry-run and does not upload values. The script validates the init data shape and cookie JSON, updates `myshell-dreamy-init-data` plus `myshell-cookies`, triggers Cloud Build, and runs `python -m generation_smoke --execute --require-live` against the public service.
+Without `--apply`, this command is a dry-run and does not upload values. With `--apply`, the script validates the init data shape, validates cookie JSON, probes MyShell Art API auth with the provided cookies, updates `myshell-dreamy-init-data` plus `myshell-cookies`, triggers Cloud Build, and runs `python -m generation_smoke --execute --require-live` against the public service. If the Art API probe is `UNAUTHORIZED`, no secrets are uploaded.
 
 Target bot preview execution evidence is collected before materializing preview assets:
 

@@ -29,6 +29,10 @@ Options:
   --no-smoke              Skip live generation smoke after deploy.
   --base-url URL          Studio public URL. Default: ${base_url}
   --short-sha SHA         Image tag substitution. Default: current HEAD short SHA.
+
+When --apply is used, the script probes the MyShell Art API with the provided
+cookie file before uploading any secrets. Set MYSHELL_ART_API_PROBE_CMD only in
+tests to override that probe command.
 EOF
 }
 
@@ -108,6 +112,34 @@ if [[ "${dreamy_init_data}" != *"hash="* || "${dreamy_init_data}" != *"auth_date
   exit 1
 fi
 echo "[setup] validated Dreamy init data shape"
+
+if [ "${apply}" -eq 1 ]; then
+  probe_cookies_file="${cookies_file}"
+  probe_temp_file=""
+  if [ -z "${probe_cookies_file}" ]; then
+    probe_temp_file="$(mktemp)"
+    chmod 600 "${probe_temp_file}"
+    printf '%s' "${myshell_cookies}" > "${probe_temp_file}"
+    probe_cookies_file="${probe_temp_file}"
+  fi
+  cleanup_probe_temp() {
+    if [ -n "${probe_temp_file}" ]; then
+      rm -f "${probe_temp_file}"
+    fi
+  }
+  trap cleanup_probe_temp EXIT
+  echo "[setup] probing MyShell Art API auth with provided cookies"
+  if [ -n "${MYSHELL_ART_API_PROBE_CMD:-}" ]; then
+    if ! MYSHELL_ART_API_PROBE_COOKIES_FILE="${probe_cookies_file}" bash -c "${MYSHELL_ART_API_PROBE_CMD}" >/dev/null 2>&1; then
+      echo "MyShell Art API auth probe failed; refresh MyShell cookies before uploading secrets." >&2
+      exit 1
+    fi
+  elif ! python3 "${repo_root}/scripts/probe_myshell_art_api.py" --cookies-file "${probe_cookies_file}" >/dev/null 2>&1; then
+    echo "MyShell Art API auth probe failed; refresh MyShell cookies before uploading secrets." >&2
+    exit 1
+  fi
+  echo "[setup] validated MyShell Art API auth"
+fi
 
 upsert_secret "${dreamy_secret}" "${dreamy_init_data}"
 upsert_secret "${cookies_secret}" "${myshell_cookies}"

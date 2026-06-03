@@ -51,6 +51,74 @@ class ProbeMyShellArtApiTest(unittest.TestCase):
 
         self.assertNotIn("Authorization", headers)
 
+    def test_run_probe_execute_uses_supplied_input_values(self) -> None:
+        calls = []
+
+        def fake_post(path, body, cookies, timeout=30.0):
+            calls.append((path, body))
+            if path == "/v1/user/get_info":
+                return {"httpStatus": 200, "payload": {"success": True, "data": {"userId": "u1"}}}
+            if path == "/v1/homepage/art/task/running":
+                return {"httpStatus": 200, "payload": {"success": True, "data": {}}}
+            if path == "/v1/homepage/art/generate":
+                return {"httpStatus": 200, "payload": {"success": True, "data": {"outputJobId": "job-1"}}}
+            if path == "/v1/homepage/art/generate_result":
+                return {
+                    "httpStatus": 200,
+                    "payload": {
+                        "success": True,
+                        "data": {
+                            "tasks": [
+                                {
+                                    "result": '{"outputImg":"https://cdn.example/brat.png"}',
+                                }
+                            ]
+                        },
+                    },
+                }
+            raise AssertionError(path)
+
+        report = probe.run_probe(
+            [{"name": "ms_token", "value": "secret-token"}],
+            bot_id="1751532766",
+            execute=True,
+            input_values=["lime green cover text"],
+            poster=fake_post,
+            sleep=lambda _seconds: None,
+        )
+
+        self.assertEqual(report["status"], "ready")
+        self.assertEqual(
+            calls[2],
+            (
+                "/v1/homepage/art/generate",
+                {"botId": "1751532766", "inputImg": ["lime green cover text"]},
+            ),
+        )
+        self.assertEqual(report["generationResult"]["mediaUrl"], "https://cdn.example/brat.png")
+
+    def test_run_probe_execute_skips_generation_when_auth_probe_fails(self) -> None:
+        calls = []
+
+        def fake_post(path, body, cookies, timeout=30.0):
+            calls.append(path)
+            if path == "/v1/user/get_info":
+                return {"httpStatus": 401, "payload": {"success": False, "reason": "UNAUTHORIZED"}}
+            if path == "/v1/homepage/art/task/running":
+                return {"httpStatus": 401, "payload": {"success": False, "reason": "UNAUTHORIZED"}}
+            raise AssertionError(f"generation should not be called: {path}")
+
+        report = probe.run_probe(
+            [{"name": "ms_token", "value": "expired-token"}],
+            bot_id="1751532766",
+            execute=True,
+            input_values=["lime green cover text"],
+            poster=fake_post,
+        )
+
+        self.assertEqual(report["status"], "blocked")
+        self.assertEqual(calls, ["/v1/user/get_info", "/v1/homepage/art/task/running"])
+
 
 if __name__ == "__main__":
     unittest.main()

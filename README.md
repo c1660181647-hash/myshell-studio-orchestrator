@@ -233,7 +233,7 @@ python scripts/export_myshell_chrome_cookies.py --profile Default --output /tmp/
 python scripts/probe_myshell_art_api.py --cookies-file /tmp/myshell-cookies.json
 ```
 
-The summary includes cookie names and whether `ms_token` is present, but never cookie values. `probe_myshell_art_api.py` defaults to non-generating auth/task probes; pass `--execute --bot-id <targetBotId>` only when you intentionally want to submit a real MyShell Art generation.
+The summary includes cookie names and whether `ms_token` is present, but never cookie values. `probe_myshell_art_api.py` defaults to non-generating auth/task probes; pass `--execute --bot-id <targetBotId> --input-value <form-value>` only when you intentionally want to submit a real MyShell Art generation. The script first probes auth and will not submit generation if MyShell returns `UNAUTHORIZED`.
 
 Running frontend browser smoke after backend and frontend dev servers start:
 
