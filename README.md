@@ -225,10 +225,12 @@ MYSHELL_CDP_URL=http://127.0.0.1:9222 \
   --slug brat-generator \
   --output .studio-delivery-check/target-bot-preview-urls.json \
   --merge-existing
-python scripts/materialize_bot_preview_manifest.py --input .studio-delivery-check/target-bot-preview-urls.json
+python scripts/materialize_bot_preview_manifest.py \
+  --input .studio-delivery-check/target-bot-preview-urls.json \
+  --merge-existing-manifest
 ```
 
-`run_target_bot_previews.py` can use `--executor art-api` to call the MyShell Art homepage API with the public-page `targetBotId`, or the default CDP bridge as a fallback. It reads cookies from `MYSHELL_COOKIES`, `MYSHELL_COOKIES_FILE`, or backend-local cookie files, and only writes `targetBotExecuted: true` when the target bot returns a fresh output URL. Add `--resolve-public-metadata` with CDP mode to fetch the public Art page first and include the exact `targetBotId`, `targetSlugId`, template, and button text in the plan/report without running generation. Its output is a materializer input file. The input JSON maps each `botSlug` to a real MyShell image URL or an object with `remoteUrl`, optional `prompt`, `sourceWidgetId`, `sourceWidgetName`, and `targetBotExecuted`. The materializer downloads the images into `frontend/public/generated/bot-previews/`, writes `manifest.json`, and marks each entry as `botSpecific`.
+`run_target_bot_previews.py` can use `--executor art-api` to call the MyShell Art homepage API with the public-page `targetBotId`, or the default CDP bridge as a fallback. It reads cookies from `MYSHELL_COOKIES`, `MYSHELL_COOKIES_FILE`, or backend-local cookie files, and only writes `targetBotExecuted: true` when the target bot returns a fresh output URL. Add `--resolve-public-metadata` with CDP mode to fetch the public Art page first and include the exact `targetBotId`, `targetSlugId`, template, and button text in the plan/report without running generation. Its output is a materializer input file. The input JSON maps each `botSlug` to a real MyShell image URL or an object with `remoteUrl`, optional `prompt`, `sourceWidgetId`, `sourceWidgetName`, and `targetBotExecuted`. The materializer downloads the images into `frontend/public/generated/bot-previews/`, writes `manifest.json`, and marks each entry as `botSpecific`. Use `--merge-existing-manifest` for incremental target-bot runs so unchanged bot previews stay in the manifest while the newly verified bot flips `targetBotExecuted`.
 
 If `/api/health` or the target runner reports `captcha_required`, the cookies were present but the headless/new Chrome profile landed on MyShell/Cloudflare challenge pages. Complete the challenge in a verified browser session or rerun against a trusted CDP profile before expecting target-bot execution evidence.
 

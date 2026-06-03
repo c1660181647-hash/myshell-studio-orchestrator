@@ -150,7 +150,54 @@ def _asset_for_entry(
     }
 
 
-def build_manifest(url_map: dict[str, dict[str, Any]], asset_dir: Path = DEFAULT_ASSET_DIR, dry_run: bool = False) -> dict[str, Any]:
+def _asset_by_id(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    assets: dict[str, dict[str, Any]] = {}
+    for asset in manifest.get("assets", []):
+        if isinstance(asset, dict) and asset.get("id"):
+            assets[str(asset["id"])] = asset
+    return assets
+
+
+def _starter_presets(existing_manifest: dict[str, Any] | None) -> dict[str, Any]:
+    if existing_manifest and isinstance(existing_manifest.get("starterPresets"), dict):
+        return dict(existing_manifest["starterPresets"])
+    return {
+        "cinematic-portrait": {"botSlug": "ai-porn-generator", "assetId": "ai-porn-generator"},
+        "character-scene": {"botSlug": "image-to-video-generator", "assetId": "image-to-video-generator"},
+        "style-poster": {"botSlug": "neon-art-generator", "assetId": "neon-art-generator"},
+    }
+
+
+def _existing_asset_for_bot(bot: dict[str, Any], existing_manifest: dict[str, Any]) -> dict[str, Any] | None:
+    assets_by_id = _asset_by_id(existing_manifest)
+    overrides = existing_manifest.get("botPreviews") if isinstance(existing_manifest.get("botPreviews"), dict) else {}
+    override = overrides.get(bot["slug"], {}) if isinstance(overrides, dict) else {}
+    asset_id = str(override.get("assetId") or _safe_slug(str(bot["slug"]))) if isinstance(override, dict) else _safe_slug(str(bot["slug"]))
+    asset = assets_by_id.get(asset_id)
+    if asset:
+        return dict(asset)
+    for candidate in existing_manifest.get("assets", []):
+        if isinstance(candidate, dict) and (candidate.get("botSlug") == bot["slug"] or candidate.get("targetBotSlug") == bot["slug"]):
+            return dict(candidate)
+    return None
+
+
+def _existing_preview_override(bot: dict[str, Any], asset: dict[str, Any], existing_manifest: dict[str, Any]) -> dict[str, Any]:
+    overrides = existing_manifest.get("botPreviews") if isinstance(existing_manifest.get("botPreviews"), dict) else {}
+    override = dict(overrides.get(bot["slug"], {})) if isinstance(overrides, dict) and isinstance(overrides.get(bot["slug"]), dict) else {}
+    override.setdefault("assetId", asset.get("id") or _safe_slug(str(bot["slug"])))
+    override.setdefault("botSpecific", bool(asset.get("botSpecific")))
+    override.setdefault("targetBotExecuted", bool(asset.get("targetBotExecuted")))
+    return override
+
+
+def build_manifest(
+    url_map: dict[str, dict[str, Any]],
+    asset_dir: Path = DEFAULT_ASSET_DIR,
+    dry_run: bool = False,
+    merge_existing: bool = False,
+    existing_manifest: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     checked_at = _now_iso()
     bots = _all_bots()
     bot_by_slug = {str(bot["slug"]): bot for bot in bots}
@@ -165,6 +212,12 @@ def build_manifest(url_map: dict[str, dict[str, Any]], asset_dir: Path = DEFAULT
     for bot in bots:
         slug = str(bot["slug"])
         entry = url_map.get(slug)
+        if not entry and merge_existing and existing_manifest:
+            existing_asset = _existing_asset_for_bot(bot, existing_manifest)
+            if existing_asset:
+                assets.append(existing_asset)
+                bot_previews[slug] = _existing_preview_override(bot, existing_asset, existing_manifest)
+                continue
         if not entry:
             continue
         remote_url = str(entry.get("remoteUrl") or entry.get("url") or entry.get("mediaUrl") or entry.get("imageUrl") or "")
@@ -175,18 +228,13 @@ def build_manifest(url_map: dict[str, dict[str, Any]], asset_dir: Path = DEFAULT
         assets.append(_asset_for_entry(bot=bot, entry=entry, asset_path=asset_path, asset_dir=asset_dir, checked_at=checked_at))
         bot_previews[slug] = {"assetId": _safe_slug(slug), "botSpecific": True, "targetBotExecuted": bool(entry.get("targetBotExecuted"))}
 
-    starter_presets = {
-        "cinematic-portrait": {"botSlug": "ai-porn-generator", "assetId": "ai-porn-generator"},
-        "character-scene": {"botSlug": "image-to-video-generator", "assetId": "image-to-video-generator"},
-        "style-poster": {"botSlug": "neon-art-generator", "assetId": "neon-art-generator"},
-    }
     return {
         "version": f"{checked_at[:10]}-myshell-bot-specific-preview",
         "generatedAt": checked_at,
         "source": "myshell-openapi-widget",
         "assets": assets,
         "botPreviews": bot_previews,
-        "starterPresets": starter_presets,
+        "starterPresets": _starter_presets(existing_manifest if merge_existing else None),
         "summary": {
             "totalBots": len(bots),
             "botSpecificAssets": len(assets),
@@ -218,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--print-worklist", action="store_true", help="Print prompts for every registered Dreamy/MyShell bot.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--allow-partial", action="store_true", help="Allow fewer URLs than registered bots.")
+    parser.add_argument("--merge-existing-manifest", action="store_true", help="Preserve unchanged preview entries from the current manifest.")
     args = parser.parse_args(argv)
 
     if args.print_worklist:
@@ -228,9 +277,25 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         url_map = _load_url_map(args.input)
-        if not args.allow_partial and len(url_map) < len(_all_bots()):
+        if not args.allow_partial and not args.merge_existing_manifest and len(url_map) < len(_all_bots()):
             raise PreviewManifestError(f"Only {len(url_map)} URLs supplied for {len(_all_bots())} registered bots")
-        manifest = build_manifest(url_map, asset_dir=args.asset_dir, dry_run=args.dry_run)
+        existing_manifest: dict[str, Any] | None = None
+        if args.merge_existing_manifest and args.manifest.exists():
+            with args.manifest.open(encoding="utf-8") as manifest_file:
+                existing_manifest = json.load(manifest_file)
+            if not isinstance(existing_manifest, dict):
+                raise PreviewManifestError(f"Existing manifest must be an object: {args.manifest}")
+        manifest = build_manifest(
+            url_map,
+            asset_dir=args.asset_dir,
+            dry_run=args.dry_run,
+            merge_existing=args.merge_existing_manifest,
+            existing_manifest=existing_manifest,
+        )
+        if not args.allow_partial and manifest["summary"]["missingBotSpecificAssets"]:
+            raise PreviewManifestError(
+                f"Only {manifest['summary']['botSpecificAssets']} bot-specific assets available for {len(_all_bots())} registered bots"
+            )
         if not args.dry_run:
             args.manifest.parent.mkdir(parents=True, exist_ok=True)
             args.manifest.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
