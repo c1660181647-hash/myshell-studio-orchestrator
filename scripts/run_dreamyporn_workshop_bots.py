@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import html
 import json
 import re
 import sys
@@ -33,6 +34,7 @@ from studio import (  # noqa: E402
 
 
 DEFAULT_OUTPUT = REPO_ROOT / ".studio-delivery-check" / "dreamyporn-workshop-results.json"
+DEFAULT_HTML_OUTPUT = REPO_ROOT / ".studio-delivery-check" / "dreamyporn-workshop-results.html"
 DEFAULT_DETAIL_BASE_URL = "https://dreamyporn.ai"
 NEXT_FLIGHT_RE = re.compile(r"self\.__next_f\.push\((.*?)\)</script>", re.S)
 VIDEO_SUFFIXES = (".mp4", ".mov", ".webm", ".m4v")
@@ -332,6 +334,117 @@ def _summary(report: dict[str, Any]) -> dict[str, int]:
     }
 
 
+def _html_attr(value: Any) -> str:
+    return html.escape(str(value or ""), quote=True)
+
+
+def _status_bucket(status: Any) -> str:
+    value = str(status or "waiting")
+    if value == "done":
+        return "done"
+    if value in {"submitted", "pending", "running", "processing", "queued"}:
+        return "active"
+    if value == "queue_full":
+        return "queue"
+    if value.startswith("unavailable"):
+        return "unavailable"
+    if value.startswith("error"):
+        return "error"
+    return "waiting"
+
+
+def render_html_report(report: dict[str, Any], path: Path) -> None:
+    results = [item for item in report.get("results", []) if isinstance(item, dict)]
+    done_items = [item for item in results if item.get("status") == "done" and item.get("mediaUrl")]
+    attention_items = [
+        item
+        for item in results
+        if item.get("status") in {"running", "submitted", "pending", "processing", "queued", "queue_full", "unavailable_detail"}
+        or str(item.get("status") or "").startswith("error")
+    ]
+    summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+    summary_markup = "".join(
+        f'<span><b>{_html_attr(key)}</b>{_html_attr(value)}</span>' for key, value in summary.items()
+    )
+    done_markup = "".join(
+        "\n".join(
+            [
+                f'<article class="card done"><header><h2>{_html_attr(item.get("name") or item.get("slug"))}</h2><span>{_html_attr(item.get("slug"))}</span></header>',
+                f'<video controls preload="metadata" poster="{_html_attr(item.get("posterUrl"))}" src="{_html_attr(item.get("mediaUrl"))}"></video>',
+                f'<code>{_html_attr(item.get("taskId"))}</code>',
+                f'<a href="{_html_attr(item.get("mediaUrl"))}" target="_blank" rel="noreferrer">Open media</a></article>',
+            ]
+        )
+        for item in done_items
+    )
+    attention_markup = "".join(
+        "\n".join(
+            [
+                f'<li class="{_html_attr(_status_bucket(item.get("status")))}">',
+                f'<strong>{_html_attr(item.get("name") or item.get("slug"))}</strong>',
+                f'<span>{_html_attr(item.get("slug"))}</span>',
+                f'<code>{_html_attr(item.get("status"))}</code>',
+                f'<small>{_html_attr(item.get("taskId") or item.get("articleId"))}</small>',
+                "</li>",
+            ]
+        )
+        for item in attention_items
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dreamy Workshop Results</title>
+<style>
+:root {{ color-scheme: dark; --bg:#0d0d10; --panel:#17171b; --line:#2a2a30; --text:#f4f4f5; --muted:#a1a1aa; --hot:#ff3f8f; --ok:#48c78e; --warn:#f5b84b; }}
+* {{ box-sizing:border-box; }}
+body {{ margin:0; background:var(--bg); color:var(--text); font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+main {{ width:min(1440px,100%); margin:0 auto; padding:24px; display:grid; gap:18px; }}
+header.top {{ display:grid; gap:10px; }}
+h1,h2,p {{ margin:0; }}
+h1 {{ font-size:26px; line-height:1.15; }}
+p {{ color:var(--muted); }}
+.summary {{ display:flex; flex-wrap:wrap; gap:8px; }}
+.summary span {{ border:1px solid var(--line); background:#121216; border-radius:8px; padding:8px 10px; min-width:92px; display:grid; gap:2px; color:var(--muted); }}
+.summary b {{ color:var(--text); font-size:18px; }}
+.grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:16px; }}
+.card {{ border:1px solid var(--line); background:var(--panel); padding:14px; border-radius:8px; display:grid; gap:10px; }}
+.card header {{ display:flex; justify-content:space-between; gap:12px; align-items:start; }}
+.card h2 {{ font-size:16px; line-height:1.2; }}
+.card span,.card code,li small {{ color:var(--muted); word-break:break-all; }}
+video {{ width:100%; aspect-ratio:16/9; background:#050506; border-radius:6px; display:block; }}
+a {{ color:var(--hot); text-decoration:none; }}
+.attention {{ border:1px solid var(--line); background:#121216; border-radius:8px; padding:14px; }}
+.attention h2 {{ font-size:17px; margin-bottom:10px; }}
+ul {{ list-style:none; padding:0; margin:0; display:grid; gap:8px; }}
+li {{ display:grid; grid-template-columns:minmax(180px,1fr) minmax(120px,.8fr) auto minmax(180px,1fr); gap:10px; align-items:center; padding:10px; border:1px solid var(--line); border-radius:7px; background:#17171b; }}
+li.done code {{ color:var(--ok); }}
+li.active code {{ color:var(--warn); }}
+li.queue code,li.error code {{ color:var(--hot); }}
+li.unavailable code {{ color:var(--muted); }}
+@media (max-width: 760px) {{ main {{ padding:14px; }} li {{ grid-template-columns:1fr; }} }}
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <h1>Dreamy Workshop Results</h1>
+    <p>Generated from real DreamyPorn web API calls. Completed cards below contain playable media URLs.</p>
+    <div class="summary">{summary_markup}</div>
+  </header>
+  <section class="grid">{done_markup}</section>
+  <section class="attention"><h2>Active / Retry / Unavailable</h2><ul>{attention_markup}</ul></section>
+</main>
+</body>
+</html>
+""",
+        encoding="utf-8",
+    )
+
+
 def _target_slugs(report: dict[str, Any], explicit_slugs: list[str], limit: int | None) -> list[str]:
     slugs = explicit_slugs or sorted(_report_bots(report))
     if limit is not None:
@@ -445,12 +558,15 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         if isinstance(record, dict)
     ]
     _write_json(args.output, report)
+    if args.html_output:
+        render_html_report(report, args.html_output)
     return report
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run real DreamyPorn workshop bots and persist generated media results.")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--html-output", type=Path, default=DEFAULT_HTML_OUTPUT)
     parser.add_argument("--slug", action="append", default=[], help="Specific Dreamy slug to process. Repeatable.")
     parser.add_argument("--limit", type=int, help="Limit processed slugs after discovery.")
     parser.add_argument("--max-new-submissions", type=int, default=1)

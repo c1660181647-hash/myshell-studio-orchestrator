@@ -57,6 +57,35 @@ class DreamyPornWorkshopRunnerTest(unittest.TestCase):
 
         self.assertEqual(json.loads(values[0]), ["https://cdn.example/source.jpg"])
 
+    def test_render_html_report_exposes_done_and_active_items(self) -> None:
+        output = SCRIPT_DIR / ".tmp-dreamy-workshop-report.html"
+        try:
+            runner.render_html_report(
+                {
+                    "summary": {"done": 1, "running": 1, "queueFull": 1},
+                    "results": [
+                        {
+                            "slug": "done-bot",
+                            "name": "Done Bot",
+                            "status": "done",
+                            "taskId": "task-done",
+                            "mediaUrl": "https://cdn.example/done.mp4",
+                            "posterUrl": "https://cdn.example/done.jpg",
+                        },
+                        {"slug": "active-bot", "name": "Active Bot", "status": "running", "taskId": "task-active"},
+                        {"slug": "queued-bot", "name": "Queued Bot", "status": "queue_full", "articleId": "queued-bot"},
+                    ],
+                },
+                output,
+            )
+            html = output.read_text(encoding="utf-8")
+        finally:
+            output.unlink(missing_ok=True)
+
+        self.assertIn("https://cdn.example/done.mp4", html)
+        self.assertIn("Active Bot", html)
+        self.assertIn("queue_full", html)
+
 
 if __name__ == "__main__":
     unittest.main()
