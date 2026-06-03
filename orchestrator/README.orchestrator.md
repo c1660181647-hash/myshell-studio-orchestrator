@@ -113,9 +113,16 @@ The summary is value-safe: it includes cookie names, profile coverage, and missi
 
 ```bash
 python scripts/probe_myshell_art_api.py --cookies-file /tmp/myshell-cookies.json
+python scripts/generation_chain_check.py \
+  --base-url https://art-chat-orchestrator-ju35f47zeq-ew.a.run.app \
+  --project k-project-481102 \
+  --check-local-cookies \
+  --probe-local-art-api \
+  --local-cookies-file /tmp/myshell-cookies.json \
+  --require-live
 ```
 
-This default probe calls non-generating auth/task endpoints only. Use `--execute --bot-id <targetBotId> --input-value <form-value>` only when a real Art generation run is intended. The script probes auth first and will not submit generation if MyShell returns `UNAUTHORIZED`.
+These default probes call non-generating auth/task endpoints only. Use `probe_myshell_art_api.py --execute --bot-id <targetBotId> --input-value <form-value>` only when a real Art generation run is intended. The scripts probe auth first and will not submit generation if MyShell returns `UNAUTHORIZED`; do not upload cookies until the probe is ready.
 
 Get `DREAMY_TELEGRAM_INIT_DATA` from a real Telegram Miniapp session. It must look like Telegram WebApp `initData` and include `auth_date` plus `hash`.
 

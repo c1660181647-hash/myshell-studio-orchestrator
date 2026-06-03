@@ -204,10 +204,12 @@ python scripts/generation_chain_check.py \
   --base-url https://art-chat-orchestrator-ju35f47zeq-ew.a.run.app \
   --project k-project-481102 \
   --check-local-cookies \
+  --probe-local-art-api \
+  --local-cookies-file /tmp/myshell-cookies.json \
   --require-live
 ```
 
-This check does not print secret values. It verifies Cloud Run traffic, Secret Manager presence, public health components, MyShell Art API auth smoke, bot-specific generated preview coverage, target-bot execution evidence, optional local MyShell cookie availability, and the live generation smoke. It stays blocked until `/api/studio/bot-previews` reports `summary.botSpecific == summary.total` and `summary.targetBotExecuted == summary.total`, `myshell-dreamy-init-data` and `myshell-cookies` exist, Cloud Run injects them, `/api/studio/art-api-auth-smoke` or CDP auth is ready, and `/api/studio/generation-smoke` accepts fresh media.
+This check does not print secret values. It verifies Cloud Run traffic, Secret Manager presence, public health components, MyShell Art API auth smoke, bot-specific generated preview coverage, target-bot execution evidence, optional local MyShell cookie availability, optional non-generating local Art API auth probing, and the live generation smoke. It stays blocked until `/api/studio/bot-previews` reports `summary.botSpecific == summary.total` and `summary.targetBotExecuted == summary.total`, `myshell-dreamy-init-data` and `myshell-cookies` exist, Cloud Run injects them, `/api/studio/art-api-auth-smoke` or CDP auth is ready, and `/api/studio/generation-smoke` accepts fresh media. If the local Art API probe returns `UNAUTHORIZED`, refresh the MyShell login before uploading cookies.
 
 Bot-specific preview refresh workflow:
 

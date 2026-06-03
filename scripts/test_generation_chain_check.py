@@ -268,6 +268,47 @@ class GenerationChainCheckTest(unittest.TestCase):
         self.assertEqual(local["evidence"]["missingCookieNames"], ["ms_token"])
         self.assertEqual(local["evidence"]["cookieNames"], ["privy-session", "privy-token"])
 
+    def test_report_blocks_when_local_art_api_probe_rejects_cookies(self) -> None:
+        report = generation_chain_check.build_generation_chain_report(
+            base_url="https://studio.example",
+            project="project",
+            require_live=False,
+            check_local_cookies=True,
+            probe_local_art_api=True,
+            local_cookies_file="/tmp/myshell-cookies.json",
+            local_art_api_probe=lambda _path: {
+                "status": "blocked",
+                "authProbe": {"httpStatus": 401, "reason": "UNAUTHORIZED"},
+                "runningTasksProbe": {"httpStatus": 401, "reason": "UNAUTHORIZED"},
+            },
+            fetcher=_fake_fetch(
+                {
+                    "/api/health": {
+                        "status": "ok",
+                        "components": {
+                            "dreamyApiAuth": {"status": "ready"},
+                            "myshellCookies": {"status": "ready"},
+                            "cookieInjection": {"status": "ready"},
+                            "chromeCdp": {"status": "ok"},
+                        },
+                    },
+                    "/api/studio/bot-previews": {
+                        "summary": {"ready": 40, "total": 40, "botSpecific": 40, "targetBotExecuted": 40}
+                    },
+                    "/api/studio/generation-smoke": {
+                        "status": "done",
+                        "latest": {"accepted": True, "mediaUrl": "https://cdn.example/generated.png"},
+                    },
+                }
+            ),
+            runner=_fake_runner(existing_secrets=True),
+        )
+
+        local_art_api = next(item for item in report["requirements"] if item["id"] == "local-art-api-auth")
+        self.assertEqual(local_art_api["status"], "blocked")
+        self.assertEqual(local_art_api["evidence"]["authProbe"]["httpStatus"], 401)
+        self.assertIn("do not upload", " ".join(report["nextActions"]).lower())
+
 
 if __name__ == "__main__":
     unittest.main()

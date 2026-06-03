@@ -144,6 +144,25 @@ def _local_cookie_status() -> dict[str, Any]:
     return payload
 
 
+def _local_art_api_probe(cookies_file: str) -> dict[str, Any]:
+    if not cookies_file:
+        return {"status": "skipped", "message": "No local cookie file was provided for Art API probing."}
+    script_path = Path(__file__).with_name("probe_myshell_art_api.py")
+    completed = subprocess.run(
+        [sys.executable, str(script_path), "--cookies-file", cookies_file],
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        return {"status": "error", "message": f"Art API probe summary was not JSON: {exc}"}
+    if completed.returncode != 0 and payload.get("status") != "ready":
+        return {**payload, "status": payload.get("status") or "blocked"}
+    return payload
+
+
 def _component_status(health: dict[str, Any], component_id: str) -> str:
     component = (health.get("components") or {}).get(component_id)
     return str(component.get("status") or "missing") if isinstance(component, dict) else "missing"
@@ -169,6 +188,9 @@ def build_generation_chain_report(
     region: str = "europe-west1",
     require_live: bool = False,
     check_local_cookies: bool = False,
+    probe_local_art_api: bool = False,
+    local_cookies_file: str = "",
+    local_art_api_probe: Callable[[str], dict[str, Any]] = _local_art_api_probe,
     fetcher: Callable[[str, str, float], dict[str, Any]] = fetch_json,
     runner: Callable[[list[str]], tuple[int, str, str]] = _run_text,
 ) -> dict[str, Any]:
@@ -185,6 +207,7 @@ def build_generation_chain_report(
     secrets = _secret_status(project, runner)
     cloud_run = _cloud_run_status(project, service, region, runner)
     local_cookies = _local_cookie_status() if check_local_cookies else {"status": "skipped"}
+    local_art_api_auth = local_art_api_probe(local_cookies_file) if probe_local_art_api else {"status": "skipped"}
     latest_accepted = _generation_latest_accepted(generation_smoke)
     art_api_ready = bool(art_api_auth.get("ready") or art_api_auth.get("status") == "ready")
     cdp_art_ready = (
@@ -279,6 +302,25 @@ def build_generation_chain_report(
                 },
             }
         )
+    if probe_local_art_api:
+        requirements.append(
+            {
+                "id": "local-art-api-auth",
+                "label": "Local MyShell Art API auth accepts exported cookies",
+                "status": "ready"
+                if local_art_api_auth.get("status") == "ready"
+                else "skipped"
+                if local_art_api_auth.get("status") == "skipped"
+                else "blocked",
+                "evidence": {
+                    "status": local_art_api_auth.get("status"),
+                    "authProbe": local_art_api_auth.get("authProbe"),
+                    "runningTasksProbe": local_art_api_auth.get("runningTasksProbe"),
+                    "execute": local_art_api_auth.get("execute"),
+                    "message": local_art_api_auth.get("message"),
+                },
+            }
+        )
 
     blocking = [item for item in requirements if item["status"] not in {"ready", "skipped"}]
     status = "ready" if not blocking else "blocked" if require_live or any(item["id"] == "live-generation-smoke" for item in blocking) else "degraded"
@@ -295,6 +337,10 @@ def build_generation_chain_report(
                 "Refresh the local MyShell login until the cookie export includes: "
                 + ", ".join(str(name) for name in local_cookies.get("missingCookieNames", []))
                 + "."
+            )
+        if probe_local_art_api and local_art_api_auth.get("status") not in {"ready", "skipped"}:
+            next_actions.append(
+                "Refresh local MyShell login/cookies and rerun the local Art API probe; do not upload cookies until the probe is ready."
             )
         if secrets.get("status") not in {"ready", "skipped"}:
             next_actions.append("Create or update Secret Manager secrets myshell-dreamy-init-data and myshell-cookies.")
@@ -338,6 +384,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--service", default="art-chat-orchestrator")
     parser.add_argument("--region", default="europe-west1")
     parser.add_argument("--check-local-cookies", action="store_true")
+    parser.add_argument("--probe-local-art-api", action="store_true", help="Probe a local cookie file against MyShell Art API without generating.")
+    parser.add_argument("--local-cookies-file", default="", help="Local cookie JSON file for --probe-local-art-api.")
     parser.add_argument("--require-live", action="store_true", help="Exit non-zero unless live generation has accepted media.")
     args = parser.parse_args(argv)
 
@@ -349,6 +397,8 @@ def main(argv: list[str] | None = None) -> int:
             region=args.region,
             require_live=args.require_live,
             check_local_cookies=args.check_local_cookies,
+            probe_local_art_api=args.probe_local_art_api,
+            local_cookies_file=args.local_cookies_file,
         )
     except GenerationChainCheckError as exc:
         print(json.dumps({"status": "error", "message": str(exc)}, indent=2, ensure_ascii=False))
