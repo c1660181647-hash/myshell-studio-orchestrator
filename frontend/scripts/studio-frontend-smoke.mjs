@@ -18,6 +18,11 @@ const currentFile = fileURLToPath(import.meta.url);
 
 export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'studio-title',
+  'conversation-workspace-panel',
+  'bot-selection-panel',
+  'studio-composer',
+  'preview-workspace-panel',
+  'studio-layout-no-overlap',
   'ai-recommendation-agent',
   'ai-recommendation-run',
   'starter-presets',
@@ -88,7 +93,6 @@ export function buildStudioSmokeUrl(frontendUrl) {
   const normalized = normalizeFrontendBaseUrl(frontendUrl);
   const url = new URL(normalized);
   if (!url.pathname || url.pathname === '/') url.pathname = '/';
-  url.searchParams.set('test_route', 'dreamy');
   return url.toString();
 }
 
@@ -298,6 +302,55 @@ async function clickEnabled(checks, page, id, label, locator, timeoutMs) {
   }
 }
 
+async function checkStudioLayoutGeometry(checks, page, timeoutMs) {
+  const locators = {
+    left: page.getByTestId('conversation-workspace-panel'),
+    bot: page.getByTestId('bot-selection-panel'),
+    chat: page.getByTestId('studio-chat-log'),
+    composer: page.getByTestId('studio-composer'),
+    preview: page.getByTestId('preview-workspace-panel'),
+  };
+  try {
+    await Promise.all(
+      Object.values(locators).map((locator) => locator.first().waitFor({ state: 'visible', timeout: timeoutMs })),
+    );
+    const [left, bot, chat, composer, preview] = await Promise.all(
+      Object.values(locators).map((locator) => locator.first().boundingBox()),
+    );
+    const missing = { left, bot, chat, composer, preview };
+    if (!left || !bot || !chat || !composer || !preview) {
+      checks.push({
+        id: 'studio-layout-no-overlap',
+        label: 'Studio layout sections do not overlap',
+        ok: false,
+        message: `Missing layout box: ${Object.entries(missing)
+          .filter(([, box]) => !box)
+          .map(([key]) => key)
+          .join(', ')}`,
+      });
+      return;
+    }
+    const failures = [];
+    if (bot.y + bot.height > chat.y + 1) failures.push('bot selection overlaps chat log');
+    if (chat.y + chat.height > composer.y + 1) failures.push('chat log overlaps composer');
+    if (composer.y + composer.height > left.y + left.height + 1) failures.push('composer is clipped by left panel');
+    if (left.x + left.width > preview.x + 1) failures.push('left panel overlaps preview panel');
+    checks.push({
+      id: 'studio-layout-no-overlap',
+      label: 'Studio layout sections do not overlap',
+      ok: failures.length === 0,
+      message: failures.length ? failures.join('; ') : undefined,
+    });
+  } catch (error) {
+    checks.push({
+      id: 'studio-layout-no-overlap',
+      label: 'Studio layout sections do not overlap',
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function captureScreenshot(page, screenshotPath) {
   if (!screenshotPath) return;
   await fs.mkdir(path.dirname(screenshotPath), { recursive: true });
@@ -340,6 +393,32 @@ export async function runStudioFrontendSmoke(options = {}) {
     await page.waitForLoadState('networkidle', { timeout: Math.min(timeoutMs, 5000) }).catch(() => undefined);
 
     await checkVisible(checks, page, 'studio-title', 'Dreamy Studio title', page.getByText('Dreamy Studio').first(), timeoutMs);
+    await checkVisible(
+      checks,
+      page,
+      'conversation-workspace-panel',
+      'Left conversation workspace panel',
+      page.getByTestId('conversation-workspace-panel'),
+      timeoutMs,
+    );
+    await checkVisible(
+      checks,
+      page,
+      'bot-selection-panel',
+      'Bot selection panel',
+      page.getByTestId('bot-selection-panel'),
+      timeoutMs,
+    );
+    await checkVisible(checks, page, 'studio-composer', 'Studio composer', page.getByTestId('studio-composer'), timeoutMs);
+    await checkVisible(
+      checks,
+      page,
+      'preview-workspace-panel',
+      'Right preview workspace panel',
+      page.getByTestId('preview-workspace-panel'),
+      timeoutMs,
+    );
+    await checkStudioLayoutGeometry(checks, page, timeoutMs);
     await checkVisible(
       checks,
       page,

@@ -10,10 +10,10 @@ import {
   runStudioFrontendSmoke,
 } from './studio-frontend-smoke.mjs';
 
-test('buildStudioSmokeUrl opens the Dreamy test route from a bare dev server URL', () => {
+test('buildStudioSmokeUrl opens the root Studio route from a bare dev server URL', () => {
   assert.equal(
     buildStudioSmokeUrl('http://127.0.0.1:5174'),
-    'http://127.0.0.1:5174/?test_route=dreamy',
+    'http://127.0.0.1:5174/',
   );
 });
 
@@ -98,6 +98,24 @@ test('createSmokeSummary fails when required dispatch queue interaction checks a
 test('runStudioFrontendSmoke records the delivery command center surface', () => {
   assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes('delivery-command-center'));
   assert.match(runStudioFrontendSmoke.toString(), /delivery-command-center/);
+});
+
+test('runStudioFrontendSmoke records non-overlapping Studio workspace layout', () => {
+  const layoutChecks = [
+    'conversation-workspace-panel',
+    'bot-selection-panel',
+    'studio-composer',
+    'preview-workspace-panel',
+    'studio-layout-no-overlap',
+  ];
+  for (const id of layoutChecks) {
+    assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes(id), `${id} should be required`);
+    if (id === 'studio-layout-no-overlap') {
+      assert.match(runStudioFrontendSmoke.toString(), /checkStudioLayoutGeometry/);
+    } else {
+      assert.match(runStudioFrontendSmoke.toString(), new RegExp(id));
+    }
+  }
 });
 
 test('runStudioFrontendSmoke records starter presets and direct preset generation', () => {

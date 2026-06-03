@@ -1,5 +1,5 @@
 export const MINIAPP_PAGE_DEEP_LINKS = {
-  explore: { route: '/' },
+  explore: { route: '/explore' },
   'ai-picks': { route: '/ai-picks' },
   'bot-detail': { route: '/bot' },
   upload: { route: '/upload' },

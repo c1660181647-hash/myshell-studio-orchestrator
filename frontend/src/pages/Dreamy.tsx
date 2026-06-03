@@ -2286,7 +2286,10 @@ function PreviewPanel({
   const latestTimelineMediaUrl = resolveStudioDisplayAssetUrl(latestTimelineExport?.mediaUrl);
 
   return (
-    <section className="relative flex min-h-0 flex-col rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2">
+    <section
+      data-testid="preview-workspace-panel"
+      className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2"
+    >
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-Cr-border-default-v2 px-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg-v2 bg-Cr-beta-white-8-v2">
@@ -2314,7 +2317,7 @@ function PreviewPanel({
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3 [-webkit-overflow-scrolling:touch]">
         <div className="relative flex min-h-[260px] flex-1 items-center justify-center overflow-hidden rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2">
           {selectedSegment?.type === 'video' && selectedSegment.url ? (
             <video
@@ -3335,9 +3338,9 @@ function RecommendationAgentPanel({
   return (
     <div
       data-testid="ai-recommendation-agent"
-      className="mb-3 grid gap-3 rounded-lg-v2 border border-dreamy-brand-hot-v2/35 bg-dreamy-brand-hot-v2/10 p-3 sm:grid-cols-[112px_minmax(0,1fr)_auto]"
+      className="grid gap-2 rounded-lg-v2 border border-dreamy-brand-hot-v2/35 bg-dreamy-brand-hot-v2/10 p-2 sm:grid-cols-[96px_minmax(0,1fr)_auto]"
     >
-      <div className="relative h-[84px] overflow-hidden rounded-md-v2 border border-white/10 bg-black/30">
+      <div className="relative h-[70px] overflow-hidden rounded-md-v2 border border-white/10 bg-black/30">
         <img src={preset.visualUrl} alt="" className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
         <div className="absolute -left-6 top-0 h-full w-12 rotate-12 animate-pulse bg-white/20 blur-sm" />
@@ -3356,7 +3359,7 @@ function RecommendationAgentPanel({
           <Pill>{`${preset.estimatedWaitSeconds}s target`}</Pill>
           <Pill tone={preset.previewAccepted ? 'success' : 'hot'}>{preset.previewLabel}</Pill>
         </div>
-        <div className="mt-1 text-xs leading-5 text-Cr-text-subtle-v2">{preset.recommendation}</div>
+        <div className="mt-1 line-clamp-2 text-xs leading-5 text-Cr-text-subtle-v2">{preset.recommendation}</div>
         <div className="mt-2 flex flex-wrap gap-1.5">
           {preset.steps.map((step) => (
             <span key={step} className="rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 py-1 text-[10px] font-semibold text-Cr-text-subtler-v2">
@@ -3379,14 +3382,217 @@ function RecommendationAgentPanel({
   );
 }
 
+function BotSelectionPanel({
+  starterPresets,
+  botPreviewCards,
+  selectedStarterPresetId,
+  selectedStarterPreset,
+  selectedSegment,
+  submitting,
+  onSelectPreset,
+  onRunPreset,
+}: {
+  starterPresets: StudioStarterPreset[];
+  botPreviewCards: StudioBotPreview[];
+  selectedStarterPresetId?: string;
+  selectedStarterPreset?: StudioStarterPreset | null;
+  selectedSegment?: StudioSegment | null;
+  submitting: boolean;
+  onSelectPreset: (preset: StudioStarterPreset) => void;
+  onRunPreset?: (preset: StudioStarterPreset) => void;
+}) {
+  const recommendedPreset = starterPresets[0];
+  const activeStarterPresetId = selectedStarterPreset?.id || selectedStarterPresetId;
+  const presetByBotSlug = useMemo(
+    () => new Map(starterPresets.map((preset) => [preset.botSlug, preset])),
+    [starterPresets],
+  );
+  const selectPreset = useCallback((preset: StudioStarterPreset) => {
+    onSelectPreset(preset);
+  }, [onSelectPreset]);
+
+  return (
+    <section
+      data-testid="bot-selection-panel"
+      className="shrink-0 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2"
+      aria-label="Dreamy bot selection"
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2 text-xs font-semibold text-Cr-text-subtle-v2">
+          <Bot size={14} className="shrink-0 text-dreamy-brand-hot-v2" />
+          <span className="truncate">Dreamy bots</span>
+        </div>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Pill tone={botPreviewCards.length ? 'hot' : 'default'}>{`${botPreviewCards.length} connected`}</Pill>
+          {selectedStarterPreset && <Pill>{selectedStarterPreset.botSlug}</Pill>}
+        </div>
+      </div>
+
+      <div className="max-h-[min(226px,28dvh)] space-y-2 overflow-y-auto pr-1 [-webkit-overflow-scrolling:touch]">
+        <RecommendationAgentPanel preset={recommendedPreset} submitting={submitting} onRunPreset={onRunPreset} />
+
+        {!!starterPresets.length && (
+          <div data-testid="starter-presets" className="grid gap-2">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
+              <Sparkles size={13} className="text-dreamy-brand-hot-v2" />
+              Starter routes
+            </div>
+            <div data-testid="starter-visual-recommendations" className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+              {starterPresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  data-testid={`starter-preset-${preset.id}`}
+                  aria-label={`Select ${preset.title} preset`}
+                  aria-pressed={activeStarterPresetId === preset.id}
+                  disabled={submitting}
+                  onClick={() => selectPreset(preset)}
+                  className={`group grid w-[148px] shrink-0 overflow-hidden rounded-lg-v2 border text-left transition-colors active:bg-Cr-beta-white-8-v2 disabled:opacity-50 ${
+                    activeStarterPresetId === preset.id
+                      ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
+                      : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2'
+                  }`}
+                >
+                  <span className="relative block h-[62px] overflow-hidden border-b border-Cr-border-default-v2 bg-black/25">
+                    <img
+                      data-testid="starter-bot-preview-image"
+                      src={preset.visualUrl}
+                      alt=""
+                      className="h-full w-full object-cover transition-transform duration-500 group-active:scale-105"
+                    />
+                    <span className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-black/10" />
+                    <span
+                      data-testid={preset.previewAccepted ? 'starter-bot-preview-real' : 'starter-bot-preview-fallback'}
+                      className="absolute left-2 top-2 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                    >
+                      {preset.previewLabel}
+                    </span>
+                    <span className="absolute bottom-0 left-0 h-0.5 w-2/3 animate-pulse rounded-r bg-dreamy-brand-hot-v2" />
+                  </span>
+                  <span className="grid gap-1 p-2">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate text-xs font-semibold text-Cr-text-default-v2">{preset.title}</span>
+                      {activeStarterPresetId === preset.id ? (
+                        <CheckCircle2 size={13} className="shrink-0 text-Cr-text-success-default-v2" />
+                      ) : (
+                        <MousePointer2 size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
+                      )}
+                    </span>
+                    <span className="line-clamp-1 text-[11px] leading-4 text-Cr-text-subtler-v2">{preset.recommendation}</span>
+                    <span
+                      data-testid="starter-bot-preview-state"
+                      className="truncate text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2"
+                    >
+                      {preset.previewAccepted ? `${preset.workflow} · ${preset.previewSource}` : `${preset.workflow} · ${preset.previewStatus}`}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {selectedStarterPreset && (
+          <div
+            data-testid="selected-bot-control-strip"
+            className="grid gap-2 rounded-lg-v2 border border-dreamy-brand-hot-v2/35 bg-dreamy-brand-hot-v2/10 p-2 sm:grid-cols-[52px_minmax(0,1fr)_auto]"
+          >
+            <div className="relative h-10 overflow-hidden rounded-md-v2 bg-black/25">
+              {selectedStarterPreset.visualUrl ? (
+                <img src={selectedStarterPreset.visualUrl} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div className="grid h-full place-items-center text-Cr-text-subtler-v2">
+                  <Bot size={18} />
+                </div>
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="truncate text-xs font-semibold text-Cr-text-default-v2">{selectedStarterPreset.title}</span>
+                <Pill tone="hot">{selectedStarterPreset.workflow}</Pill>
+              </div>
+              <div className="mt-1 truncate text-[11px] text-Cr-text-subtler-v2">{selectedStarterPreset.botSlug}</div>
+            </div>
+            <button
+              type="button"
+              data-testid="starter-preset-direct-generate"
+              disabled={submitting}
+              onClick={() => onRunPreset?.(selectedStarterPreset)}
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md-v2 bg-dreamy-brand-hot-v2 px-3 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2 sm:self-center"
+            >
+              <Clapperboard size={13} />
+              {getStarterPresetRunLabel(selectedStarterPreset, selectedSegment)}
+            </button>
+          </div>
+        )}
+
+        {!!botPreviewCards.length && (
+          <div data-testid="all-bot-previews" className="grid gap-2">
+            <div className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
+              <span className="inline-flex min-w-0 items-center gap-2">
+                <Bot size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
+                <span className="truncate">Connected Dreamy bots</span>
+              </span>
+              <Pill tone={botPreviewCards.every((preview) => preview.accepted && preview.botSpecific) ? 'success' : 'hot'}>
+                {`${botPreviewCards.filter((preview) => preview.accepted && preview.botSpecific).length}/${botPreviewCards.length} bot-specific`}
+              </Pill>
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+              {botPreviewCards.map((preview) => {
+                const imageUrl = resolveStudioDisplayAssetUrl(preview.thumbnailUrl || preview.mediaUrl || preview.posterUrl);
+                const linkedPreset = presetByBotSlug.get(preview.botSlug) || starterPresetFromBotPreview(preview);
+                return (
+                  <button
+                    key={preview.botSlug}
+                    type="button"
+                    data-testid="all-bot-preview-card"
+                    data-bot-slug={preview.botSlug}
+                    disabled={submitting}
+                    aria-pressed={activeStarterPresetId === linkedPreset.id}
+                    onPointerDown={() => selectPreset(linkedPreset)}
+                    onClick={() => selectPreset(linkedPreset)}
+                    className={`grid w-[124px] shrink-0 overflow-hidden rounded-lg-v2 border text-left disabled:opacity-60 ${
+                      activeStarterPresetId === linkedPreset.id
+                        ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
+                        : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2'
+                    }`}
+                  >
+                    <div className="relative h-[58px] bg-black/25">
+                      {imageUrl ? (
+                        <img data-testid="all-bot-preview-image" src={imageUrl} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="grid h-full place-items-center text-Cr-text-subtlest-v2">
+                          <Bot size={18} />
+                        </div>
+                      )}
+                      <span className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                        {previewLabelFor(preview)}
+                      </span>
+                      {preview.targetBotExecuted ? (
+                        <span className="absolute bottom-1.5 right-1.5 rounded bg-Cr-text-success-default-v2/90 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                          executed
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="grid gap-1 p-2">
+                      <span className="truncate text-[11px] font-semibold text-Cr-text-default-v2">{preview.botName}</span>
+                      <span className="truncate text-[10px] uppercase text-Cr-text-subtlest-v2">{preview.botType || preview.pageId || 'bot'}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function Composer({
   mode,
   prompt,
   canSubmitWithoutPrompt,
-  showStarterPresets,
-  starterPresets,
-  botPreviewCards,
-  selectedStarterPresetId,
   selectedStarterPreset,
   selectedSegment,
   previewUrl,
@@ -3404,10 +3610,6 @@ function Composer({
   mode: StudioMode;
   prompt: string;
   canSubmitWithoutPrompt?: boolean;
-  showStarterPresets?: boolean;
-  starterPresets?: StudioStarterPreset[];
-  botPreviewCards?: StudioBotPreview[];
-  selectedStarterPresetId?: string;
   selectedStarterPreset?: StudioStarterPreset | null;
   selectedSegment?: StudioSegment | null;
   previewUrl: string;
@@ -3422,183 +3624,37 @@ function Composer({
   onClearFile: () => void;
   onStop: () => void;
 }) {
-  const visiblePresets = showStarterPresets ? starterPresets || [] : [];
-  const recommendedPreset = visiblePresets[0];
-  const visibleBotPreviewCards = showStarterPresets ? botPreviewCards || [] : [];
-  const activeStarterPresetId = selectedStarterPreset?.id || selectedStarterPresetId;
-  const presetByBotSlug = useMemo(
-    () => new Map(visiblePresets.map((preset) => [preset.botSlug, preset])),
-    [visiblePresets],
-  );
-  const selectPreset = useCallback((preset: StudioStarterPreset) => {
-    onSelectPreset?.(preset);
-  }, [onSelectPreset]);
-
   return (
-    <div className="shrink-0 border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-3">
+    <div data-testid="studio-composer" className="shrink-0 border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">
       <div className="mb-2 flex items-center justify-between gap-3">
         <ModeSwitch mode={mode} onChange={onModeChange} labelScope="Switch composer mode to" />
         <Pill>{mode === 'canvas' ? 'Canvas chain' : 'Player loop'}</Pill>
       </div>
-      <div className="rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-3">
-        <RecommendationAgentPanel preset={recommendedPreset} submitting={submitting} onRunPreset={onRunPreset} />
-        {!!visiblePresets.length && (
-          <div data-testid="starter-presets" className="mb-3 grid gap-2">
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
-              <Sparkles size={13} className="text-dreamy-brand-hot-v2" />
-              Bot previews
-            </div>
-            <div data-testid="starter-visual-recommendations" className="grid gap-2 sm:grid-cols-3">
-              {visiblePresets.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  data-testid={`starter-preset-${preset.id}`}
-                  aria-label={`Select ${preset.title} preset`}
-                  aria-pressed={activeStarterPresetId === preset.id}
-                  disabled={submitting}
-                  onClick={() => selectPreset(preset)}
-                  className={`group grid min-h-[148px] overflow-hidden rounded-lg-v2 border text-left transition-colors active:bg-Cr-beta-white-8-v2 disabled:opacity-50 ${
-                    activeStarterPresetId === preset.id
-                      ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
-                      : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2'
-                  }`}
-                >
-                  <span className="relative block h-[74px] overflow-hidden border-b border-Cr-border-default-v2 bg-black/25">
-                    <img
-                      data-testid="starter-bot-preview-image"
-                      src={preset.visualUrl}
-                      alt=""
-                      className="h-full w-full object-cover transition-transform duration-500 group-active:scale-105"
-                    />
-                    <span className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-black/10" />
-                    <span
-                      data-testid={preset.previewAccepted ? 'starter-bot-preview-real' : 'starter-bot-preview-fallback'}
-                      className="absolute left-2 top-2 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white"
-                    >
-                      {preset.previewLabel}
-                    </span>
-                    <span className="absolute bottom-0 left-0 h-0.5 w-2/3 animate-pulse rounded-r bg-dreamy-brand-hot-v2" />
-                  </span>
-                  <span className="grid gap-1.5 p-3">
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="min-w-0 truncate text-xs font-semibold text-Cr-text-default-v2">{preset.title}</span>
-                      {activeStarterPresetId === preset.id ? (
-                        <CheckCircle2 size={13} className="shrink-0 text-Cr-text-success-default-v2" />
-                      ) : (
-                        <MousePointer2 size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
-                      )}
-                    </span>
-                    <span className="line-clamp-2 text-[11px] leading-4 text-Cr-text-subtler-v2">{preset.recommendation}</span>
-                    <span
-                      data-testid="starter-bot-preview-state"
-                      className="text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2"
-                    >
-                      {preset.previewAccepted ? `${preset.workflow} · ${preset.previewSource}` : `${preset.workflow} · ${preset.previewStatus}`}
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
-            {selectedStarterPreset && (
-              <div className="grid gap-2 rounded-lg-v2 border border-dreamy-brand-hot-v2/35 bg-dreamy-brand-hot-v2/10 p-2 sm:grid-cols-[56px_minmax(0,1fr)_auto]">
-                <div className="relative h-14 overflow-hidden rounded-md-v2 bg-black/25">
-                  {selectedStarterPreset.visualUrl ? (
-                    <img src={selectedStarterPreset.visualUrl} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="grid h-full place-items-center text-Cr-text-subtler-v2">
-                      <Bot size={18} />
-                    </div>
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="truncate text-xs font-semibold text-Cr-text-default-v2">{selectedStarterPreset.title}</span>
-                    <Pill tone="hot">{selectedStarterPreset.workflow}</Pill>
-                  </div>
-                  <div className="mt-1 truncate text-[11px] text-Cr-text-subtler-v2">{selectedStarterPreset.botSlug}</div>
-                  <div className="mt-1 line-clamp-1 text-[11px] text-Cr-text-subtlest-v2">{selectedStarterPreset.recommendation}</div>
-                </div>
-                <button
-                  type="button"
-                  data-testid="starter-preset-direct-generate"
-                  disabled={submitting}
-                  onClick={() => onRunPreset?.(selectedStarterPreset)}
-                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md-v2 bg-dreamy-brand-hot-v2 px-3 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2 sm:self-center"
-                >
-                  <Clapperboard size={13} />
-                  {getStarterPresetRunLabel(selectedStarterPreset, selectedSegment)}
-                </button>
-              </div>
-            )}
-            {!!visibleBotPreviewCards.length && (
-              <div data-testid="all-bot-previews" className="mt-2 grid gap-2">
-                <div className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
-                  <span className="inline-flex min-w-0 items-center gap-2">
-                    <Bot size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
-                    <span className="truncate">Connected Dreamy bots</span>
-                  </span>
-                  <Pill tone={visibleBotPreviewCards.every((preview) => preview.accepted && preview.botSpecific) ? 'success' : 'hot'}>
-                    {`${visibleBotPreviewCards.filter((preview) => preview.accepted && preview.botSpecific).length}/${visibleBotPreviewCards.length} bot-specific`}
-                  </Pill>
-                </div>
-                <div className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
-                  {visibleBotPreviewCards.map((preview) => {
-                    const imageUrl = resolveStudioDisplayAssetUrl(preview.thumbnailUrl || preview.mediaUrl || preview.posterUrl);
-                    const linkedPreset = presetByBotSlug.get(preview.botSlug) || starterPresetFromBotPreview(preview);
-                    return (
-                      <button
-                        key={preview.botSlug}
-                        type="button"
-                        data-testid="all-bot-preview-card"
-                        data-bot-slug={preview.botSlug}
-                        disabled={submitting}
-                        aria-pressed={activeStarterPresetId === linkedPreset.id}
-                        onPointerDown={() => selectPreset(linkedPreset)}
-                        onClick={() => selectPreset(linkedPreset)}
-                        className={`grid w-[132px] shrink-0 overflow-hidden rounded-lg-v2 border text-left disabled:opacity-60 ${
-                          activeStarterPresetId === linkedPreset.id
-                            ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
-                            : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2'
-                        }`}
-                      >
-                        <div className="relative h-[72px] bg-black/25">
-                          {imageUrl ? (
-                            <img data-testid="all-bot-preview-image" src={imageUrl} alt="" className="h-full w-full object-cover" />
-                          ) : (
-                            <div className="grid h-full place-items-center text-Cr-text-subtlest-v2">
-                              <Bot size={18} />
-                            </div>
-                          )}
-                          <span className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[9px] font-semibold text-white">
-                            {previewLabelFor(preview)}
-                          </span>
-                          {preview.targetBotExecuted ? (
-                            <span className="absolute bottom-1.5 right-1.5 rounded bg-Cr-text-success-default-v2/90 px-1.5 py-0.5 text-[9px] font-semibold text-white">
-                              executed
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="grid gap-1 p-2">
-                          <span className="truncate text-[11px] font-semibold text-Cr-text-default-v2">{preview.botName}</span>
-                          <span className="truncate text-[10px] uppercase text-Cr-text-subtlest-v2">{preview.botType || preview.pageId || 'bot'}</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+      <div className="rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2">
+        {selectedStarterPreset && (
+          <div className="mb-2 flex min-w-0 items-center justify-between gap-2 rounded-lg-v2 border border-dreamy-brand-hot-v2/25 bg-dreamy-brand-hot-v2/10 px-2 py-1">
+            <span className="min-w-0 truncate text-[11px] font-semibold text-Cr-text-subtle-v2">
+              {`Selected bot · ${selectedStarterPreset.title}`}
+            </span>
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => onRunPreset?.(selectedStarterPreset)}
+              className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md-v2 bg-Cr-beta-white-8-v2 px-2 text-[11px] font-semibold text-Cr-text-default-v2 disabled:opacity-40"
+            >
+              <Clapperboard size={12} />
+              {getStarterPresetRunLabel(selectedStarterPreset, selectedSegment)}
+            </button>
           </div>
         )}
         <textarea
           value={prompt}
           onChange={(event) => onPromptChange(event.target.value)}
-          rows={3}
-          className="block max-h-28 min-h-16 w-full resize-none bg-transparent text-sm leading-5 text-Cr-text-default-v2 outline-none placeholder:text-Cr-text-subtlest-v2"
+          rows={2}
+          className="block max-h-20 min-h-12 w-full resize-none bg-transparent text-sm leading-5 text-Cr-text-default-v2 outline-none placeholder:text-Cr-text-subtlest-v2"
           placeholder="Describe the next shot, style, or change"
         />
-        <div className="mt-3 flex items-center justify-between gap-2">
+        <div className="mt-2 flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
@@ -6270,12 +6326,13 @@ export default function Dreamy() {
       <main
         className={`relative z-0 min-h-0 flex-1 overflow-hidden ${
           mode === 'canvas'
-            ? 'grid gap-3 p-3 lg:grid-cols-[minmax(340px,0.34fr)_minmax(520px,0.66fr)]'
-            : 'grid gap-3 p-3 lg:grid-cols-[minmax(360px,0.42fr)_minmax(480px,0.58fr)]'
+            ? 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(360px,0.36fr)_minmax(520px,0.64fr)]'
+            : 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(380px,0.38fr)_minmax(520px,0.62fr)]'
         }`}
       >
         <section
-          className={`min-h-0 flex-col overflow-hidden rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 ${
+          data-testid="conversation-workspace-panel"
+          className={`h-full min-h-0 flex-col overflow-hidden rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 ${
             activeTab === 'chat' ? 'flex' : 'hidden lg:flex'
           }`}
         >
@@ -6294,7 +6351,18 @@ export default function Dreamy() {
             <Pill tone={submitting ? 'hot' : 'default'}>{submitting ? 'Running' : mode}</Pill>
           </div>
 
-          <div data-testid="studio-chat-log" className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 [-webkit-overflow-scrolling:touch]">
+          <BotSelectionPanel
+            starterPresets={recommendedStarterPresets}
+            botPreviewCards={connectedBotPreviewCards}
+            selectedStarterPresetId={selectedStarterPresetId}
+            selectedStarterPreset={selectedStarterPreset}
+            selectedSegment={selectedSegment}
+            submitting={submitting}
+            onSelectPreset={selectStarterPreset}
+            onRunPreset={runStarterPreset}
+          />
+
+          <div data-testid="studio-chat-log" className="min-h-[120px] flex-1 space-y-3 overflow-y-auto p-3 [-webkit-overflow-scrolling:touch]">
             {messages.map((item) => (
               <ChatMessage
                 key={item.id}
@@ -6310,10 +6378,6 @@ export default function Dreamy() {
             mode={mode}
             prompt={prompt}
             canSubmitWithoutPrompt={selectedPage?.executor === 'navigation'}
-            showStarterPresets
-            starterPresets={recommendedStarterPresets}
-            botPreviewCards={connectedBotPreviewCards}
-            selectedStarterPresetId={selectedStarterPresetId}
             selectedStarterPreset={selectedStarterPreset}
             selectedSegment={selectedSegment}
             previewUrl={previewUrl}

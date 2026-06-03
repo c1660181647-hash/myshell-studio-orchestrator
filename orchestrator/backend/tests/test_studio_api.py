@@ -1691,6 +1691,7 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(route_coverage["extraRegistryRoutes"], [])
         self.assertIn("/dreamy", route_coverage["coveredRoutes"])
         self.assertIn("/library/:id", route_coverage["coveredRoutes"])
+        self.assertIn("/", route_coverage["ignoredAppRoutes"])
         self.assertIn("/__test-customize-scene", route_coverage["ignoredAppRoutes"])
         self.assertGreaterEqual(gates["agent-registry"]["evidence"]["agentCount"], 7)
         self.assertEqual(gates["agent-registry"]["evidence"]["missingAgentIds"], [])
@@ -2395,7 +2396,7 @@ class StudioApiTest(unittest.TestCase):
 
         page_by_id = {page["id"]: page for page in pages.json()["pages"]}
         expected_routes = {
-            "explore": "/",
+            "explore": "/explore",
             "ai-picks": "/ai-picks",
             "bot-detail": "/bot",
             "upload": "/upload",

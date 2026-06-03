@@ -4,7 +4,7 @@ import {
   resolveStartParamDeepLink,
 } from './deepLinks';
 
-const exploreRouteContract: '/' = MINIAPP_PAGE_DEEP_LINKS.explore.route;
+const exploreRouteContract: '/explore' = MINIAPP_PAGE_DEEP_LINKS.explore.route;
 const aiPicksRouteContract: '/ai-picks' = MINIAPP_PAGE_DEEP_LINKS['ai-picks'].route;
 const botDetailRouteContract: '/bot' = MINIAPP_PAGE_DEEP_LINKS['bot-detail'].route;
 const uploadRouteContract: '/upload' = MINIAPP_PAGE_DEEP_LINKS.upload.route;

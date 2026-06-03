@@ -4,7 +4,7 @@
     {
       "id": "explore",
       "name": "Explore",
-      "appRoute": "/",
+      "appRoute": "/explore",
       "capabilities": ["explore", "category-browse", "bot-discovery"],
       "intentKeywords": ["explore", "discover", "browse bots", "bot discovery", "首页", "探索", "发现"]
     },

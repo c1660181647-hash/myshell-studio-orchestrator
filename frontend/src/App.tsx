@@ -215,7 +215,8 @@ function AppRoutes() {
   return (
     <div className="h-full w-full">
       <Routes>
-        <Route path="/" element={<Explore />} />
+        <Route path="/" element={<Dreamy />} />
+        <Route path="/explore" element={<Explore />} />
         <Route path="/ai-picks" element={<AiPicks />} />
         <Route path="/bot" element={<BotDetail />} />
         <Route path="/profile" element={<Settings />} />

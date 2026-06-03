@@ -103,6 +103,7 @@ PLACEHOLDER_POSTERS = {
 }
 
 IGNORED_FRONTEND_ROUTE_PREFIXES = ("/__",)
+IGNORED_FRONTEND_ROUTE_EXACT = {"/"}
 
 
 def _default_frontend_app_routes_file_for_backend(backend_file: Path) -> Path:
@@ -187,7 +188,10 @@ def _frontend_route_coverage(pages: list[dict[str, Any]]) -> dict[str, Any]:
 
     app_routes = _extract_frontend_app_routes(source)
     ignored_routes = sorted(
-        route for route in app_routes if any(route.startswith(prefix) for prefix in IGNORED_FRONTEND_ROUTE_PREFIXES)
+        route
+        for route in app_routes
+        if route in IGNORED_FRONTEND_ROUTE_EXACT
+        or any(route.startswith(prefix) for prefix in IGNORED_FRONTEND_ROUTE_PREFIXES)
     )
     routable_app_routes = sorted(route for route in app_routes if route not in set(ignored_routes))
     registered_routes = sorted(
