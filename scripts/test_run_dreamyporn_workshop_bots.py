@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+import json
+import sys
+import unittest
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import run_dreamyporn_workshop_bots as runner
+
+
+def _flight_html(info: dict) -> str:
+    payload = '7:[["$","$L16",null,{"info":' + json.dumps(info) + ',"showFooter":true}]]'
+    return f'<script>self.__next_f.push([1,{json.dumps(payload)}])</script>'
+
+
+class DreamyPornWorkshopRunnerTest(unittest.TestCase):
+    def test_extract_detail_info_reads_next_flight_payload(self) -> None:
+        info = {
+            "botName": "AI Oil Massage",
+            "botId": "1779936515",
+            "slugId": "ai-oil-massage",
+            "template": "template6",
+            "singleText": json.dumps(
+                {
+                    "title": "AI Oil Massage",
+                    "form": [{"title": "Drop any Photo", "component": "Uploader", "index": 0, "options": []}],
+                }
+            ),
+        }
+
+        parsed = runner.extract_detail_info(_flight_html(info))
+
+        self.assertEqual(parsed["botId"], "1779936515")
+        self.assertEqual(parsed["slugId"], "ai-oil-massage")
+        self.assertEqual(parsed["singleTextJson"]["form"][0]["component"], "Uploader")
+
+    def test_form_values_fill_supported_components_in_order(self) -> None:
+        form = [
+            {"title": "Mood", "component": "RadioGroup", "index": 2, "options": [{"value": "cinematic"}]},
+            {"title": "Drop any Photo", "component": "Uploader", "index": 0},
+            {"title": "Prompt", "component": "Textarea", "index": 1, "default": ""},
+            {"title": "Optional", "component": "Input", "index": 3, "required": False},
+        ]
+
+        values = runner._form_values(form, source_image_url="https://cdn.example/source.jpg", prompt="verify prompt")
+
+        self.assertEqual(values, ["https://cdn.example/source.jpg", "verify prompt", "cinematic", "verify prompt"])
+
+    def test_form_values_support_multi_uploaders(self) -> None:
+        form = [{"title": "Photos", "component": "Uploader", "index": 0, "multi": True}]
+
+        values = runner._form_values(form, source_image_url="https://cdn.example/source.jpg", prompt="ignored")
+
+        self.assertEqual(json.loads(values[0]), ["https://cdn.example/source.jpg"])
+
+
+if __name__ == "__main__":
+    unittest.main()
