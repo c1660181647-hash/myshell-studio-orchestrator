@@ -3560,10 +3560,12 @@ async def _project_delivery_bundle(
 
 def _generated_media_root() -> Path:
     configured = os.environ.get("STUDIO_GENERATED_DIR")
+    module_path = Path(__file__).resolve()
+    repo_root = module_path.parents[2] if len(module_path.parents) > 2 else None
     candidates = [
         Path(configured) if configured else None,
-        Path(__file__).resolve().parents[2] / "frontend" / "dist" / "generated",
-        Path(__file__).resolve().parent / "frontend" / "dist" / "generated",
+        repo_root / "frontend" / "dist" / "generated" if repo_root else None,
+        module_path.parent / "frontend" / "dist" / "generated",
         Path("/app/frontend/dist/generated"),
     ]
     for candidate in candidates:
