@@ -62,7 +62,7 @@ class DreamyPornWorkshopRunnerTest(unittest.TestCase):
         try:
             runner.render_html_report(
                 {
-                    "summary": {"done": 1, "running": 1, "queueFull": 1},
+                    "summary": {"done": 1, "running": 1, "queueFull": 1, "cancelled": 1},
                     "results": [
                         {
                             "slug": "done-bot",
@@ -74,6 +74,7 @@ class DreamyPornWorkshopRunnerTest(unittest.TestCase):
                         },
                         {"slug": "active-bot", "name": "Active Bot", "status": "running", "taskId": "task-active"},
                         {"slug": "queued-bot", "name": "Queued Bot", "status": "queue_full", "articleId": "queued-bot"},
+                        {"slug": "cancelled-bot", "name": "Cancelled Bot", "status": "cancelled", "taskId": "task-cancelled"},
                     ],
                 },
                 output,
@@ -85,6 +86,7 @@ class DreamyPornWorkshopRunnerTest(unittest.TestCase):
         self.assertIn("https://cdn.example/done.mp4", html)
         self.assertIn("Active Bot", html)
         self.assertIn("queue_full", html)
+        self.assertIn("Cancelled Bot", html)
 
 
 if __name__ == "__main__":
