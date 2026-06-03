@@ -159,6 +159,34 @@ class GenerationChainCheckTest(unittest.TestCase):
         blocking_ids = {item["id"] for item in report["blocking"]}
         self.assertIn("target-bot-preview-execution", blocking_ids)
 
+    def test_report_next_actions_mentions_captcha_required(self) -> None:
+        report = generation_chain_check.build_generation_chain_report(
+            base_url="https://studio.example",
+            project="project",
+            require_live=False,
+            fetcher=_fake_fetch(
+                {
+                    "/api/health": {
+                        "status": "degraded",
+                        "components": {
+                            "dreamyApiAuth": {"status": "ready"},
+                            "myshellCookies": {"status": "ready"},
+                            "cookieInjection": {"status": "captcha_required"},
+                            "chromeCdp": {"status": "ok"},
+                        },
+                    },
+                    "/api/studio/bot-previews": {"summary": {"ready": 40, "total": 40, "botSpecific": 40, "targetBotExecuted": 0}},
+                    "/api/studio/generation-smoke": {
+                        "status": "done",
+                        "latest": {"accepted": True, "mediaUrl": "https://cdn.example/generated.png"},
+                    },
+                }
+            ),
+            runner=_fake_runner(existing_secrets=True),
+        )
+
+        self.assertIn("captcha", " ".join(report["nextActions"]).lower())
+
 
 if __name__ == "__main__":
     unittest.main()

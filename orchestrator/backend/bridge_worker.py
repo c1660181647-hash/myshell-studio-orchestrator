@@ -13,6 +13,19 @@ DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 def _cdp_url():
     return (os.environ.get("MYSHELL_CDP_URL") or DEFAULT_CDP_URL).rstrip("/")
 
+
+def _page_blocker_state(current_url, body_text):
+    url = str(current_url or "")
+    text = str(body_text or "")
+    lower_text = text.lower()
+    if "cf-captcha" in url or "connection is secure" in lower_text or "challenge-platform" in text:
+        return {
+            "status": "captcha_required",
+            "message": "Cloudflare captcha challenge blocked the MyShell Art target page; use a verified browser session or complete the challenge before running target bots.",
+            "currentUrl": url,
+        }
+    return {"status": "ok", "message": "", "currentUrl": url}
+
 async def generate(bot_slug, gen_button, image_b64, prompt=""):
     cdp_url = _cdp_url()
     pages = (await httpx.AsyncClient().get(f"{cdp_url}/json")).json()
@@ -47,6 +60,13 @@ async def generate(bot_slug, gen_button, image_b64, prompt=""):
         # Navigate to bot
         await cdp("Page.navigate", {"url": f"https://art.myshell.ai/creative/{bot_slug}"})
         await asyncio.sleep(8)
+
+        blocker = _page_blocker_state(
+            await ev("location.href"),
+            await ev("document.body.innerText.slice(0, 1000)"),
+        )
+        if blocker["status"] != "ok":
+            return blocker
         
         # Record existing embed_obj images BEFORE generation
         before_imgs_json = await ev("""
@@ -97,6 +117,12 @@ async def generate(bot_slug, gen_button, image_b64, prompt=""):
                 }})()
             """)
             if filled_prompt == "missing":
+                blocker = _page_blocker_state(
+                    await ev("location.href"),
+                    await ev("document.body.innerText.slice(0, 1000)"),
+                )
+                if blocker["status"] != "ok":
+                    return blocker
                 return {"status": "error", "message": "Prompt input not found or unavailable"}
         
         # Click I Agree (appears after upload)

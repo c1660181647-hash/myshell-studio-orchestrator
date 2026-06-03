@@ -265,6 +265,20 @@ def build_generation_chain_report(
 
     blocking = [item for item in requirements if item["status"] not in {"ready", "skipped"}]
     status = "ready" if not blocking else "blocked" if require_live or any(item["id"] == "live-generation-smoke" for item in blocking) else "degraded"
+    next_actions: list[str] = []
+    if blocking:
+        if preview_bot_specific < preview_total:
+            next_actions.append("Refresh bot preview assets until /api/studio/bot-previews summary.botSpecific equals summary.total.")
+        if preview_target_executed < preview_total:
+            next_actions.append("Run each target MyShell bot adapter until /api/studio/bot-previews summary.targetBotExecuted equals summary.total.")
+        if _component_status(health, "cookieInjection") == "captcha_required":
+            next_actions.append("Resolve the MyShell/Cloudflare captcha in a verified browser session before rerunning target-bot execution.")
+        if secrets.get("status") not in {"ready", "skipped"}:
+            next_actions.append("Create or update Secret Manager secrets myshell-dreamy-init-data and myshell-cookies.")
+        if _component_status(health, "dreamyApiAuth") != "ready" or _component_status(health, "myshellCookies") != "ready":
+            next_actions.append("Redeploy Cloud Run so DREAMY_TELEGRAM_INIT_DATA and MYSHELL_COOKIES are injected.")
+        if not latest_accepted:
+            next_actions.append("Run python -m generation_smoke --base-url <public-url> --execute --require-live --timeout 180.")
     return {
         "status": status,
         "readyForDelivery": not blocking,
@@ -290,15 +304,7 @@ def build_generation_chain_report(
             }
             for item in blocking
         ],
-        "nextActions": [
-            "Refresh bot preview assets until /api/studio/bot-previews summary.botSpecific equals summary.total.",
-            "Run each target MyShell bot adapter until /api/studio/bot-previews summary.targetBotExecuted equals summary.total.",
-            "Create or update Secret Manager secrets myshell-dreamy-init-data and myshell-cookies.",
-            "Redeploy Cloud Run so DREAMY_TELEGRAM_INIT_DATA and MYSHELL_COOKIES are injected.",
-            "Run python -m generation_smoke --base-url <public-url> --execute --require-live --timeout 180.",
-        ]
-        if blocking
-        else [],
+        "nextActions": next_actions,
     }
 
 

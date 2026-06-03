@@ -122,6 +122,20 @@ scripts/configure_generation_secrets.sh \
 
 Without `--apply`, this command is a dry-run and does not upload values. The script validates the init data shape and cookie JSON, updates `myshell-dreamy-init-data` plus `myshell-cookies`, triggers Cloud Build, and runs `python -m generation_smoke --execute --require-live` against the public service.
 
+Target bot preview execution evidence is collected before materializing preview assets:
+
+```bash
+python scripts/run_target_bot_previews.py --plan-only --slug brat-generator
+MYSHELL_CDP_URL=http://127.0.0.1:9222 \
+  python scripts/run_target_bot_previews.py \
+  --slug brat-generator \
+  --output .studio-delivery-check/target-bot-preview-urls.json \
+  --merge-existing
+python scripts/materialize_bot_preview_manifest.py --input .studio-delivery-check/target-bot-preview-urls.json
+```
+
+The runner reuses the MyShell Art CDP bridge and only marks `targetBotExecuted: true` after the target page returns a fresh output URL. If health or runner evidence reports `captcha_required`, the browser reached a MyShell/Cloudflare challenge page after cookie injection; use a verified browser session or complete the challenge before rerunning target-bot execution.
+
 ## Tests
 
 ```bash

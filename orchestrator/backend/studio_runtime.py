@@ -325,7 +325,12 @@ def cookie_injection_status(has_cookies: bool, cookie_source: dict[str, Any] | N
         }
 
     raw_status = str(payload.get("status") or "").strip().lower()
-    normalized_status = "ready" if raw_status in {"success", "ready", "ok"} else "error"
+    if raw_status in {"success", "ready", "ok"}:
+        normalized_status = "ready"
+    elif raw_status in {"captcha_required", "challenge_required"}:
+        normalized_status = "captcha_required"
+    else:
+        normalized_status = "error"
     return {
         "status": normalized_status,
         "mode": "cdp-status-file",
@@ -333,6 +338,7 @@ def cookie_injection_status(has_cookies: bool, cookie_source: dict[str, Any] | N
         "checkedAt": payload.get("checkedAt") or payload.get("updatedAt") or "",
         "cookieCount": payload.get("cookieCount", 0),
         "energyDisplay": payload.get("energyDisplay", ""),
+        "currentUrl": payload.get("currentUrl", ""),
         "message": str(payload.get("message") or ("Cookie injection succeeded" if normalized_status == "ready" else "Cookie injection failed")),
     }
 
@@ -355,7 +361,7 @@ async def runtime_health(store_path: str) -> dict[str, Any]:
     degraded_component = (
         not storage_ready
         or not cdp_ready
-        or str(injection_status.get("status") or "") in {"auth_missing", "error", "pending"}
+        or str(injection_status.get("status") or "") in {"auth_missing", "error", "pending", "captcha_required"}
         or credential_setup.get("status") == "needs_configuration"
     )
     overall = "degraded" if degraded_component else "ok"

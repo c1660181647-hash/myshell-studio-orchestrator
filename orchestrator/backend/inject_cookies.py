@@ -34,6 +34,36 @@ def _write_status(status, message, cookie_count=0, energy_display=""):
         )
 
 
+def _write_status_payload(payload):
+    os.makedirs(os.path.dirname(STATUS_PATH) or ".", exist_ok=True)
+    payload = {
+        "checkedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        **payload,
+    }
+    with open(STATUS_PATH, "w", encoding="utf-8") as status_file:
+        json.dump(payload, status_file, ensure_ascii=False)
+
+
+def _classify_post_injection_state(current_url, body_text, energy_display):
+    url = str(current_url or "")
+    text = str(body_text or "")
+    energy = str(energy_display or "")
+    if "cf-captcha" in url or "connection is secure" in text.lower() or "challenge-platform" in text:
+        return {
+            "status": "captcha_required",
+            "message": "Cloudflare captcha challenge blocked the headless browser; use a verified browser session or complete the challenge before target-bot execution.",
+            "energyDisplay": energy,
+            "currentUrl": url,
+        }
+    success = "not found" not in energy
+    return {
+        "status": "success" if success else "failed",
+        "message": "Cookie injection succeeded" if success else "Cookie injection did not reveal a logged-in energy display",
+        "energyDisplay": energy,
+        "currentUrl": url,
+    }
+
+
 def _validate_cookie_payload(payload, source):
     if not isinstance(payload, list):
         raise CookieSourceError(f"{source} must be a valid JSON cookie array")
@@ -144,15 +174,12 @@ async def inject_cookies():
             return r.get("result",{}).get("result",{}).get("value","")
         
         energy = await ev("document.body.innerText.match(/(\\d+)\\s*\\/\\s*(\\d+)/)?.[0] || 'not found'")
+        current_url = await ev("location.href")
+        body_text = await ev("document.body.innerText.slice(0, 1000)")
         print(f"[COOKIES] Energy display: {energy}")
-        success = "not found" not in energy
-        _write_status(
-            "success" if success else "failed",
-            "Cookie injection succeeded" if success else "Cookie injection did not reveal a logged-in energy display",
-            len(cookies),
-            energy,
-        )
-        return success
+        state = _classify_post_injection_state(current_url, body_text, energy)
+        _write_status_payload({**state, "cookieCount": len(cookies)})
+        return state["status"] == "success"
 
 def main():
     try:

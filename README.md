@@ -213,10 +213,18 @@ Bot-specific preview refresh workflow:
 
 ```bash
 python scripts/materialize_bot_preview_manifest.py --print-worklist
+python scripts/run_target_bot_previews.py --plan-only --slug brat-generator
+MYSHELL_CDP_URL=http://127.0.0.1:9222 \
+  python scripts/run_target_bot_previews.py \
+  --slug brat-generator \
+  --output .studio-delivery-check/target-bot-preview-urls.json \
+  --merge-existing
 python scripts/materialize_bot_preview_manifest.py --input /path/to/generated-bot-preview-urls.json
 ```
 
-The input JSON maps each `botSlug` to a real MyShell image URL or an object with `remoteUrl`, optional `prompt`, `sourceWidgetId`, `sourceWidgetName`, and `targetBotExecuted`. The script downloads the images into `frontend/public/generated/bot-previews/`, writes `manifest.json`, and marks each entry as `botSpecific`.
+`run_target_bot_previews.py` uses the same MyShell Art CDP bridge as Studio execution and only writes `targetBotExecuted: true` when the target page returns a fresh output URL. Its output is a materializer input file. The input JSON maps each `botSlug` to a real MyShell image URL or an object with `remoteUrl`, optional `prompt`, `sourceWidgetId`, `sourceWidgetName`, and `targetBotExecuted`. The materializer downloads the images into `frontend/public/generated/bot-previews/`, writes `manifest.json`, and marks each entry as `botSpecific`.
+
+If `/api/health` or the target runner reports `captcha_required`, the cookies were present but the headless/new Chrome profile landed on MyShell/Cloudflare challenge pages. Complete the challenge in a verified browser session or rerun against a trusted CDP profile before expecting target-bot execution evidence.
 
 Running frontend browser smoke after backend and frontend dev servers start:
 

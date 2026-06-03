@@ -974,6 +974,17 @@ class StudioApiTest(unittest.TestCase):
             self.assertEqual(inject_cookies._cdp_url(), "http://cdp.internal:9333")
             self.assertEqual(bridge_worker._cdp_url(), "http://cdp.internal:9333")
 
+    def test_bridge_worker_classifies_cloudflare_captcha(self) -> None:
+        import bridge_worker
+
+        blocker = bridge_worker._page_blocker_state(
+            current_url="https://art.myshell.ai/cf-captcha?originHref=https://art.myshell.ai/creative/brat-generator",
+            body_text="Checking if the site connection is secure",
+        )
+
+        self.assertEqual(blocker["status"], "captcha_required")
+        self.assertIn("Cloudflare", blocker["message"])
+
     def test_myshell_art_auth_requires_successful_cookie_injection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             status_path = Path(tmp_dir) / "cookie-injection-status.json"
@@ -1006,6 +1017,45 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(art["authStatus"]["injectionStatus"], "error")
         self.assertFalse(art["dispatchReady"])
         self.assertEqual(art["dispatchStatus"], "auth_missing")
+
+    def test_myshell_art_auth_reports_captcha_required_after_cookie_injection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            status_path = Path(tmp_dir) / "cookie-injection-status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "status": "captcha_required",
+                        "checkedAt": "2026-06-02T00:00:00Z",
+                        "cookieCount": 1,
+                        "message": "Cloudflare captcha challenge blocked the headless browser",
+                        "currentUrl": "https://art.myshell.ai/cf-captcha?originHref=https://art.myshell.ai/",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "MYSHELL_COOKIES": json.dumps(
+                        [{"name": "token", "value": "redacted", "domain": ".myshell.ai"}]
+                    ),
+                    "MYSHELL_COOKIE_INJECTION_STATUS_PATH": str(status_path),
+                },
+            ):
+                health = self.client.get("/api/health")
+                pages = self.client.get("/api/pages")
+
+        self.assertEqual(health.status_code, 200)
+        cookie_injection = health.json()["components"]["cookieInjection"]
+        self.assertEqual(cookie_injection["status"], "captcha_required")
+        self.assertIn("Cloudflare", cookie_injection["message"])
+        self.assertIn("cf-captcha", cookie_injection["currentUrl"])
+
+        page_by_id = {page["id"]: page for page in pages.json()["pages"]}
+        art = page_by_id["myshell-art"]
+        self.assertEqual(art["authStatus"]["status"], "auth_missing")
+        self.assertEqual(art["authStatus"]["injectionStatus"], "captcha_required")
+        self.assertFalse(art["dispatchReady"])
 
     def test_myshell_art_auth_requires_live_chrome_cdp_after_cookie_injection_success(self) -> None:
         import studio_runtime
@@ -1136,6 +1186,18 @@ class StudioApiTest(unittest.TestCase):
         self.assertFalse(result)
         self.assertTrue(requested_urls)
         self.assertEqual(requested_urls[0], "http://cdp.internal:9333/json")
+
+    def test_cookie_injection_classifies_cloudflare_captcha(self) -> None:
+        import inject_cookies
+
+        state = inject_cookies._classify_post_injection_state(
+            current_url="https://art.myshell.ai/cf-captcha?originHref=https://art.myshell.ai/",
+            body_text="Checking if the site connection is secure",
+            energy_display="not found",
+        )
+
+        self.assertEqual(state["status"], "captcha_required")
+        self.assertIn("headless browser", state["message"])
 
     def test_cookie_injection_reports_invalid_cookie_source_without_throwing(self) -> None:
         import inject_cookies
