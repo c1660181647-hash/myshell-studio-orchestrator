@@ -341,6 +341,7 @@ def _summary(report: dict[str, Any]) -> dict[str, int]:
         "done": sum(1 for item in bots if item.get("status") == "done" and item.get("mediaUrl")),
         "running": sum(1 for item in bots if str(item.get("status") or "") in {"submitted", "pending", "running", "processing", "queued"}),
         "errors": sum(1 for item in bots if str(item.get("status") or "").startswith("error")),
+        "rejected": sum(1 for item in bots if str(item.get("status") or "") == "rejected"),
         "unavailable": sum(1 for item in bots if str(item.get("status") or "").startswith("unavailable")),
         "queueFull": sum(1 for item in bots if item.get("status") == "queue_full"),
         "cancelled": sum(1 for item in bots if str(item.get("status") or "") in {"cancelled", "canceled"}),
@@ -359,8 +360,8 @@ def _status_bucket(status: Any) -> str:
         return "active"
     if value == "queue_full":
         return "queue"
-    if value in {"cancelled", "canceled"}:
-        return "cancelled"
+    if value in {"cancelled", "canceled", "rejected"}:
+        return value
     if value.startswith("unavailable"):
         return "unavailable"
     if value.startswith("error"):
@@ -386,7 +387,18 @@ def render_html_report(report: dict[str, Any], path: Path) -> None:
         item
         for item in results
         if item.get("status")
-        in {"running", "submitted", "pending", "processing", "queued", "queue_full", "unavailable_detail", "cancelled", "canceled"}
+        in {
+            "running",
+            "submitted",
+            "pending",
+            "processing",
+            "queued",
+            "queue_full",
+            "unavailable_detail",
+            "cancelled",
+            "canceled",
+            "rejected",
+        }
         or str(item.get("status") or "").startswith("error")
     ]
     summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
@@ -452,6 +464,7 @@ li {{ display:grid; grid-template-columns:minmax(180px,1fr) minmax(120px,.8fr) a
 li.done code {{ color:var(--ok); }}
 li.active code {{ color:var(--warn); }}
 li.queue code,li.error code {{ color:var(--hot); }}
+li.rejected code {{ color:var(--hot); }}
 li.cancelled code {{ color:var(--muted); }}
 li.unavailable code {{ color:var(--muted); }}
 @media (max-width: 760px) {{ main {{ padding:14px; }} li {{ grid-template-columns:1fr; }} }}
