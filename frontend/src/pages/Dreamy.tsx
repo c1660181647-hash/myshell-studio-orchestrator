@@ -1,11 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, PointerEvent as ReactPointerEvent } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type {
+  ChangeEvent,
+  DragEvent as ReactDragEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  WheelEvent as ReactWheelEvent,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
   Bot,
   CheckCircle2,
-  ChevronLeft,
+  ChevronDown,
   Clapperboard,
   Clock3,
   Copy,
@@ -27,11 +33,14 @@ import {
   RefreshCcw,
   RotateCcw,
   Send,
+  Share2,
   SlidersHorizontal,
   Sparkles,
   Trash2,
+  Volume2,
   Wand2,
   X,
+  Zap,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
@@ -139,8 +148,23 @@ import type {
 import { trackEvent } from '../services/tracking';
 
 type TabKey = 'chat' | 'preview';
-type CanvasTool = 'select' | 'pan';
-type CanvasNodeKind = 'prompt' | 'agent' | 'segment' | 'output';
+type CanvasTool = 'select' | 'pan' | 'connect';
+type CanvasNodeKind =
+  | 'prompt'
+  | 'agent'
+  | 'segment'
+  | 'output'
+  | 'source-text'
+  | 'source-image'
+  | 'source-video'
+  | 'source-audio'
+  | 'ai-text'
+  | 'ai-image'
+  | 'ai-video'
+  | 'ai-audio'
+  | 'annotation';
+type CanvasSourceType = 'text' | 'image' | 'video' | 'audio' | 'json';
+type CanvasBoardId = 'story' | 'media' | 'timeline';
 
 interface CanvasNode {
   id: string;
@@ -159,6 +183,10 @@ interface CanvasNode {
   botSlug?: string;
   botName?: string;
   mediaUrl?: string;
+  sourceType?: CanvasSourceType;
+  fileName?: string;
+  outputText?: string;
+  boardId?: CanvasBoardId;
 }
 
 interface CanvasConnection {
@@ -166,6 +194,21 @@ interface CanvasConnection {
   from: string;
   to: string;
   label?: string;
+  sourceHandle?: string;
+  targetHandle?: string;
+}
+
+interface CanvasSnapshot {
+  customNodes: CanvasNode[];
+  customConnections: CanvasConnection[];
+  positionOverrides: Record<string, { x: number; y: number }>;
+}
+
+interface CanvasContextMenuState {
+  screenX: number;
+  screenY: number;
+  canvasX: number;
+  canvasY: number;
 }
 
 function getInitialCanvasView() {
@@ -316,7 +359,7 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
     articleId: DEFAULT_DREAMY_SLUG,
     recommendation: 'Verified workshop bot with completed media already staged in the timeline.',
     visualUrl: VERIFIED_WORKSHOP_SEGMENTS[0].posterUrl || presetCinematicGif,
-    fallbackVisualUrl: VERIFIED_WORKSHOP_SEGMENTS[0].posterUrl || presetCinematicGif,
+    fallbackVisualUrl: presetCinematicGif,
     previewStatus: 'done',
     previewAccepted: true,
     previewSource: 'dreamyporn-workshop-web',
@@ -337,7 +380,7 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
     articleId: DREAMY_VIDEO_SLUG,
     recommendation: 'Verified workshop bot used as the second timeline segment.',
     visualUrl: VERIFIED_WORKSHOP_SEGMENTS[1].posterUrl || presetCharacterGif,
-    fallbackVisualUrl: VERIFIED_WORKSHOP_SEGMENTS[1].posterUrl || presetCharacterGif,
+    fallbackVisualUrl: presetCharacterGif,
     previewStatus: 'done',
     previewAccepted: true,
     previewSource: 'dreamyporn-workshop-web',
@@ -345,6 +388,177 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
     workflow: 'Workshop video',
     steps: ['Verified bot', 'Next segment', 'Timeline'],
     estimatedWaitSeconds: 0,
+  },
+];
+
+const DREAMY_CATALOG_FALLBACK_PRESETS: StudioStarterPreset[] = [
+  {
+    id: 'catalog-aurora-dusk',
+    title: 'Aurora Dusk',
+    prompt: 'Animate the current Dreamy source into a five second Aurora Dusk video segment with smooth cinematic motion.',
+    pageId: 'dreamy-miniapp',
+    pageName: 'Dreamy Miniapp',
+    agentId: DEFAULT_STUDIO_AGENT_ID,
+    botSlug: 'aurora-dusk',
+    botId: 'aurora-dusk',
+    articleId: 'aurora-dusk',
+    recommendation: 'Dreamy miniapp video generation for extending Studio timelines.',
+    visualUrl: '',
+    fallbackVisualUrl: presetCinematicGif,
+    previewStatus: 'catalog_ready',
+    previewAccepted: true,
+    previewSource: 'dreamy-catalog',
+    previewLabel: 'Catalog media',
+    workflow: 'Image to video',
+    steps: ['Source image', 'Motion prompt', 'Video segment'],
+    estimatedWaitSeconds: 60,
+  },
+  {
+    id: 'catalog-crystal-rose',
+    title: 'Crystal Rose',
+    prompt: 'Create a polished Dreamy image with Crystal Rose, cinematic lighting and a clean portrait composition.',
+    pageId: 'dreamy-miniapp',
+    pageName: 'Dreamy Miniapp',
+    agentId: DEFAULT_STUDIO_AGENT_ID,
+    botSlug: 'crystal-rose',
+    botId: 'crystal-rose',
+    articleId: 'crystal-rose',
+    recommendation: 'Dreamy miniapp outfit and portrait generation.',
+    visualUrl: '',
+    fallbackVisualUrl: exampleSmall,
+    previewStatus: 'catalog_ready',
+    previewAccepted: true,
+    previewSource: 'dreamy-catalog',
+    previewLabel: 'Catalog media',
+    workflow: 'Text to image',
+    steps: ['Prompt', 'Dreamy bot', 'Image segment'],
+    estimatedWaitSeconds: 30,
+  },
+  {
+    id: 'catalog-ember-fox',
+    title: 'Ember Fox',
+    prompt: 'Create a classic Dreamy scene with Ember Fox, warm studio lighting and a production-ready composition.',
+    pageId: 'dreamy-miniapp',
+    pageName: 'Dreamy Miniapp',
+    agentId: DEFAULT_STUDIO_AGENT_ID,
+    botSlug: 'ember-fox',
+    botId: 'ember-fox',
+    articleId: 'ember-fox',
+    recommendation: 'Dreamy miniapp classic scene generation.',
+    visualUrl: '',
+    fallbackVisualUrl: exampleGood,
+    previewStatus: 'catalog_ready',
+    previewAccepted: true,
+    previewSource: 'dreamy-catalog',
+    previewLabel: 'Catalog media',
+    workflow: 'Text to image',
+    steps: ['Prompt', 'Dreamy bot', 'Image segment'],
+    estimatedWaitSeconds: 30,
+  },
+  {
+    id: 'catalog-jade-river',
+    title: 'Jade River',
+    prompt: 'Create a vivid Dreamy wild encounter style image with Jade River and cinematic lighting.',
+    pageId: 'dreamy-miniapp',
+    pageName: 'Dreamy Miniapp',
+    agentId: DEFAULT_STUDIO_AGENT_ID,
+    botSlug: 'jade-river',
+    botId: 'jade-river',
+    articleId: 'jade-river',
+    recommendation: 'Dreamy miniapp wild encounter image generation.',
+    visualUrl: '',
+    fallbackVisualUrl: exampleMultiple,
+    previewStatus: 'catalog_ready',
+    previewAccepted: true,
+    previewSource: 'dreamy-catalog',
+    previewLabel: 'Catalog media',
+    workflow: 'Text to image',
+    steps: ['Prompt', 'Dreamy bot', 'Image segment'],
+    estimatedWaitSeconds: 30,
+  },
+  {
+    id: 'catalog-luna-star',
+    title: 'Luna Star',
+    prompt: 'Create a character image with Luna Star, clear subject and polished Dreamy composition.',
+    pageId: 'dreamy-miniapp',
+    pageName: 'Dreamy Miniapp',
+    agentId: DEFAULT_STUDIO_AGENT_ID,
+    botSlug: 'luna-star',
+    botId: 'luna-star',
+    articleId: 'luna-star',
+    recommendation: 'Dreamy miniapp character image generation.',
+    visualUrl: '',
+    fallbackVisualUrl: presetCharacterGif,
+    previewStatus: 'catalog_ready',
+    previewAccepted: true,
+    previewSource: 'dreamy-catalog',
+    previewLabel: 'Catalog media',
+    workflow: 'Text to image',
+    steps: ['Prompt', 'Dreamy bot', 'Image segment'],
+    estimatedWaitSeconds: 30,
+  },
+  {
+    id: 'catalog-nova-silk',
+    title: 'Nova Silk',
+    prompt: 'Create a celebrity style Dreamy image with Nova Silk, strong lighting and high-detail composition.',
+    pageId: 'dreamy-miniapp',
+    pageName: 'Dreamy Miniapp',
+    agentId: DEFAULT_STUDIO_AGENT_ID,
+    botSlug: 'nova-silk',
+    botId: 'nova-silk',
+    articleId: 'nova-silk',
+    recommendation: 'Dreamy miniapp celebrity style image generation.',
+    visualUrl: '',
+    fallbackVisualUrl: exampleGood,
+    previewStatus: 'catalog_ready',
+    previewAccepted: true,
+    previewSource: 'dreamy-catalog',
+    previewLabel: 'Catalog media',
+    workflow: 'Text to image',
+    steps: ['Prompt', 'Dreamy bot', 'Image segment'],
+    estimatedWaitSeconds: 30,
+  },
+  {
+    id: 'catalog-scarlet-bloom',
+    title: 'Scarlet Bloom',
+    prompt: 'Create a fashion-forward Dreamy image with Scarlet Bloom, polished framing and cinematic color.',
+    pageId: 'dreamy-miniapp',
+    pageName: 'Dreamy Miniapp',
+    agentId: DEFAULT_STUDIO_AGENT_ID,
+    botSlug: 'scarlet-bloom',
+    botId: 'scarlet-bloom',
+    articleId: 'scarlet-bloom',
+    recommendation: 'Dreamy miniapp fashion image generation.',
+    visualUrl: '',
+    fallbackVisualUrl: exampleSmall,
+    previewStatus: 'catalog_ready',
+    previewAccepted: true,
+    previewSource: 'dreamy-catalog',
+    previewLabel: 'Catalog media',
+    workflow: 'Text to image',
+    steps: ['Prompt', 'Dreamy bot', 'Image segment'],
+    estimatedWaitSeconds: 30,
+  },
+  {
+    id: 'catalog-violet-haze',
+    title: 'Violet Haze',
+    prompt: 'Create a Dreamy category image with Violet Haze, expressive styling and a clean final composition.',
+    pageId: 'dreamy-miniapp',
+    pageName: 'Dreamy Miniapp',
+    agentId: DEFAULT_STUDIO_AGENT_ID,
+    botSlug: 'violet-haze',
+    botId: 'violet-haze',
+    articleId: 'violet-haze',
+    recommendation: 'Dreamy miniapp category image generation.',
+    visualUrl: '',
+    fallbackVisualUrl: presetCinematicGif,
+    previewStatus: 'catalog_ready',
+    previewAccepted: true,
+    previewSource: 'dreamy-catalog',
+    previewLabel: 'Catalog media',
+    workflow: 'Text to image',
+    steps: ['Prompt', 'Dreamy bot', 'Image segment'],
+    estimatedWaitSeconds: 30,
   },
 ];
 
@@ -485,6 +699,30 @@ function getStarterPresetRunLabel(preset: StudioStarterPreset, sourceSegment?: S
   return getStarterPresetAction(preset, sourceSegment) === 'extend' ? 'Append segment' : 'Add segment';
 }
 
+function verifiedWorkshopBotMatches(
+  segment: StudioSegment,
+  target: Partial<Pick<StudioStarterPreset, 'botSlug' | 'botId' | 'articleId' | 'title'>>,
+): boolean {
+  const values = [target.botSlug, target.botId, target.articleId, target.title].filter(Boolean).map((value) => String(value).toLowerCase());
+  const segmentValues = [segment.botSlug, segment.botId, segment.articleId, segment.botName]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase());
+  return values.some((value) => segmentValues.includes(value));
+}
+
+function findVerifiedWorkshopSegmentForBot(
+  target: Partial<Pick<StudioStarterPreset, 'botSlug' | 'botId' | 'articleId' | 'title'>>,
+): StudioSegment | null {
+  return VERIFIED_WORKSHOP_SEGMENTS.find((segment) => verifiedWorkshopBotMatches(segment, target)) || null;
+}
+
+function resolveVerifiedWorkshopVisual(
+  target: Partial<Pick<StudioStarterPreset, 'botSlug' | 'botId' | 'articleId' | 'title'>>,
+): string {
+  const segment = findVerifiedWorkshopSegmentForBot(target);
+  return resolveStudioDisplayAssetUrl(segment?.posterUrl || '') || resolveStudioDisplayAssetUrl(segment?.url || '') || '';
+}
+
 function previewLabelFor(preview?: StudioBotPreview): string {
   if (!preview) return 'Local fallback';
   if (preview.status === 'ready' && preview.accepted) {
@@ -538,7 +776,20 @@ function parseManualBotEntries(value: string): ManualBotEntry[] {
 
 function starterPresetFromBotPreview(preview: StudioBotPreview): StudioStarterPreset {
   const botType = preview.botType || '';
-  const imageUrl = resolveStudioDisplayAssetUrl(preview.thumbnailUrl || preview.mediaUrl || preview.posterUrl) || presetCinematicGif;
+  const fallbackVisualUrl = fallbackVisualForDreamyBot(preview.botSlug, preview.botName);
+  const verifiedVisualUrl = resolveVerifiedWorkshopVisual({
+    botSlug: preview.botSlug,
+    botId: preview.botId,
+    articleId: preview.articleId,
+    title: preview.botName,
+  });
+  const imageUrl = verifiedVisualUrl || resolveStudioDisplayAssetUrl(preview.thumbnailUrl || preview.posterUrl || preview.mediaUrl) || fallbackVisualUrl;
+  const verifiedSegment = findVerifiedWorkshopSegmentForBot({
+    botSlug: preview.botSlug,
+    botId: preview.botId,
+    articleId: preview.articleId,
+    title: preview.botName,
+  });
   const isVideo = botType.toLowerCase().includes('video');
   return {
     id: `dreamy-bot-${preview.botSlug}`,
@@ -550,13 +801,15 @@ function starterPresetFromBotPreview(preview: StudioBotPreview): StudioStarterPr
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
     botSlug: preview.botSlug,
+    botId: preview.botId || verifiedSegment?.botId,
+    articleId: preview.articleId || verifiedSegment?.articleId || preview.botSlug,
     recommendation: preview.generatedPrompt || preview.evidence?.message || `Run ${preview.botName} through the Dreamy miniapp.`,
     visualUrl: imageUrl,
-    fallbackVisualUrl: imageUrl,
-    previewStatus: preview.status,
-    previewAccepted: Boolean(preview.botSpecific || preview.mediaUrl || preview.thumbnailUrl || preview.posterUrl),
-    previewSource: preview.source || 'dreamy-catalog',
-    previewLabel: previewLabelFor(preview),
+    fallbackVisualUrl,
+    previewStatus: verifiedSegment ? 'done' : preview.status,
+    previewAccepted: Boolean(verifiedSegment || preview.botSpecific || preview.mediaUrl || preview.thumbnailUrl || preview.posterUrl),
+    previewSource: verifiedSegment ? 'dreamyporn-workshop-web' : preview.source || 'dreamy-catalog',
+    previewLabel: verifiedSegment ? 'Verified result' : previewLabelFor(preview),
     workflow: workflowForDreamyBotType(botType),
     steps: stepsForDreamyBotType(botType),
     estimatedWaitSeconds: isVideo ? 60 : 30,
@@ -574,16 +827,26 @@ function hydrateStarterPresets(
     const manifestPreview = manifestStarter?.botSlug ? previewBySlug.get(manifestStarter.botSlug) : undefined;
     const previewSlug = manifestPreview && isDreamyStudioBot(manifestPreview) ? manifestStarter?.botSlug || preset.botSlug : preset.botSlug;
     const preview = previewBySlug.get(previewSlug);
-    const previewMedia = resolveStudioDisplayAssetUrl(preview?.thumbnailUrl || preview?.mediaUrl || preview?.posterUrl);
-    const visualUrl = previewMedia || preset.fallbackVisualUrl;
+    const verifiedSegment = findVerifiedWorkshopSegmentForBot({
+      botSlug: previewSlug,
+      botId: preview?.botId || preset.botId,
+      articleId: preview?.articleId || preset.articleId,
+      title: preview?.botName || preset.title,
+    });
+    const previewMedia =
+      resolveStudioDisplayAssetUrl(verifiedSegment?.posterUrl || '') ||
+      resolveStudioDisplayAssetUrl(preview?.thumbnailUrl || preview?.posterUrl || preview?.mediaUrl);
+    const visualUrl = previewMedia || preset.visualUrl || preset.fallbackVisualUrl;
     return {
       ...preset,
       botSlug: previewSlug,
+      botId: preview?.botId || verifiedSegment?.botId || preset.botId,
+      articleId: preview?.articleId || verifiedSegment?.articleId || preset.articleId,
       visualUrl,
-      previewStatus: preview?.status || preset.previewStatus,
-      previewAccepted: preview ? Boolean(preview.accepted) : preset.previewAccepted,
-      previewSource: preview?.source || preset.previewSource,
-      previewLabel: preview ? previewLabelFor(preview) : preset.previewLabel,
+      previewStatus: verifiedSegment ? 'done' : preview?.status || preset.previewStatus,
+      previewAccepted: Boolean(verifiedSegment || (preview ? preview.accepted : preset.previewAccepted)),
+      previewSource: verifiedSegment ? 'dreamyporn-workshop-web' : preview?.source || preset.previewSource,
+      previewLabel: verifiedSegment ? 'Verified result' : preview ? previewLabelFor(preview) : preset.previewLabel,
     };
   });
 }
@@ -780,8 +1043,131 @@ function getSegmentMedia(segment?: StudioSegment | null): string {
   return resolveStudioDisplayAssetUrl(segment.type === 'video' ? segment.posterUrl || segment.url : segment.url || segment.posterUrl);
 }
 
+const FAILED_DISPLAY_SEGMENT_STATUSES = new Set(['error', 'auth_missing', 'timeout', 'cancelled']);
+
+function isFailedDisplaySegment(segment?: StudioSegment | null): boolean {
+  return Boolean(segment?.status && FAILED_DISPLAY_SEGMENT_STATUSES.has(segment.status));
+}
+
+function getTimelineDisplaySegments(segments: StudioSegment[] = []): StudioSegment[] {
+  return segments.filter((segment) => !isFailedDisplaySegment(segment));
+}
+
+function fallbackVisualForDreamyBot(botSlug?: string, botName?: string): string {
+  const value = `${botSlug || ''} ${botName || ''}`.toLowerCase();
+  return value.includes('futa') ? presetCharacterGif : presetCinematicGif;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+const CANVAS_BOARDS: Array<{ id: CanvasBoardId; label: string }> = [
+  { id: 'story', label: 'Story' },
+  { id: 'media', label: 'Media' },
+  { id: 'timeline', label: 'Timeline' },
+];
+
+const AI_CANVAS_NODE_LIBRARY: Array<{
+  kind: CanvasNodeKind;
+  title: string;
+  subtitle: string;
+  width: number;
+  height: number;
+  action?: StudioAction;
+  botSlug?: string;
+  sourceType?: CanvasSourceType;
+}> = [
+  {
+    kind: 'source-text',
+    title: 'Source Text',
+    subtitle: 'Prompt, character notes, or shot brief',
+    width: 248,
+    height: 118,
+    sourceType: 'text',
+  },
+  {
+    kind: 'source-image',
+    title: 'Source Image',
+    subtitle: 'Reference image dropped into the canvas',
+    width: 258,
+    height: 146,
+    sourceType: 'image',
+  },
+  {
+    kind: 'source-video',
+    title: 'Source Video',
+    subtitle: 'Reference clip or generated video source',
+    width: 266,
+    height: 150,
+    sourceType: 'video',
+  },
+  {
+    kind: 'source-audio',
+    title: 'Source Audio',
+    subtitle: 'Audio reference or voice material',
+    width: 244,
+    height: 116,
+    sourceType: 'audio',
+  },
+  {
+    kind: 'ai-image',
+    title: 'AI Image',
+    subtitle: 'Generate a source frame from prompt or references',
+    width: 258,
+    height: 132,
+    action: 'generate',
+    botSlug: DEFAULT_DREAMY_SLUG,
+  },
+  {
+    kind: 'ai-video',
+    title: 'AI Video',
+    subtitle: 'Animate selected sources into a short clip',
+    width: 266,
+    height: 136,
+    action: 'extend',
+    botSlug: DREAMY_VIDEO_SLUG,
+  },
+  {
+    kind: 'ai-text',
+    title: 'AI Text',
+    subtitle: 'Rewrite prompt, extract beats, or summarize nodes',
+    width: 248,
+    height: 120,
+    action: 'generate',
+  },
+  {
+    kind: 'annotation',
+    title: 'Annotation',
+    subtitle: 'Planning note pinned on the canvas',
+    width: 220,
+    height: 104,
+  },
+];
+
+const CANVAS_COMMAND_PRESETS = [
+  { label: '/image', value: '/image Generate a polished source frame from the selected references.' },
+  { label: '/video', value: '/video Animate the selected source into a five second Dreamy segment.' },
+  { label: '/extend', value: '/extend Continue the previous timeline segment with matching motion and style.' },
+  { label: '/style', value: '/style Restyle the selected node while preserving the subject and composition.' },
+];
+
+function getCanvasNodeLibraryItem(kind: CanvasNodeKind) {
+  return AI_CANVAS_NODE_LIBRARY.find((item) => item.kind === kind);
+}
+
+function getCanvasDefaultBoard(kind: CanvasNodeKind): CanvasBoardId {
+  if (kind === 'segment' || kind === 'output' || kind === 'ai-video' || kind === 'source-video') return 'timeline';
+  if (kind.startsWith('source-') || kind === 'ai-image' || kind === 'ai-audio') return 'media';
+  return 'story';
+}
+
+function getCanvasNodeMediaMode(kind: CanvasNodeKind): CanvasSourceType | undefined {
+  if (kind === 'source-image') return 'image';
+  if (kind === 'source-video') return 'video';
+  if (kind === 'source-audio') return 'audio';
+  if (kind === 'source-text') return 'text';
+  return undefined;
 }
 
 function getCanvasNodeIcon(kind: CanvasNodeKind) {
@@ -790,7 +1176,42 @@ function getCanvasNodeIcon(kind: CanvasNodeKind) {
     agent: Bot,
     segment: Film,
     output: Layers3,
+    'source-text': PanelRightOpen,
+    'source-image': ImagePlus,
+    'source-video': Film,
+    'source-audio': Play,
+    'ai-text': Sparkles,
+    'ai-image': ImagePlus,
+    'ai-video': Clapperboard,
+    'ai-audio': Play,
+    annotation: SlidersHorizontal,
   }[kind];
+}
+
+function normalizeCanvasNodeKind(value: unknown): CanvasNodeKind {
+  const raw = String(value || '').toLowerCase();
+  const knownKinds: CanvasNodeKind[] = [
+    'prompt',
+    'agent',
+    'segment',
+    'output',
+    'source-text',
+    'source-image',
+    'source-video',
+    'source-audio',
+    'ai-text',
+    'ai-image',
+    'ai-video',
+    'ai-audio',
+    'annotation',
+  ];
+  if (knownKinds.includes(raw as CanvasNodeKind)) return raw as CanvasNodeKind;
+  if (raw.includes('audio')) return raw.includes('source') ? 'source-audio' : 'ai-audio';
+  if (raw.includes('video') || raw.includes('clip')) return raw.includes('source') || raw.includes('media') ? 'source-video' : 'ai-video';
+  if (raw.includes('image') || raw.includes('photo') || raw.includes('picture')) return raw.includes('source') ? 'source-image' : 'ai-image';
+  if (raw.includes('note') || raw.includes('comment')) return 'annotation';
+  if (raw.includes('text') || raw.includes('prompt')) return raw.includes('source') ? 'source-text' : 'ai-text';
+  return 'agent';
 }
 
 function buildCanvasGraph(
@@ -798,7 +1219,7 @@ function buildCanvasGraph(
   positionOverrides: Record<string, { x: number; y: number }>,
 ): { nodes: CanvasNode[]; connections: CanvasConnection[] } {
   const graph = project?.agentGraph?.length ? project.agentGraph : EMPTY_GRAPH;
-  const segments = project?.segments || [];
+  const segments = getTimelineDisplaySegments(project?.segments || []);
   const nodes: CanvasNode[] = [];
   const connections: CanvasConnection[] = [];
 
@@ -818,6 +1239,7 @@ function buildCanvasGraph(
     height: 118,
     status: project ? 'ready' : 'idle',
     prompt: project?.messages?.[project.messages.length - 1]?.content,
+    boardId: 'story',
   });
 
   graph.forEach((agent, index) => {
@@ -846,6 +1268,7 @@ function buildCanvasGraph(
       height: position.height,
       status: agent.status,
       agentId: agent.id,
+      boardId: index > 1 ? 'timeline' : 'story',
     });
 
     connections.push({
@@ -876,6 +1299,8 @@ function buildCanvasGraph(
       botSlug: segment.botSlug,
       botName: segment.botName,
       mediaUrl: getSegmentMedia(segment),
+      sourceType: segment.type,
+      boardId: 'timeline',
     });
 
     const parent = segment.parentSegmentId ? `segment-${segment.parentSegmentId}` : null;
@@ -897,6 +1322,7 @@ function buildCanvasGraph(
     width: 360,
     height: 112,
     status: segments.length ? 'ready' : 'idle',
+    boardId: 'timeline',
   });
 
   if (segments.length) {
@@ -2315,6 +2741,711 @@ function ChatMessage({
   );
 }
 
+function ChatThreadPanel({
+  messages,
+  selectedSegment,
+  submitting,
+  onAction,
+}: {
+  messages: ChatItem[];
+  selectedSegment?: StudioSegment | null;
+  submitting: boolean;
+  onAction: (action: StudioAction, prompt?: string, source?: StudioSegment | null) => void;
+}) {
+  const endRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: 'end' });
+  }, [messages.length, submitting]);
+
+  return (
+    <div
+      data-testid="studio-chat-log"
+      className="min-h-0 flex-1 overflow-y-auto bg-Cr-Bg-soft-v2 p-3 [-webkit-overflow-scrolling:touch]"
+      aria-label="Dreamy chat conversation"
+    >
+      <div className="grid min-h-full content-end gap-3">
+        {messages.map((message) => (
+          <ChatMessage
+            key={message.id}
+            item={message}
+            selectedSegment={selectedSegment}
+            submitting={submitting}
+            onAction={onAction}
+          />
+        ))}
+        <div ref={endRef} />
+      </div>
+    </div>
+  );
+}
+
+function DreamyOrchestratorThread({
+  project,
+  messages,
+  starterPresets,
+  allBotPresets,
+  selectedStarterPresetId,
+  selectedStarterPreset,
+  selectedSegment,
+  manualBotIdsText,
+  manualBotEntries,
+  selectedManualBotEntryId,
+  submitting,
+  onSelectPreset,
+  onManualBotIdsChange,
+  onSelectManualBot,
+  onRunManualBot,
+  onRunManualBotSequence,
+  onRunPreset,
+  onAction,
+}: {
+  project: StudioProject | null;
+  messages: ChatItem[];
+  starterPresets: StudioStarterPreset[];
+  allBotPresets: StudioStarterPreset[];
+  selectedStarterPresetId?: string;
+  selectedStarterPreset?: StudioStarterPreset | null;
+  selectedSegment?: StudioSegment | null;
+  manualBotIdsText: string;
+  manualBotEntries: ManualBotEntry[];
+  selectedManualBotEntryId?: string;
+  submitting: boolean;
+  onSelectPreset: (preset: StudioStarterPreset) => void;
+  onManualBotIdsChange: (value: string) => void;
+  onSelectManualBot: (entry: ManualBotEntry) => void;
+  onRunManualBot: (entry: ManualBotEntry) => void;
+  onRunManualBotSequence: () => void;
+  onRunPreset?: (preset: StudioStarterPreset, prompt?: string) => void;
+  onAction: (action: StudioAction, prompt?: string, source?: StudioSegment | null) => void;
+}) {
+  const [allBotPickerOpen, setAllBotPickerOpen] = useState(false);
+  const activeStarterPresetId = selectedStarterPreset?.id || selectedStarterPresetId;
+  const selectableBotCount = allBotPresets.length || starterPresets.length;
+  const choicePresets = useMemo(() => {
+    const seen = new Set<string>();
+    const ordered = [selectedStarterPreset, ...starterPresets, ...allBotPresets].filter(Boolean) as StudioStarterPreset[];
+    return ordered.filter((preset) => {
+      const key = preset.botSlug || preset.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 4);
+  }, [allBotPresets, selectedStarterPreset, starterPresets]);
+  const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
+  const latestAssistantError = [...messages].reverse().find((message) => message.error);
+  const displayPrompt =
+    latestUserMessage?.content ||
+    selectedStarterPreset?.prompt ||
+    'Generate a 5s rooftop suite at night - neon skyline through the window, slow push-in, cinematic.';
+  const segments = getTimelineDisplaySegments(project?.segments || []);
+  const selectedSegmentIndex = selectedSegment ? segments.findIndex((segment) => segment.id === selectedSegment.id) : -1;
+  const segmentMedia = getSegmentMedia(selectedSegment);
+  const selectedSegmentNumber = selectedSegmentIndex >= 0 ? selectedSegmentIndex + 1 : Math.max(segments.length, 1);
+  const selectedBotName = selectedStarterPreset?.title || selectedSegment?.botName || choicePresets[0]?.title || 'Dreamy bot';
+  const allPresets = allBotPresets.length ? allBotPresets : starterPresets;
+
+  return (
+    <div data-testid="studio-chat-log" className="dreamy-studio-thread" aria-label="Dreamy orchestrator conversation">
+      <div className="dreamy-studio-msg">
+        <div className="dreamy-studio-msg-avatar dreamy-studio-msg-avatar-user">D</div>
+        <div className="min-w-0">
+          <div className="dreamy-studio-who">
+            <span className="dreamy-studio-name">You</span>
+            <span className="dreamy-studio-time">10:41 AM</span>
+          </div>
+          <div className="dreamy-studio-bubble">{displayPrompt}</div>
+        </div>
+      </div>
+
+      <div className="dreamy-studio-msg">
+        <div className="dreamy-studio-msg-avatar dreamy-studio-msg-avatar-bot">
+          <Bot size={15} />
+        </div>
+        <div className="min-w-0">
+          <div className="dreamy-studio-who">
+            <span className="dreamy-studio-name">Orchestrator</span>
+            <span className="dreamy-studio-time">10:41 AM</span>
+          </div>
+          <div className="dreamy-studio-body-text">
+            I found <b className="text-white">{choicePresets.length || selectableBotCount} scenes</b> that match your prompt.
+            Pick the one you want to bring to life.
+          </div>
+          <div className="dreamy-studio-choice-head">
+            <span className="dreamy-studio-eyebrow">Choose a scene</span>
+            <span className="dreamy-studio-faint">{`${choicePresets.length} options`}</span>
+          </div>
+          <div data-testid="all-bot-previews" className="dreamy-studio-choice-list">
+            {choicePresets.map((preset, index) => {
+              const selected = activeStarterPresetId === preset.id;
+              const cost = preset.workflow.toLowerCase().includes('video') ? (index === 2 ? 56 : 48) : 44;
+              const visual = resolveStudioDisplayAssetUrl(preset.visualUrl) || preset.fallbackVisualUrl || fallbackVisualForDreamyBot(preset.botSlug, preset.title);
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  data-testid="dreamy-scene-choice"
+                  aria-pressed={selected}
+                  onClick={() => onSelectPreset(preset)}
+                  className={`dreamy-studio-choice ${selected ? 'is-on' : ''}`}
+                >
+                  <span className="dreamy-studio-choice-thumb">
+                    {visual ? <img src={visual} alt="" /> : null}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="dreamy-studio-choice-title">{preset.title}</span>
+                    <span className="dreamy-studio-choice-desc">
+                      {preset.workflow} · {preset.previewAccepted ? 'ready media' : preset.previewLabel} · 5s
+                    </span>
+                  </span>
+                  <span className="dreamy-studio-pickside">
+                    <span className="dreamy-studio-cost-mini">
+                      <Zap size={11} fill="currentColor" />
+                      {cost}
+                    </span>
+                    <span className="dreamy-studio-radio">
+                      <CheckCircle2 size={11} />
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="dreamy-studio-choice-foot">
+            <button type="button" className="dreamy-studio-ghost-pill" onClick={() => setAllBotPickerOpen(true)}>
+              <RefreshCcw size={13} />
+              Show other scenes
+            </button>
+            <span className="dreamy-studio-faint">Tap a scene to preview · switch anytime</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="dreamy-studio-msg">
+        <div className="dreamy-studio-msg-avatar dreamy-studio-msg-avatar-bot">
+          <Sparkles size={15} />
+        </div>
+        <div className="min-w-0">
+          <div className="dreamy-studio-who">
+            <span className="dreamy-studio-name">Orchestrator</span>
+            <span className="dreamy-studio-time">10:41 AM</span>
+          </div>
+          <div className="dreamy-studio-body-text">
+            Segment <b className="text-white">{String(selectedSegmentNumber).padStart(2, '0')}</b> is ready. Added to the timeline.
+          </div>
+          <div className="dreamy-studio-segment-card">
+            <div className="dreamy-studio-segment-thumb">
+              {segmentMedia ? <img src={segmentMedia} alt="" /> : null}
+              <button type="button" className="dreamy-studio-segment-play" aria-label="Preview segment">
+                <Play size={16} fill="currentColor" />
+              </button>
+              <span className="dreamy-studio-duration">00:05</span>
+            </div>
+            <div className="dreamy-studio-segment-meta">
+              <div className="dreamy-studio-eyebrow">Inputs used</div>
+              <div className="dreamy-studio-seg-pills">
+                <span className="dreamy-studio-seg-pill"><span className="dreamy-studio-faint">Source</span><b>{selectedSegment?.botSlug || selectedStarterPreset?.botSlug || 'keyframe_02'}</b></span>
+                <span className="dreamy-studio-seg-pill"><span className="dreamy-studio-faint">Prompt</span><b>{selectedBotName}</b></span>
+                <span className="dreamy-studio-seg-pill"><span className="dreamy-studio-faint">Style</span><b>Cinematic</b></span>
+                <span className="dreamy-studio-seg-pill"><span className="dreamy-studio-faint">Motion</span><b>Slow</b></span>
+              </div>
+            </div>
+            <div className="dreamy-studio-seg-actions">
+              <button
+                type="button"
+                data-testid="orchestrator-extend-segment"
+                disabled={submitting || (!selectedSegment && !selectedStarterPreset)}
+                onClick={() => {
+                  if (selectedStarterPreset) onRunPreset?.(selectedStarterPreset, `Extend ${selectedBotName} as the next five second shot.`);
+                  else onAction('extend', 'Extend this into the next shot.', selectedSegment);
+                }}
+                className="dreamy-studio-seg-action dreamy-studio-seg-action-primary disabled:opacity-50"
+              >
+                <Plus size={13} />
+                Extend
+              </button>
+              <button
+                type="button"
+                disabled={!selectedSegment || submitting}
+                onClick={() => onAction('extend', 'Use this segment as the source for the next shot.', selectedSegment)}
+                className="dreamy-studio-seg-action disabled:opacity-50"
+              >
+                Use as next source
+              </button>
+              <span className="dreamy-studio-spacer" />
+              <button type="button" className="dreamy-studio-seg-action !w-8 !px-0" aria-label="More segment actions">
+                ...
+              </button>
+            </div>
+          </div>
+          {latestAssistantError?.error && (
+            <div className="mt-3 rounded-lg border border-red-400/35 bg-red-500/10 p-2 text-xs leading-5 text-red-100">
+              {latestAssistantError.error}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="sr-only">
+        {messages.map((message) => (
+          <span key={message.id}>{message.content}</span>
+        ))}
+      </div>
+
+      {allBotPickerOpen && (
+        <div className="dreamy-studio-dialog-backdrop" role="dialog" aria-modal="true" aria-label="All selectable Dreamy bots">
+          <button
+            type="button"
+            className="absolute inset-0"
+            aria-label="Close all bot picker"
+            onClick={() => setAllBotPickerOpen(false)}
+          />
+          <section className="dreamy-studio-dialog">
+            <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-semibold text-Cr-text-default-v2">
+                  <Bot size={15} className="text-dreamy-brand-hot-v2" />
+                  All selectable bots
+                </div>
+                <div className="truncate text-[11px] text-Cr-text-subtler-v2">
+                  Select one bot for the prompt. The canvas preview follows the active choice.
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Pill tone="hot">{`${allPresets.length} bots`}</Pill>
+                <button
+                  type="button"
+                  onClick={() => setAllBotPickerOpen(false)}
+                  className="flex h-8 w-8 items-center justify-center rounded-md-v2 border border-white/10 bg-white/[0.04] text-Cr-text-subtler-v2 active:bg-white/[0.08]"
+                  aria-label="Close all bot picker"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            </div>
+            <div data-testid="all-bots-modal-list" className="min-h-0 flex-1 overflow-y-auto p-4">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {allPresets.map((preset) => (
+                  <BotPresetCard
+                    key={`modal-${preset.id}`}
+                    preset={preset}
+                    selected={activeStarterPresetId === preset.id}
+                    submitting={submitting}
+                    variant="modal"
+                    onSelect={(nextPreset) => {
+                      onSelectPreset(nextPreset);
+                      setAllBotPickerOpen(false);
+                    }}
+                  />
+                ))}
+              </div>
+              <details data-testid="manual-bot-id-panel" className="mt-4 rounded-lg-v2 border border-white/10 bg-white/[0.03] p-3">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 marker:hidden">
+                  <span className="text-xs font-semibold uppercase text-Cr-text-subtler-v2">Manual Bot IDs</span>
+                  <Pill tone={manualBotEntries.length ? 'hot' : 'default'}>{`${manualBotEntries.length} queued`}</Pill>
+                </summary>
+                <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_160px]">
+                  <textarea
+                    data-testid="manual-bot-id-input"
+                    value={manualBotIdsText}
+                    disabled={submitting}
+                    onChange={(event) => onManualBotIdsChange(event.target.value)}
+                    rows={3}
+                    className="min-h-20 resize-none rounded-md-v2 border border-white/10 bg-black/35 px-3 py-2 text-xs leading-5 text-Cr-text-default-v2 outline-none placeholder:text-Cr-text-subtlest-v2 disabled:opacity-50"
+                    placeholder="botId or botId|name|type|slug|articleId"
+                  />
+                  <div className="grid gap-2">
+                    <button
+                      type="button"
+                      data-testid="manual-bot-run-selected"
+                      disabled={submitting || !manualBotEntries.length}
+                      onClick={() => {
+                        const selected = manualBotEntries.find((entry) => entry.id === selectedManualBotEntryId) || manualBotEntries[0];
+                        if (selected) onRunManualBot(selected);
+                      }}
+                      className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md-v2 bg-white/[0.08] px-3 text-xs font-semibold text-Cr-text-default-v2 disabled:opacity-40"
+                    >
+                      <Clapperboard size={13} />
+                      Run selected
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="manual-bot-run-sequence"
+                      disabled={submitting || manualBotEntries.length < 2}
+                      onClick={onRunManualBotSequence}
+                      className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md-v2 bg-dreamy-brand-hot-v2 px-3 text-xs font-semibold text-white disabled:bg-white/[0.08] disabled:text-Cr-text-subtlest-v2"
+                    >
+                      <GitBranch size={13} />
+                      Run sequence
+                    </button>
+                  </div>
+                </div>
+                {!!manualBotEntries.length && (
+                  <div data-testid="manual-bot-sequence-list" className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                    {manualBotEntries.map((entry, index) => (
+                      <button
+                        key={entry.id}
+                        type="button"
+                        disabled={submitting}
+                        aria-pressed={selectedManualBotEntryId === entry.id}
+                        onClick={() => onSelectManualBot(entry)}
+                        className={`min-w-[144px] rounded-md-v2 border px-2 py-2 text-left disabled:opacity-50 ${
+                          selectedManualBotEntryId === entry.id
+                            ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
+                            : 'border-white/10 bg-white/[0.04]'
+                        }`}
+                      >
+                        <span className="block truncate text-xs font-semibold text-Cr-text-default-v2">{entry.botName}</span>
+                        <span className="block truncate text-[10px] text-Cr-text-subtlest-v2">{`${index + 1}. ${entry.botId || entry.botSlug}`}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </details>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DreamyPreviewTimelinePanels({
+  project,
+  selectedSegment,
+  selectedStarterPreset,
+  onSelectSegment,
+  onAction,
+  onRunPreset,
+  onExportAllSegments,
+  timelineExporting,
+  submitting,
+}: {
+  project: StudioProject | null;
+  selectedSegment?: StudioSegment | null;
+  selectedStarterPreset?: StudioStarterPreset | null;
+  onSelectSegment: (segmentId: string) => void;
+  onAction: (action: StudioAction, prompt?: string, source?: StudioSegment | null) => void;
+  onRunPreset?: (preset: StudioStarterPreset, prompt?: string) => void;
+  onExportAllSegments: () => void;
+  timelineExporting: boolean;
+  submitting: boolean;
+}) {
+  const [playing, setPlaying] = useState(false);
+  const segments = getTimelineDisplaySegments(project?.segments || []);
+  const media = getSegmentMedia(selectedSegment);
+  const selectedStarterVisual = resolveStudioDisplayAssetUrl(selectedStarterPreset?.visualUrl);
+  const selectedSegmentFallback = fallbackVisualForDreamyBot(selectedSegment?.botSlug, selectedSegment?.botName);
+  const starterMatchesSelectedSegment = Boolean(
+    selectedStarterPreset && selectedSegment && verifiedWorkshopBotMatches(selectedSegment, selectedStarterPreset),
+  );
+  const showStarterPreview = Boolean(selectedStarterPreset && (!selectedSegment || !starterMatchesSelectedSegment));
+  const stageMedia = showStarterPreview ? selectedStarterVisual : media;
+  const stageFallback = showStarterPreview ? selectedStarterVisual || presetCinematicGif : selectedSegmentFallback;
+  const selectedIndex = selectedSegment ? segments.findIndex((segment) => segment.id === selectedSegment.id) : -1;
+  const selectedNumber = selectedIndex >= 0 ? selectedIndex + 1 : Math.max(segments.length, 1);
+  const totalSeconds = Math.max(segments.length * 5, 5);
+  const latestTimelineExport = project?.timelineExports?.[0] || null;
+  const latestTimelineMediaUrl = resolveStudioDisplayAssetUrl(latestTimelineExport?.mediaUrl);
+  const markerPositions = segments.length
+    ? segments.map((_, index) => `${((index + 0.5) / segments.length) * 100}%`)
+    : ['8%', '34%', '60%', '84%'];
+  const timelineLabels = Array.from({ length: Math.max(segments.length, 2) + 1 }, (_, index) =>
+    `00:${String(index * 5).padStart(2, '0')}`,
+  );
+  const runAddSegment = () => {
+    if (selectedStarterPreset) {
+      onRunPreset?.(selectedStarterPreset, `Append the next five second segment with ${selectedStarterPreset.title}.`);
+      return;
+    }
+    if (selectedSegment) onAction('extend', 'Extend this into the next shot.', selectedSegment);
+  };
+
+  return (
+    <>
+      <section data-testid="preview-workspace-panel" className="dreamy-studio-preview" aria-label="Preview">
+        <div className="dreamy-studio-preview-stage">
+          <div data-testid="preview-main-stage" className="dreamy-studio-player">
+            <div
+              className="dreamy-studio-player-media"
+              style={{
+                backgroundImage: stageMedia ? undefined : `url(${stageFallback})`,
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat',
+                backgroundSize: 'cover',
+              }}
+            >
+              {stageMedia ? (
+                <img
+                  src={stageMedia}
+                  alt={`${selectedStarterPreset?.title || selectedSegment?.botName || 'Dreamy'} preview`}
+                  onError={(event) => {
+                    event.currentTarget.onerror = null;
+                    event.currentTarget.src = stageFallback;
+                  }}
+                />
+              ) : null}
+            </div>
+            <span className="dreamy-studio-scene-tag">
+              <span className="dreamy-studio-live-dot" />
+              {`Preview · Segment ${String(selectedNumber).padStart(2, '0')}`}
+            </span>
+            <span className="dreamy-studio-scene-cap">1920x1080 · 24fps</span>
+
+            <div className="dreamy-studio-marker-track">
+              <div className="dreamy-studio-marker-line" />
+              {markerPositions.map((left, index) => (
+                <span key={`${left}-${index}`} className="dreamy-studio-marker" style={{ left }} />
+              ))}
+            </div>
+
+            <div className="dreamy-studio-controls">
+              <button
+                type="button"
+                className="dreamy-studio-play"
+                onClick={() => setPlaying((value) => !value)}
+                aria-label={playing ? 'Pause preview' : 'Play preview'}
+              >
+                {playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+              </button>
+              <span className="dreamy-studio-time">
+                00:03.21 <span>{`/ 00:${String(Math.min(totalSeconds, 5)).padStart(2, '0')}.00`}</span>
+              </span>
+              <div className="dreamy-studio-scrub" aria-hidden="true">
+                <div className="dreamy-studio-scrub-fill" />
+                <div className="dreamy-studio-scrub-knob" />
+              </div>
+              <button type="button" className="dreamy-studio-control-icon" aria-label="Volume">
+                <Volume2 size={20} />
+              </button>
+              <button type="button" className="dreamy-studio-fit">
+                Fit
+                <ChevronDown size={13} />
+              </button>
+              <button type="button" className="dreamy-studio-control-icon" aria-label="Fullscreen">
+                <Maximize2 size={18} />
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section data-testid="timeline-workbench" className="dreamy-studio-timeline" aria-label="Timeline">
+        <div className="dreamy-studio-timeline-head">
+          <span className="dreamy-studio-timeline-title">Timeline</span>
+          <span className="dreamy-studio-total">{`Total 00:${String(totalSeconds).padStart(2, '0')}.00 · ${segments.length} segments`}</span>
+          <span className="dreamy-studio-spacer" />
+          <div className="dreamy-studio-tool">
+            <button type="button" className="dreamy-studio-tool-button" aria-label="Undo">
+              <RotateCcw size={17} />
+            </button>
+            <button type="button" className="dreamy-studio-tool-button" aria-label="Redo">
+              <RefreshCcw size={17} />
+            </button>
+          </div>
+          <div className="dreamy-studio-zoom">
+            <button type="button" aria-label="Zoom out">-</button>
+            <span className="dreamy-studio-zoom-bar" />
+            <button type="button" aria-label="Zoom in">+</button>
+          </div>
+          <button
+            type="button"
+            data-testid="preview-append-next-segment"
+            disabled={submitting || (!selectedSegment && !selectedStarterPreset)}
+            onClick={runAddSegment}
+            className="dreamy-studio-add disabled:opacity-50"
+          >
+            <Plus size={14} />
+            Add segment
+          </button>
+        </div>
+
+        <div className="dreamy-studio-timeline-body">
+          <div className="dreamy-studio-ruler">
+            {timelineLabels.map((label) => <span key={label}>{label}</span>)}
+          </div>
+          <div className="dreamy-studio-tracks">
+            {segments.map((segment, index) => {
+              const segmentMedia = getSegmentMedia(segment);
+              const segmentFallback = fallbackVisualForDreamyBot(segment.botSlug, segment.botName);
+              return (
+                <Fragment key={segment.id}>
+                  {index > 0 && (
+                    <span className="dreamy-studio-gap">
+                      <button type="button" aria-label="Insert segment" onClick={runAddSegment}>
+                        <Plus size={12} />
+                      </button>
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    data-testid="timeline-segment-card"
+                    onClick={() => onSelectSegment(segment.id)}
+                    className={`dreamy-studio-clip ${segment.id === selectedSegment?.id ? 'is-sel' : ''}`}
+                    style={{
+                      backgroundImage: segmentMedia ? undefined : `url(${segmentFallback})`,
+                      backgroundPosition: 'center',
+                      backgroundSize: 'cover',
+                    }}
+                  >
+                    {segmentMedia ? (
+                      <img
+                        src={segmentMedia}
+                        alt=""
+                        onError={(event) => {
+                          event.currentTarget.style.display = 'none';
+                        }}
+                      />
+                    ) : null}
+                    <span className="dreamy-studio-clip-no">{index + 1}</span>
+                    <span className="dreamy-studio-clip-len">5.0s</span>
+                  </button>
+                </Fragment>
+              );
+            })}
+            {!segments.length && (
+              <div className="flex h-[86px] flex-1 items-center justify-center rounded-lg border border-dashed border-white/15 text-xs text-Cr-text-subtler-v2">
+                Start now to create segment 1
+              </div>
+            )}
+          </div>
+          <div className="dreamy-studio-hint">Drag to reorder · click a segment to edit or preview</div>
+        </div>
+
+        <div className="dreamy-studio-dock">
+          <div className="dreamy-studio-cost">
+            <span className="dreamy-studio-cost-label">Preview render</span>
+            <span className="dreamy-studio-cost-value energy">
+              <Zap size={16} fill="currentColor" />
+              48
+              <span className="dreamy-studio-unit">/ preview</span>
+            </span>
+          </div>
+          <span className="dreamy-studio-cost-div" />
+          <div className="dreamy-studio-cost">
+            <span className="dreamy-studio-cost-label">Spent this project</span>
+            <span className="dreamy-studio-cost-value">
+              <Zap size={16} fill="currentColor" className="text-Cr-text-subtler-v2" />
+              {Math.max(segments.length * 78, 156)}
+              <span className="dreamy-studio-unit">energy</span>
+            </span>
+          </div>
+          <span className="dreamy-studio-spacer" />
+          <span className="dreamy-studio-cost-note">
+            <Zap size={14} fill="currentColor" className="text-yellow-300" />
+            Final render at 1080p · est. 240 energy
+          </span>
+          <button
+            type="button"
+            data-testid="preview-export-all-segments"
+            disabled={!segments.length || timelineExporting}
+            onClick={onExportAllSegments}
+            className="dreamy-studio-start"
+          >
+            {timelineExporting ? 'Rendering' : 'Start now'}
+            <span className="dreamy-studio-cost-chip">
+              {timelineExporting ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} fill="currentColor" />}
+              240
+            </span>
+          </button>
+        </div>
+
+        {latestTimelineExport && (
+          <div data-testid="timeline-export-output-card" className="dreamy-studio-export-output">
+            <Pill tone={latestTimelineExport.status === 'ready' ? 'success' : statusPillTone(latestTimelineExport.status)}>
+              {latestTimelineExport.status}
+            </Pill>
+            <span>{latestTimelineExport.evidence?.message || `Composed ${latestTimelineExport.summary.videoSegments} video segments.`}</span>
+            {latestTimelineMediaUrl && (
+              <a href={latestTimelineMediaUrl} target="_blank" rel="noreferrer">
+                Open composed video
+              </a>
+            )}
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function PromptRoutingPanel({
+  prompt,
+  messages,
+  selectedStarterPreset,
+  selectedSegment,
+  submitting,
+}: {
+  prompt: string;
+  messages: ChatItem[];
+  selectedStarterPreset?: StudioStarterPreset | null;
+  selectedSegment?: StudioSegment | null;
+  submitting: boolean;
+}) {
+  const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
+  const latestAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant');
+  const acceptedPrompt = prompt.trim() || latestUserMessage?.content || selectedStarterPreset?.prompt || '';
+  const targetBotName = selectedStarterPreset?.title || selectedSegment?.botName || 'Choose a bot';
+  const targetBotId = selectedStarterPreset?.botId || selectedSegment?.botId || selectedStarterPreset?.botSlug || selectedSegment?.botSlug || '';
+  const nextAction = selectedSegment ? 'Add next segment' : 'Generate first segment';
+
+  return (
+    <div
+      data-testid="studio-chat-log"
+      className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto p-3 [-webkit-overflow-scrolling:touch]"
+    >
+      <div className="rounded-xl-v2 border border-dreamy-brand-hot-v2/35 bg-dreamy-brand-hot-v2/10 p-3">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-Cr-text-default-v2">Prompt to bot</div>
+            <div className="mt-0.5 truncate text-[11px] text-Cr-text-subtler-v2">
+              {submitting ? 'Calling Dreamy now' : 'One prompt, one selected bot, one timeline result'}
+            </div>
+          </div>
+          <Pill tone={submitting ? 'hot' : acceptedPrompt ? 'success' : 'default'}>
+            {submitting ? 'Running' : acceptedPrompt ? 'Prompt accepted' : 'Waiting'}
+          </Pill>
+        </div>
+
+        <div className="grid gap-2 text-xs">
+          <div className="rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2.5">
+            <div className="mb-1 text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2">Input prompt</div>
+            <div className="line-clamp-3 min-h-5 leading-5 text-Cr-text-default-v2">
+              {acceptedPrompt || 'Type the next shot in the box below.'}
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2.5">
+              <div className="mb-1 text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2">Bot to call</div>
+              <div className="truncate font-semibold text-Cr-text-default-v2">{targetBotName}</div>
+              {targetBotId && <div className="mt-0.5 truncate text-[11px] text-Cr-text-subtler-v2">{targetBotId}</div>}
+            </div>
+            <div className="rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2.5">
+              <div className="mb-1 text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2">Next action</div>
+              <div className="truncate font-semibold text-Cr-text-default-v2">{nextAction}</div>
+              <div className="mt-0.5 truncate text-[11px] text-Cr-text-subtler-v2">
+                {selectedSegment ? `Source: ${selectedSegment.botName}` : 'Starts the timeline'}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {latestAssistantMessage && (
+        <div className="rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-3 text-xs leading-5 text-Cr-text-subtle-v2">
+          <div className="mb-1 text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2">Latest result</div>
+          <div className="line-clamp-3">{latestAssistantMessage.content}</div>
+        </div>
+      )}
+
+      <div className="sr-only">
+        {messages.map((message) => (
+          <span key={message.id}>{message.content}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SegmentCard({
   segment,
   active,
@@ -2340,7 +3471,7 @@ function SegmentCard({
         aria-label={`Select ${segment.botName} segment`}
       >
         {media ? (
-          <img src={media} alt="" className="h-full w-full object-cover opacity-80" />
+          <img src={media} alt="" className="h-full w-full object-contain opacity-80" />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-Cr-Bg-surface-subtle-v2">
             <Film size={18} className="text-Cr-text-subtler-v2" />
@@ -2408,10 +3539,17 @@ function PreviewPanel({
   submitting: boolean;
 }) {
   const media = getSegmentMedia(selectedSegment);
+  const selectedSegmentFallback = fallbackVisualForDreamyBot(selectedSegment?.botSlug, selectedSegment?.botName);
   const selectedStarterVisual = resolveStudioDisplayAssetUrl(selectedStarterPreset?.visualUrl);
+  const starterMatchesSelectedSegment = Boolean(
+    selectedStarterPreset && selectedSegment && verifiedWorkshopBotMatches(selectedSegment, selectedStarterPreset),
+  );
+  const showStarterPreview = Boolean(selectedStarterPreset && (!selectedSegment || !starterMatchesSelectedSegment));
+  const stageMedia = showStarterPreview ? selectedStarterVisual : media;
+  const stageFallback = showStarterPreview ? selectedStarterVisual || presetCinematicGif : selectedSegmentFallback;
   const graph = project?.agentGraph?.length ? project.agentGraph : EMPTY_GRAPH;
   const runningAgents = graph.filter((node) => node.status === 'running' || node.status === 'queued').length;
-  const segments = project?.segments || [];
+  const segments = getTimelineDisplaySegments(project?.segments || []);
   const selectedSegmentIndex = selectedSegment
     ? segments.findIndex((segment) => segment.id === selectedSegment.id)
     : -1;
@@ -2453,20 +3591,28 @@ function PreviewPanel({
         </button>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-3 p-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3">
         <div
           data-testid="preview-main-stage"
-          className="relative flex min-h-[320px] items-center justify-center overflow-hidden rounded-lg-v2 border border-Cr-border-default-v2 bg-[#07080d]"
+          className="relative flex h-[clamp(260px,38dvh,420px)] shrink-0 items-center justify-center overflow-hidden rounded-lg-v2 border border-Cr-border-default-v2 bg-[#07080d]"
+          style={{
+            backgroundImage: stageMedia ? undefined : `url(${stageFallback})`,
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+            backgroundSize: 'contain',
+          }}
         >
-          {selectedSegment?.type === 'video' && selectedSegment.url ? (
-            <video
-              src={resolveStudioDisplayAssetUrl(selectedSegment.url)}
-              poster={resolveStudioDisplayAssetUrl(selectedSegment.posterUrl)}
+          {!showStarterPreview && selectedSegment?.type === 'video' && selectedSegment.url ? (
+            <img
+              src={media || selectedSegmentFallback}
+              alt={`${selectedSegment.botName || 'Selected'} segment preview`}
+              onError={(event) => {
+                event.currentTarget.onerror = null;
+                event.currentTarget.src = selectedSegmentFallback;
+              }}
               className="h-full w-full object-contain"
-              controls
-              playsInline
             />
-          ) : media ? (
+          ) : !showStarterPreview && media ? (
             <img src={media} alt="Selected segment" className="h-full w-full object-contain" />
           ) : selectedStarterPreset ? (
             <div
@@ -2474,7 +3620,7 @@ function PreviewPanel({
               className="relative h-full w-full bg-black/20"
             >
               {selectedStarterVisual ? (
-                <img src={selectedStarterVisual} alt="" className="h-full w-full object-cover opacity-90" />
+                <img src={selectedStarterVisual} alt="" className="h-full w-full object-contain opacity-90" />
               ) : (
                 <div className="grid h-full place-items-center text-Cr-text-subtler-v2">
                   <Bot size={32} />
@@ -2492,7 +3638,12 @@ function PreviewPanel({
           )}
 
           <div className="absolute left-3 top-3 flex flex-wrap gap-2">
-            {selectedSegment ? (
+            {showStarterPreview && selectedStarterPreset ? (
+              <>
+                <Pill tone={selectedStarterPreset.previewAccepted ? 'success' : 'hot'}>{selectedStarterPreset.previewLabel}</Pill>
+                <Pill>{selectedStarterPreset.title}</Pill>
+              </>
+            ) : selectedSegment ? (
               <>
                 <Pill tone={statusPillTone(selectedSegment.status)}>{selectedSegment.status}</Pill>
                 <Pill>{selectedSegment.botName}</Pill>
@@ -2523,7 +3674,7 @@ function PreviewPanel({
 
         <div
           data-testid="timeline-workbench"
-          className="shrink-0 rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-3"
+          className="min-h-0 flex-1 overflow-y-auto rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-3 [-webkit-overflow-scrolling:touch]"
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
@@ -2537,7 +3688,13 @@ function PreviewPanel({
                 type="button"
                 data-testid="preview-segment-rerun"
                 disabled={!selectedSegment || submitting}
-                onClick={() => onAction('retry-agent', 'Rerun this selected segment with stronger continuity and keep it in the timeline.', selectedSegment)}
+                onClick={() => {
+                  if (selectedStarterPreset) {
+                    onRunPreset?.(selectedStarterPreset);
+                  } else {
+                    onAction('retry-agent', 'Rerun this selected segment with stronger continuity and keep it in the timeline.', selectedSegment);
+                  }
+                }}
                 className="inline-flex h-9 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-3 text-xs font-semibold text-Cr-text-default-v2 disabled:text-Cr-text-subtlest-v2"
               >
                 <RefreshCcw size={14} />
@@ -2548,10 +3705,10 @@ function PreviewPanel({
                 data-testid="preview-append-next-segment"
                 disabled={submitting || (!selectedSegment && !selectedStarterPreset)}
                 onClick={() => {
-                  if (selectedSegment) {
-                    onAction('extend', 'Extend this into the next shot', selectedSegment);
-                  } else if (selectedStarterPreset) {
+                  if (selectedStarterPreset) {
                     onRunPreset?.(selectedStarterPreset);
+                  } else if (selectedSegment) {
+                    onAction('extend', 'Extend this into the next shot', selectedSegment);
                   }
                 }}
                 className="inline-flex h-9 items-center gap-1.5 rounded-md-v2 bg-dreamy-brand-hot-v2 px-3 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
@@ -2575,20 +3732,33 @@ function PreviewPanel({
           <div className="mt-3 flex items-center gap-3 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
             {segments.map((segment, index) => {
               const segmentMedia = getSegmentMedia(segment);
+              const segmentFallback = fallbackVisualForDreamyBot(segment.botSlug, segment.botName);
               return (
                 <button
                   key={segment.id}
                   type="button"
                   data-testid="timeline-segment-card"
                   onClick={() => onSelectSegment(segment.id)}
-                  className={`relative h-[104px] w-[178px] shrink-0 overflow-hidden rounded-lg-v2 border text-left ${
+                  className={`relative h-[96px] w-[168px] shrink-0 overflow-hidden rounded-lg-v2 border text-left ${
                     segment.id === selectedSegment?.id
                       ? 'border-dreamy-brand-hot-v2 shadow-[0_0_0_1px_rgba(244,45,118,0.45)]'
                       : 'border-Cr-border-default-v2'
                   } bg-Cr-Bg-surface-default-v2`}
+                  style={{
+                    backgroundImage: segmentMedia ? undefined : `url(${segmentFallback})`,
+                    backgroundPosition: 'center',
+                    backgroundSize: 'cover',
+                  }}
                 >
                   {segmentMedia ? (
-                    <img src={segmentMedia} alt="" className="h-full w-full object-cover opacity-85" />
+                    <img
+                      src={segmentMedia}
+                      alt=""
+                      onError={(event) => {
+                        event.currentTarget.style.display = 'none';
+                      }}
+                      className="h-full w-full object-cover opacity-90"
+                    />
                   ) : (
                     <div className="grid h-full w-full place-items-center bg-Cr-Bg-surface-subtle-v2 text-Cr-text-subtler-v2">
                       <Film size={20} />
@@ -2616,7 +3786,11 @@ function PreviewPanel({
           <div className="mt-3 flex min-w-0 items-center gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-3 py-2 text-xs text-Cr-text-subtle-v2">
             <Clock3 size={14} className="shrink-0 text-dreamy-brand-hot-v2" />
             <span data-testid="video-fast-status" className="min-w-0 flex-1 truncate">
-              {submitting ? 'Generating the next clip...' : 'Preview cost: one short segment per clip.'}
+              {submitting
+                ? 'Generating the next clip...'
+                : segments.length
+                  ? `Timeline cost: ${segments.length} short clip${segments.length === 1 ? '' : 's'} / ${segments.length * 5}s total.`
+                  : 'Timeline cost appears after the first clip.'}
             </span>
             {selectedStarterPreset && (
               <span data-testid="selected-dreamy-bot-preview" className="hidden min-w-0 items-center gap-2 sm:inline-flex">
@@ -2705,6 +3879,7 @@ function CanvasWorkspace({
   project,
   selectedSegment,
   selectedStarterPreset,
+  allBotPresets,
   onSelectSegment,
   onDeleteSegment,
   onAction,
@@ -2714,18 +3889,23 @@ function CanvasWorkspace({
   project: StudioProject | null;
   selectedSegment?: StudioSegment | null;
   selectedStarterPreset?: StudioStarterPreset | null;
+  allBotPresets?: StudioStarterPreset[];
   onSelectSegment: (segmentId: string) => void;
   onDeleteSegment: (segmentId: string) => void;
   onAction: (action: StudioAction, prompt?: string, source?: StudioSegment | null) => void;
   onRunPreset?: (preset: StudioStarterPreset) => void;
   submitting: boolean;
 }) {
+  const canvasSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const canvasFileInputRef = useRef<HTMLInputElement | null>(null);
   const [tool, setTool] = useState<CanvasTool>('select');
   const [initialView] = useState(getInitialCanvasView);
   const [zoom, setZoom] = useState(initialView.zoom);
   const [pan, setPan] = useState(initialView.pan);
+  const [activeBoardId, setActiveBoardId] = useState<CanvasBoardId>('timeline');
   const [activeFlowPresetId, setActiveFlowPresetId] = useState(CANVAS_FLOW_PRESETS[0]?.id || '');
   const [selectedNodeId, setSelectedNodeId] = useState(CANVAS_FLOW_PRESETS[0]?.nodes[0]?.id || 'prompt-root');
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([CANVAS_FLOW_PRESETS[0]?.nodes[0]?.id || 'prompt-root']);
   const [canvasAction, setCanvasAction] = useState<StudioAction>('generate');
   const [canvasCommand, setCanvasCommand] = useState('');
   const [positionOverrides, setPositionOverrides] = useState<Record<string, { x: number; y: number }>>({});
@@ -2733,6 +3913,15 @@ function CanvasWorkspace({
   const [customConnections, setCustomConnections] = useState<CanvasConnection[]>(
     () => CANVAS_FLOW_PRESETS[0]?.connections.map((connection) => ({ ...connection })) || [],
   );
+  const [history, setHistory] = useState<CanvasSnapshot[]>([]);
+  const [future, setFuture] = useState<CanvasSnapshot[]>([]);
+  const [contextMenu, setContextMenu] = useState<CanvasContextMenuState | null>(null);
+  const [connectFromNodeId, setConnectFromNodeId] = useState<string | null>(null);
+  const [isDropActive, setIsDropActive] = useState(false);
+  const [spacePanning, setSpacePanning] = useState(false);
+  const [showBotCatalog, setShowBotCatalog] = useState(false);
+  const [leftPanelOpen, setLeftPanelOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [dragState, setDragState] = useState<{
     id: string;
@@ -2786,22 +3975,87 @@ function CanvasWorkspace({
   );
   const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
   const selectedNode = nodeMap.get(selectedNodeId) || nodes[0] || null;
+  const displaySegments = useMemo(() => getTimelineDisplaySegments(project?.segments || []), [project?.segments]);
   const selectedNodeSegment = selectedNode?.segmentId
-    ? project?.segments.find((segment) => segment.id === selectedNode.segmentId) || null
+    ? displaySegments.find((segment) => segment.id === selectedNode.segmentId) || null
     : selectedSegment || null;
   const isCustomSelected = Boolean(selectedNode && customNodes.some((node) => node.id === selectedNode.id));
   const activeFlowPreset = CANVAS_FLOW_PRESETS.find((preset) => preset.id === activeFlowPresetId) || CANVAS_FLOW_PRESETS[0];
+  const activeSelectedNodeIds = selectedNodeIds.length ? selectedNodeIds : selectedNodeId ? [selectedNodeId] : [];
+  const boardNodes = useMemo(
+    () => nodes.filter((node) => (node.boardId || getCanvasDefaultBoard(node.kind)) === activeBoardId),
+    [activeBoardId, nodes],
+  );
+  const canUndo = history.length > 0;
+  const canRedo = future.length > 0;
+  const canvasBotCatalogPresets = allBotPresets?.length ? allBotPresets : DREAMY_STARTER_PRESETS;
+
+  const createCanvasSnapshot = useCallback<() => CanvasSnapshot>(
+    () => ({
+      customNodes: customNodes.map((node) => ({ ...node })),
+      customConnections: customConnections.map((connection) => ({ ...connection })),
+      positionOverrides: { ...positionOverrides },
+    }),
+    [customConnections, customNodes, positionOverrides],
+  );
+
+  const restoreCanvasSnapshot = useCallback((snapshot: CanvasSnapshot) => {
+    setCustomNodes(snapshot.customNodes.map((node) => ({ ...node })));
+    setCustomConnections(snapshot.customConnections.map((connection) => ({ ...connection })));
+    setPositionOverrides({ ...snapshot.positionOverrides });
+  }, []);
+
+  const commitCanvasSnapshot = useCallback(() => {
+    const snapshot = createCanvasSnapshot();
+    setHistory((prev) => [...prev.slice(-29), snapshot]);
+    setFuture([]);
+  }, [createCanvasSnapshot]);
+
+  const undoCanvas = useCallback(() => {
+    setHistory((prev) => {
+      const snapshot = prev[prev.length - 1];
+      if (!snapshot) return prev;
+      setFuture((next) => [createCanvasSnapshot(), ...next].slice(0, 30));
+      restoreCanvasSnapshot(snapshot);
+      return prev.slice(0, -1);
+    });
+  }, [createCanvasSnapshot, restoreCanvasSnapshot]);
+
+  const redoCanvas = useCallback(() => {
+    setFuture((prev) => {
+      const snapshot = prev[0];
+      if (!snapshot) return prev;
+      setHistory((next) => [...next.slice(-29), createCanvasSnapshot()]);
+      restoreCanvasSnapshot(snapshot);
+      return prev.slice(1);
+    });
+  }, [createCanvasSnapshot, restoreCanvasSnapshot]);
+
+  const getCanvasPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = canvasSurfaceRef.current?.getBoundingClientRect();
+      if (!rect) return { x: 480, y: 260 };
+      return {
+        x: Math.round((clientX - rect.left - pan.x) / zoom),
+        y: Math.round((clientY - rect.top - pan.y) / zoom),
+      };
+    },
+    [pan.x, pan.y, zoom],
+  );
 
   useEffect(() => {
     if (nodes.length && !nodes.some((node) => node.id === selectedNodeId)) {
       const nextId = selectedSegment?.id ? `segment-${selectedSegment.id}` : nodes[0].id;
-      setSelectedNodeId(nodes.some((node) => node.id === nextId) ? nextId : nodes[0].id);
+      const resolvedId = nodes.some((node) => node.id === nextId) ? nextId : nodes[0].id;
+      setSelectedNodeId(resolvedId);
+      setSelectedNodeIds([resolvedId]);
     }
   }, [nodes, selectedNodeId, selectedSegment?.id]);
 
   useEffect(() => {
     if (!selectedStarterNode) return;
     setSelectedNodeId(selectedStarterNode.id);
+    setSelectedNodeIds([selectedStarterNode.id]);
     setCanvasAction(selectedStarterNode.action || 'generate');
     setCanvasCommand(selectedStarterNode.prompt || '');
   }, [selectedStarterNode?.id]);
@@ -2813,8 +4067,16 @@ function CanvasWorkspace({
   }, [selectedNode?.id]);
 
   const selectCanvasNode = useCallback(
-    (node: CanvasNode) => {
+    (node: CanvasNode, additive = false) => {
       setSelectedNodeId(node.id);
+      setSelectedNodeIds((prev) => {
+        if (!additive) return [node.id];
+        if (prev.includes(node.id)) {
+          const next = prev.filter((id) => id !== node.id);
+          return next.length ? next : [node.id];
+        }
+        return [...prev, node.id];
+      });
       if (node.segmentId) onSelectSegment(node.segmentId);
     },
     [onSelectSegment],
@@ -2867,11 +4129,110 @@ function CanvasWorkspace({
     };
   }, [applyNodePosition, dragState, panState, zoom]);
 
+  const connectCanvasNodes = useCallback(
+    (fromId: string, toId: string, label = 'route') => {
+      if (!fromId || !toId || fromId === toId) return;
+      if (connections.some((connection) => connection.from === fromId && connection.to === toId)) {
+        setConnectFromNodeId(null);
+        setTool('select');
+        return;
+      }
+      commitCanvasSnapshot();
+      setCustomConnections((prev) => [
+        ...prev,
+        {
+          id: `${fromId}-to-${toId}-${Date.now()}`,
+          from: fromId,
+          to: toId,
+          label,
+          sourceHandle: 'out',
+          targetHandle: 'in',
+        },
+      ]);
+      setConnectFromNodeId(null);
+      setTool('select');
+    },
+    [commitCanvasSnapshot, connections],
+  );
+
+  const addCanvasNode = useCallback(
+    (
+      kind: CanvasNodeKind,
+      point?: { x: number; y: number },
+      options: { linkFromSelected?: boolean; overrides?: Partial<CanvasNode> } = {},
+    ) => {
+      const anchor = selectedNode || nodes[nodes.length - 1];
+      const libraryItem = getCanvasNodeLibraryItem(kind);
+      const sourceType = options.overrides?.sourceType || libraryItem?.sourceType || getCanvasNodeMediaMode(kind);
+      const id = options.overrides?.id || makeId(`canvas_${kind.replace(/[^a-z0-9]+/gi, '_')}`);
+      const x = point?.x ?? (anchor?.x || 480) + 270;
+      const y = point?.y ?? (anchor?.y || 180) + (kind === 'agent' || kind.startsWith('ai-') ? 26 : 132);
+      const node: CanvasNode = {
+        id,
+        kind,
+        title: options.overrides?.title || libraryItem?.title || (kind === 'segment' ? 'Draft Segment' : 'Custom Agent'),
+        subtitle:
+          options.overrides?.subtitle ||
+          libraryItem?.subtitle ||
+          (kind === 'segment' ? 'Staged media slot' : 'Manual chain step'),
+        x,
+        y,
+        width: options.overrides?.width || libraryItem?.width || (kind === 'agent' ? 228 : 252),
+        height: options.overrides?.height || libraryItem?.height || (kind === 'agent' ? 104 : 122),
+        status: options.overrides?.status || 'idle',
+        action:
+          options.overrides?.action ||
+          libraryItem?.action ||
+          (kind === 'segment' ? 'generate' : kind === 'ai-video' ? 'extend' : undefined),
+        prompt: (options.overrides?.prompt ?? canvasCommand) || anchor?.prompt || '',
+        botName:
+          options.overrides?.botName ||
+          (kind === 'agent'
+            ? 'Unassigned agent'
+            : kind === 'ai-video'
+              ? '3D Futa Porn'
+              : kind === 'ai-image'
+                ? '3D Anime Porn'
+                : 'Dreamy canvas'),
+        botSlug: options.overrides?.botSlug || libraryItem?.botSlug || (kind === 'agent' ? 'manual-agent' : DEFAULT_DREAMY_SLUG),
+        sourceType,
+        fileName: options.overrides?.fileName,
+        mediaUrl: options.overrides?.mediaUrl,
+        outputText: options.overrides?.outputText,
+        boardId: options.overrides?.boardId || activeBoardId || getCanvasDefaultBoard(kind),
+      };
+      commitCanvasSnapshot();
+      setCustomNodes((prev) => [...prev, node]);
+      if (anchor && options.linkFromSelected !== false) {
+        const label = kind.startsWith('source-') ? 'source' : kind.startsWith('ai-') ? 'input' : 'manual';
+        setCustomConnections((prev) => [
+          ...prev,
+          { id: `${anchor.id}-to-${id}`, from: anchor.id, to: id, label, sourceHandle: 'out', targetHandle: 'in' },
+        ]);
+      }
+      setSelectedNodeId(id);
+      setSelectedNodeIds([id]);
+      setContextMenu(null);
+    },
+    [activeBoardId, canvasCommand, commitCanvasSnapshot, nodes, selectedNode],
+  );
+
   const handleNodePointerDown = (event: ReactPointerEvent<HTMLButtonElement>, node: CanvasNode) => {
-    if (tool !== 'select') return;
     event.preventDefault();
     event.stopPropagation();
-    selectCanvasNode(node);
+    setContextMenu(null);
+    if (tool === 'connect') {
+      if (connectFromNodeId && connectFromNodeId !== node.id) {
+        connectCanvasNodes(connectFromNodeId, node.id);
+      } else {
+        setConnectFromNodeId(node.id);
+      }
+      selectCanvasNode(node, event.shiftKey);
+      return;
+    }
+    if (tool !== 'select') return;
+    selectCanvasNode(node, event.shiftKey);
+    commitCanvasSnapshot();
     setDragState({
       id: node.id,
       clientX: event.clientX,
@@ -2882,7 +4243,12 @@ function CanvasWorkspace({
   };
 
   const handleSurfacePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (tool !== 'pan') return;
+    setContextMenu(null);
+    if (tool === 'connect') {
+      setConnectFromNodeId(null);
+      return;
+    }
+    if (tool !== 'pan' && event.button !== 1 && !spacePanning) return;
     event.preventDefault();
     setPanState({
       clientX: event.clientX,
@@ -2892,43 +4258,21 @@ function CanvasWorkspace({
     });
   };
 
-  const addCanvasNode = (kind: 'agent' | 'segment') => {
-    const anchor = selectedNode || nodes[nodes.length - 1];
-    const id = makeId(`canvas_${kind}`);
-    const node: CanvasNode = {
-      id,
-      kind,
-      title: kind === 'agent' ? 'Custom Agent' : 'Draft Segment',
-      subtitle: kind === 'agent' ? 'Manual chain step' : 'Staged media slot',
-      x: (anchor?.x || 480) + 270,
-      y: (anchor?.y || 180) + (kind === 'agent' ? 26 : 132),
-      width: kind === 'agent' ? 228 : 252,
-      height: kind === 'agent' ? 104 : 122,
-      status: 'idle',
-      action: kind === 'segment' ? 'generate' : undefined,
-      prompt: canvasCommand || anchor?.prompt || '',
-      botName: kind === 'agent' ? 'Unassigned agent' : 'Dreamy segment',
-      botSlug: kind === 'agent' ? 'manual-agent' : DEFAULT_DREAMY_SLUG,
-    };
-    setCustomNodes((prev) => [...prev, node]);
-    if (anchor) {
-      setCustomConnections((prev) => [...prev, { id: `${anchor.id}-to-${id}`, from: anchor.id, to: id, label: 'manual' }]);
-    }
-    setSelectedNodeId(id);
-  };
-
   const applyFlowPreset = (preset: CanvasFlowPreset) => {
+    commitCanvasSnapshot();
     setActiveFlowPresetId(preset.id);
     setCustomNodes(preset.nodes.map((node) => ({ ...node })));
     setCustomConnections(preset.connections.map((connection) => ({ ...connection })));
     setCanvasAction(preset.action);
     setCanvasCommand(preset.prompt);
     setSelectedNodeId(preset.nodes[0]?.id || 'prompt-root');
+    setSelectedNodeIds([preset.nodes[0]?.id || 'prompt-root']);
     setPositionOverrides({});
   };
 
   const duplicateSelected = () => {
     if (!selectedNode) return;
+    commitCanvasSnapshot();
     const id = makeId(`copy_${selectedNode.kind}`);
     const copy: CanvasNode = {
       ...selectedNode,
@@ -2943,27 +4287,46 @@ function CanvasWorkspace({
     setCustomNodes((prev) => [...prev, copy]);
     setCustomConnections((prev) => [...prev, { id: `${selectedNode.id}-to-${id}`, from: selectedNode.id, to: id, label: 'copy' }]);
     setSelectedNodeId(id);
+    setSelectedNodeIds([id]);
   };
 
   const deleteSelected = () => {
     if (!selectedNode || selectedNode.id === 'prompt-root' || selectedNode.id === 'timeline-output') return;
-    if (selectedNode.segmentId && !isCustomSelected) {
-      onDeleteSegment(selectedNode.segmentId);
-    } else {
-      setCustomNodes((prev) => prev.filter((node) => node.id !== selectedNode.id));
-    }
-    setCustomConnections((prev) =>
-      prev.filter((connection) => connection.from !== selectedNode.id && connection.to !== selectedNode.id),
-    );
+    const protectedIds = new Set(['prompt-root', 'timeline-output', selectedStarterNode?.id].filter(Boolean) as string[]);
+    const idsToDelete = (activeSelectedNodeIds.length ? activeSelectedNodeIds : [selectedNode.id]).filter((id) => !protectedIds.has(id));
+    if (!idsToDelete.length) return;
+    commitCanvasSnapshot();
+    idsToDelete.forEach((id) => {
+      const node = nodeMap.get(id);
+      if (node?.segmentId && !customNodes.some((customNode) => customNode.id === id)) {
+        onDeleteSegment(node.segmentId);
+      }
+    });
+    setCustomNodes((prev) => prev.filter((node) => !idsToDelete.includes(node.id)));
+    setCustomConnections((prev) => prev.filter((connection) => !idsToDelete.includes(connection.from) && !idsToDelete.includes(connection.to)));
     setSelectedNodeId('prompt-root');
+    setSelectedNodeIds(['prompt-root']);
   };
+
+  const resolveCanvasCommand = useCallback(
+    (value: string) => {
+      const withoutSlashPreset = value.replace(/^\/[a-z-]+\s*/i, '');
+      return withoutSlashPreset.replace(/@([a-zA-Z0-9:_-]+)/g, (_match, id: string) => {
+        const node = nodeMap.get(id);
+        if (!node) return `@${id}`;
+        return [node.title, node.prompt || node.outputText || node.subtitle].filter(Boolean).join(': ');
+      });
+    },
+    [nodeMap],
+  );
 
   const runSelected = () => {
     if (selectedStarterPreset && selectedNode?.id === selectedStarterNode?.id) {
       onRunPreset?.(selectedStarterPreset);
       return;
     }
-    const promptText = canvasCommand.trim() || selectedNode?.prompt || `Run ${selectedNode?.title || 'selected node'}`;
+    const promptText =
+      resolveCanvasCommand(canvasCommand.trim()) || selectedNode?.prompt || `Run ${selectedNode?.title || 'selected node'}`;
     onAction(canvasAction, promptText, selectedNodeSegment);
   };
 
@@ -2996,6 +4359,244 @@ function CanvasWorkspace({
     setPan(nextView.pan);
   };
 
+  const commandTail = canvasCommand.trimEnd();
+  const showReferenceMenu = commandTail.endsWith('@');
+  const showPresetMenu = commandTail.endsWith('/');
+  const referenceNodes = nodes.filter((node) => node.id !== selectedNode?.id).slice(0, 6);
+  const insertCanvasCommandToken = (token: string) => {
+    setCanvasCommand((prev) => {
+      const trimmed = prev.trimEnd();
+      const withoutTrigger = trimmed.endsWith('@') || trimmed.endsWith('/') ? trimmed.slice(0, -1).trimEnd() : trimmed;
+      return `${withoutTrigger}${withoutTrigger ? ' ' : ''}${token} `;
+    });
+  };
+
+  const importCanvasState = useCallback(
+    (rawJson: string, point?: { x: number; y: number }) => {
+      const parsed = JSON.parse(rawJson) as Record<string, unknown>;
+      const readRecord = (value: unknown): Record<string, unknown> =>
+        value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+      const readArrayOrObject = (value: unknown): Record<string, unknown>[] => {
+        if (Array.isArray(value)) return value.map(readRecord);
+        if (value && typeof value === 'object') {
+          return Object.entries(value as Record<string, unknown>).map(([id, item]) => ({ id, ...readRecord(item) }));
+        }
+        return [];
+      };
+      const numeric = (value: unknown, fallback: number) => {
+        const number = Number(value);
+        return Number.isFinite(number) ? number : fallback;
+      };
+
+      const rawNodes = readArrayOrObject(parsed.customNodes || parsed.nodes);
+      const rawConnections = readArrayOrObject(parsed.customConnections || parsed.connections || parsed.edges);
+      const basePoint = point || getCanvasPoint((canvasSurfaceRef.current?.getBoundingClientRect().left || 0) + 420, 260);
+      const existingIds = new Set(nodes.map((node) => node.id));
+      const importedIdMap = new Map<string, string>();
+      const protectedImportIds = new Set(['prompt-root', 'timeline-output']);
+      const importedNodes: CanvasNode[] = rawNodes
+        .map((rawNode, index) => {
+          const sourceId = String(rawNode.id || rawNode.nodeId || rawNode.key || `imported-${index}`);
+          if (
+            protectedImportIds.has(sourceId) ||
+            sourceId.startsWith('agent-') ||
+            sourceId.startsWith('segment-') ||
+            sourceId.startsWith('selected-dreamy-bot')
+          ) {
+            return null;
+          }
+          const kind = normalizeCanvasNodeKind(rawNode.kind || rawNode.type || rawNode.nodeType);
+          const libraryItem = getCanvasNodeLibraryItem(kind);
+          const id = existingIds.has(sourceId) ? makeId(`import_${sourceId.replace(/[^a-z0-9]+/gi, '_')}`) : sourceId;
+          importedIdMap.set(sourceId, id);
+          existingIds.add(id);
+          const position = readRecord(rawNode.position);
+          const data = readRecord(rawNode.data);
+          const sourceType =
+            (String(rawNode.sourceType || data.sourceType || '').toLowerCase() as CanvasSourceType) ||
+            getCanvasNodeMediaMode(kind) ||
+            libraryItem?.sourceType;
+          return {
+            id,
+            kind,
+            title: String(rawNode.title || rawNode.name || data.title || data.name || libraryItem?.title || 'Imported Node'),
+            subtitle: String(
+              rawNode.subtitle ||
+                rawNode.description ||
+                data.subtitle ||
+                data.description ||
+                rawNode.prompt ||
+                data.prompt ||
+                libraryItem?.subtitle ||
+                'Imported from canvas JSON',
+            ),
+            x: numeric(rawNode.x ?? position.x, basePoint.x + index * 34),
+            y: numeric(rawNode.y ?? position.y, basePoint.y + index * 34),
+            width: numeric(rawNode.width, libraryItem?.width || 244),
+            height: numeric(rawNode.height, libraryItem?.height || 120),
+            status: String(rawNode.status || data.status || 'imported'),
+            action: (rawNode.action || data.action || libraryItem?.action) as StudioAction | undefined,
+            prompt: String(rawNode.prompt || data.prompt || rawNode.text || data.text || ''),
+            botSlug: String(rawNode.botSlug || data.botSlug || libraryItem?.botSlug || DEFAULT_DREAMY_SLUG),
+            botName: String(rawNode.botName || data.botName || ''),
+            mediaUrl: String(rawNode.mediaUrl || rawNode.url || data.mediaUrl || data.url || rawNode.thumbnail || ''),
+            outputText: String(rawNode.outputText || data.outputText || rawNode.text || data.text || ''),
+            fileName: String(rawNode.fileName || data.fileName || ''),
+            sourceType,
+            boardId: activeBoardId,
+          } satisfies CanvasNode;
+        })
+        .filter(Boolean) as CanvasNode[];
+
+      const importedConnections: CanvasConnection[] = rawConnections
+        .map((rawConnection, index) => {
+          const source = String(rawConnection.from || rawConnection.source || rawConnection.sourceId || rawConnection.start || '');
+          const target = String(rawConnection.to || rawConnection.target || rawConnection.targetId || rawConnection.end || '');
+          const from = importedIdMap.get(source) || source;
+          const to = importedIdMap.get(target) || target;
+          if (!from || !to || from === to || !existingIds.has(from) || !existingIds.has(to)) return null;
+          return {
+            id: String(rawConnection.id || `${from}-to-${to}-import-${index}`),
+            from,
+            to,
+            label: String(rawConnection.label || rawConnection.type || 'import'),
+            sourceHandle: String(rawConnection.sourceHandle || 'out'),
+            targetHandle: String(rawConnection.targetHandle || 'in'),
+          };
+        })
+        .filter(Boolean) as CanvasConnection[];
+
+      if (!importedNodes.length && !importedConnections.length) return;
+      commitCanvasSnapshot();
+      setCustomNodes((prev) => [...prev, ...importedNodes]);
+      setCustomConnections((prev) => [...prev, ...importedConnections]);
+      if (importedNodes[0]) {
+        setSelectedNodeId(importedNodes[0].id);
+        setSelectedNodeIds([importedNodes[0].id]);
+      }
+    },
+    [activeBoardId, commitCanvasSnapshot, getCanvasPoint, nodes],
+  );
+
+  const handleCanvasWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const rect = canvasSurfaceRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const nextZoom = clamp(zoom - event.deltaY * 0.001, 0.35, 1.8);
+    const cursorX = event.clientX - rect.left;
+    const cursorY = event.clientY - rect.top;
+    const canvasX = (cursorX - pan.x) / zoom;
+    const canvasY = (cursorY - pan.y) / zoom;
+    setZoom(nextZoom);
+    setPan({
+      x: Math.round(cursorX - canvasX * nextZoom),
+      y: Math.round(cursorY - canvasY * nextZoom),
+    });
+  };
+
+  const handleCanvasDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('[data-canvas-node="true"], [data-canvas-floating="true"]')) return;
+    const point = getCanvasPoint(event.clientX, event.clientY);
+    addCanvasNode(activeBoardId === 'timeline' ? 'ai-video' : 'ai-image', point, { linkFromSelected: Boolean(selectedNode) });
+  };
+
+  const handleCanvasContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('[data-canvas-floating="true"]')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getCanvasPoint(event.clientX, event.clientY);
+    setContextMenu({ screenX: event.clientX, screenY: event.clientY, canvasX: point.x, canvasY: point.y });
+  };
+
+  const handleCanvasDrop = async (event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDropActive(false);
+    const point = getCanvasPoint(event.clientX, event.clientY);
+    const files = Array.from(event.dataTransfer.files || []);
+    for (const [index, file] of files.entries()) {
+      const dropPoint = { x: point.x + index * 36, y: point.y + index * 36 };
+      if (file.name.toLowerCase().endsWith('.json')) {
+        try {
+          importCanvasState(await file.text(), dropPoint);
+        } catch {
+          addCanvasNode('annotation', dropPoint, {
+            linkFromSelected: false,
+            overrides: {
+              title: 'JSON import failed',
+              subtitle: file.name,
+              outputText: 'The dropped JSON could not be parsed as a canvas project.',
+            },
+          });
+        }
+        continue;
+      }
+      const mime = file.type || '';
+      const isImage = mime.startsWith('image/');
+      const isVideo = mime.startsWith('video/');
+      const isAudio = mime.startsWith('audio/');
+      const kind: CanvasNodeKind = isImage ? 'source-image' : isVideo ? 'source-video' : isAudio ? 'source-audio' : 'source-text';
+      const outputText = kind === 'source-text' ? (await file.text().catch(() => '')).slice(0, 1200) : '';
+      addCanvasNode(kind, dropPoint, {
+        linkFromSelected: false,
+        overrides: {
+          title: file.name.replace(/\.[^.]+$/, '') || file.name,
+          subtitle: `${mime || 'file'} · ${(file.size / 1024).toFixed(1)} KB`,
+          fileName: file.name,
+          mediaUrl: kind === 'source-text' ? '' : URL.createObjectURL(file),
+          outputText,
+          prompt: outputText.slice(0, 360),
+          sourceType: getCanvasNodeMediaMode(kind),
+        },
+      });
+    }
+  };
+
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      const element = target instanceof HTMLElement ? target : null;
+      if (!element) return false;
+      return ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName) || element.isContentEditable;
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) return;
+      if (event.code === 'Space') {
+        event.preventDefault();
+        setSpacePanning(true);
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        downloadJson();
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) redoCanvas();
+        else undoCanvas();
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'y') {
+        event.preventDefault();
+        redoCanvas();
+      }
+      if (event.key.toLowerCase() === 'd' || event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        deleteSelected();
+      }
+      if (event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        resetView();
+      }
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') setSpacePanning(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [deleteSelected, redoCanvas, undoCanvas]);
+
   const renderConnection = (connection: CanvasConnection) => {
     const from = nodeMap.get(connection.from);
     const to = nodeMap.get(connection.to);
@@ -3006,7 +4607,7 @@ function CanvasWorkspace({
     const endY = to.y + to.height / 2;
     const handle = Math.max(70, Math.abs(endX - startX) * 0.45);
     const path = `M ${startX} ${startY} C ${startX + handle} ${startY}, ${endX - handle} ${endY}, ${endX} ${endY}`;
-    const active = from.id === selectedNodeId || to.id === selectedNodeId;
+    const active = activeSelectedNodeIds.includes(from.id) || activeSelectedNodeIds.includes(to.id);
     const accent =
       connection.label === 'fallback'
         ? '#8b949e'
@@ -3014,6 +4615,8 @@ function CanvasWorkspace({
           ? '#f31272'
           : connection.label === 'route'
             ? '#14b8d4'
+            : connection.label === 'source'
+              ? '#a855f7'
             : '#22c55e';
 
     return (
@@ -3075,13 +4678,39 @@ function CanvasWorkspace({
         </div>
       </div>
 
-      <div className="grid min-h-[560px] flex-1 grid-cols-1 xl:min-h-0 xl:grid-cols-[292px_minmax(0,1fr)_304px]">
-        <aside className="hidden min-h-0 flex-col border-r border-white/10 bg-[#111219] xl:flex">
+      <div className="relative min-h-[560px] flex-1 overflow-hidden xl:min-h-0">
+        <aside
+          data-testid="ai-canvas-left-drawer"
+          className={`absolute inset-y-3 left-3 z-40 w-[min(360px,calc(100%-24px))] min-h-0 flex-col overflow-hidden rounded-lg-v2 border border-white/10 bg-[#111219]/98 shadow-2xl backdrop-blur ${
+            leftPanelOpen ? 'flex' : 'hidden'
+          }`}
+        >
           <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4">
-            <div className="text-sm font-semibold text-Cr-text-default-v2">Layers & Agents</div>
-            <button type="button" onClick={() => addCanvasNode('agent')} className="flex h-7 w-7 items-center justify-center rounded-md-v2 bg-white/[0.06]">
-              <Plus size={14} />
-            </button>
+            <div>
+              <div className="text-sm font-semibold text-Cr-text-default-v2">Canvas Inputs</div>
+              <div className="text-[11px] text-Cr-text-subtler-v2">{boardNodes.length} visible in {activeBoardId}</div>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setShowBotCatalog(true)}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md-v2 bg-white/[0.06] px-2 text-[11px] font-semibold active:bg-white/10"
+              >
+                <Bot size={13} />
+                Bots
+              </button>
+              <button type="button" onClick={() => addCanvasNode('agent')} className="flex h-8 w-8 items-center justify-center rounded-md-v2 bg-white/[0.06]">
+                <Plus size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setLeftPanelOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-md-v2 bg-white/[0.06] active:bg-white/10"
+                aria-label="Close canvas inputs"
+              >
+                <X size={14} />
+              </button>
+            </div>
           </div>
           {selectedStarterPreset && (
             <div
@@ -3099,7 +4728,7 @@ function CanvasWorkspace({
               >
                 <span className="relative h-14 overflow-hidden rounded-md-v2 bg-black/30">
                   {selectedStarterPreset.visualUrl ? (
-                    <img src={selectedStarterPreset.visualUrl} alt="" className="h-full w-full object-cover" />
+                    <img src={selectedStarterPreset.visualUrl} alt="" className="h-full w-full object-contain" />
                   ) : (
                     <span className="grid h-full place-items-center text-Cr-text-subtler-v2">
                       <Bot size={18} />
@@ -3128,20 +4757,35 @@ function CanvasWorkspace({
             <span>Search layers...</span>
             <span className="ml-auto">Cmd K</span>
           </div>
+          <div data-testid="ai-canvas-board-tabs" className="mx-4 mb-3 grid grid-cols-3 gap-1 rounded-md-v2 border border-white/10 bg-black/20 p-1">
+            {CANVAS_BOARDS.map((board) => (
+              <button
+                key={board.id}
+                type="button"
+                onClick={() => setActiveBoardId(board.id)}
+                className={`h-8 rounded-md-v2 text-[11px] font-semibold ${
+                  activeBoardId === board.id ? 'bg-dreamy-brand-hot-v2 text-white' : 'text-Cr-text-subtler-v2 active:bg-white/[0.08]'
+                }`}
+              >
+                {board.label}
+              </button>
+            ))}
+          </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
             <div className="mb-2 flex items-center justify-between px-1 text-[11px] font-semibold text-Cr-text-subtler-v2">
-              <span>Canvas Root</span>
-              <span>{nodes.length}</span>
+              <span>{CANVAS_BOARDS.find((board) => board.id === activeBoardId)?.label || 'Canvas'} Nodes</span>
+              <span>{boardNodes.length}/{nodes.length}</span>
             </div>
-            {nodes.map((node) => {
+            {boardNodes.map((node) => {
               const Icon = getCanvasNodeIcon(node.kind);
+              const active = activeSelectedNodeIds.includes(node.id);
               return (
                 <button
                   key={node.id}
                   type="button"
                   onClick={() => selectCanvasNode(node)}
                   className={`mb-1 flex w-full min-w-0 items-center gap-2 rounded-md-v2 px-2 py-2 text-left text-xs transition-colors ${
-                    selectedNodeId === node.id ? 'bg-dreamy-brand-hot-v2/15 text-Cr-text-default-v2' : 'text-Cr-text-subtler-v2 active:bg-white/[0.06]'
+                    active ? 'bg-dreamy-brand-hot-v2/15 text-Cr-text-default-v2' : 'text-Cr-text-subtler-v2 active:bg-white/[0.06]'
                   }`}
                 >
                   <Icon size={14} className="shrink-0 text-dreamy-brand-hot-v2" />
@@ -3175,8 +4819,72 @@ function CanvasWorkspace({
           </div>
         </aside>
 
-        <div className="relative min-h-[560px] overflow-hidden xl:min-h-0">
-          <div className="absolute left-5 top-4 z-20 flex flex-col gap-1 rounded-md-v2 border border-white/10 bg-[#171821]/90 p-1 shadow-xl">
+        <div className="absolute inset-0 overflow-hidden">
+          <input
+            ref={canvasFileInputRef}
+            type="file"
+            className="hidden"
+            multiple
+            accept="image/*,video/*,audio/*,.txt,.md,.json"
+            onChange={(event) => {
+              const files = Array.from(event.target.files || []);
+              const rect = canvasSurfaceRef.current?.getBoundingClientRect();
+              if (!files.length || !rect) return;
+              const syntheticPoint = getCanvasPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+              void Promise.all(
+                files.map(async (file, index) => {
+                  const point = { x: syntheticPoint.x + index * 36, y: syntheticPoint.y + index * 36 };
+                  if (file.name.toLowerCase().endsWith('.json')) {
+                    importCanvasState(await file.text(), point);
+                    return;
+                  }
+                  const mime = file.type || '';
+                  const kind: CanvasNodeKind = mime.startsWith('image/')
+                    ? 'source-image'
+                    : mime.startsWith('video/')
+                      ? 'source-video'
+                      : mime.startsWith('audio/')
+                        ? 'source-audio'
+                        : 'source-text';
+                  const outputText = kind === 'source-text' ? (await file.text().catch(() => '')).slice(0, 1200) : '';
+                  addCanvasNode(kind, point, {
+                    linkFromSelected: false,
+                    overrides: {
+                      title: file.name.replace(/\.[^.]+$/, '') || file.name,
+                      subtitle: `${mime || 'file'} · ${(file.size / 1024).toFixed(1)} KB`,
+                      fileName: file.name,
+                      mediaUrl: kind === 'source-text' ? '' : URL.createObjectURL(file),
+                      outputText,
+                      prompt: outputText.slice(0, 360),
+                      sourceType: getCanvasNodeMediaMode(kind),
+                    },
+                  });
+                }),
+              );
+              event.target.value = '';
+            }}
+          />
+          <div data-canvas-floating="true" className="absolute left-4 top-4 z-30 flex items-center gap-1 rounded-md-v2 border border-white/10 bg-[#171821]/90 p-1 shadow-xl">
+            <button
+              type="button"
+              data-testid="ai-canvas-open-inputs"
+              onClick={() => setLeftPanelOpen(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md-v2 bg-white/[0.06] px-2 text-xs font-semibold text-Cr-text-subtle-v2 active:bg-white/[0.1]"
+            >
+              <PanelRightOpen size={15} className="rotate-180" />
+              Inputs
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowBotCatalog(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md-v2 bg-white/[0.06] px-2 text-xs font-semibold text-Cr-text-subtle-v2 active:bg-white/[0.1]"
+            >
+              <Bot size={15} />
+              Bots
+            </button>
+          </div>
+
+          <div data-canvas-floating="true" className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 items-center gap-1 rounded-md-v2 border border-white/10 bg-[#171821]/90 p-1 shadow-xl">
             <button
               type="button"
               onClick={() => setTool('select')}
@@ -3193,18 +4901,85 @@ function CanvasWorkspace({
             >
               <Hand size={17} />
             </button>
-            <div className="my-1 h-px bg-white/10" />
+            <button
+              type="button"
+              data-testid="ai-canvas-connect-mode"
+              onClick={() => {
+                setTool('connect');
+                setConnectFromNodeId(selectedNode?.id || null);
+              }}
+              className={`flex h-9 w-9 items-center justify-center rounded-md-v2 ${tool === 'connect' ? 'bg-dreamy-brand-hot-v2 text-white' : 'text-Cr-text-subtler-v2 active:bg-white/[0.08]'}`}
+              aria-label="Connect nodes"
+            >
+              <Link2 size={17} />
+            </button>
+            <div className="mx-1 h-6 w-px bg-white/10" />
             <button type="button" onClick={() => addCanvasNode('agent')} className="flex h-9 w-9 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08]" aria-label="Add agent">
               <Bot size={17} />
             </button>
             <button type="button" onClick={() => addCanvasNode('segment')} className="flex h-9 w-9 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08]" aria-label="Add segment">
               <Film size={17} />
             </button>
+            <button type="button" onClick={() => addCanvasNode('source-image')} className="flex h-9 w-9 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08]" aria-label="Add source image">
+              <ImagePlus size={17} />
+            </button>
+            <button type="button" onClick={() => canvasFileInputRef.current?.click()} className="flex h-9 w-9 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08]" aria-label="Import file">
+              <Download size={17} className="rotate-180" />
+            </button>
+          </div>
+
+          <div data-canvas-floating="true" className="absolute right-4 top-4 z-30 flex items-center gap-1 rounded-md-v2 border border-white/10 bg-[#171821]/90 p-1 shadow-xl">
+            <button
+              type="button"
+              data-testid="ai-canvas-open-inspector"
+              onClick={() => setInspectorOpen(true)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md-v2 bg-white/[0.06] px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 active:bg-white/10"
+            >
+              <SlidersHorizontal size={13} />
+              Inspector
+            </button>
+            <button
+              type="button"
+              onClick={undoCanvas}
+              disabled={!canUndo}
+              className="flex h-8 w-8 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08] disabled:opacity-35"
+              aria-label="Undo canvas"
+            >
+              <RotateCcw size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={redoCanvas}
+              disabled={!canRedo}
+              className="flex h-8 w-8 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08] disabled:opacity-35"
+              aria-label="Redo canvas"
+            >
+              <RefreshCcw size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={downloadJson}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md-v2 bg-white/[0.06] px-2 text-[11px] font-semibold active:bg-white/10"
+            >
+              <Download size={13} />
+              JSON
+            </button>
           </div>
 
           <div
-            className="absolute inset-0 cursor-grab overflow-hidden bg-[#0d0e13] active:cursor-grabbing"
+            ref={canvasSurfaceRef}
+            data-testid="ai-canvas-surface"
+            className={`absolute inset-0 cursor-grab overflow-hidden bg-[#0d0e13] active:cursor-grabbing ${isDropActive ? 'ring-2 ring-inset ring-dreamy-brand-hot-v2' : ''}`}
             onPointerDown={handleSurfacePointerDown}
+            onWheel={handleCanvasWheel}
+            onDoubleClick={handleCanvasDoubleClick}
+            onContextMenu={handleCanvasContextMenu}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setIsDropActive(true);
+            }}
+            onDragLeave={() => setIsDropActive(false)}
+            onDrop={handleCanvasDrop}
             style={{
               backgroundImage:
                 'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.11) 1px, transparent 0)',
@@ -3221,13 +4996,14 @@ function CanvasWorkspace({
 
               {nodes.map((node) => {
                 const Icon = getCanvasNodeIcon(node.kind);
-                const active = selectedNodeId === node.id;
+                const active = activeSelectedNodeIds.includes(node.id);
                 return (
                   <button
                     key={node.id}
                     type="button"
+                    data-canvas-node="true"
                     onPointerDown={(event) => handleNodePointerDown(event, node)}
-                    onClick={() => selectCanvasNode(node)}
+                    onClick={(event) => selectCanvasNode(node, event.shiftKey)}
                     className={`absolute overflow-hidden rounded-md-v2 border text-left shadow-2xl transition-colors ${
                       active
                         ? 'border-dreamy-brand-hot-v2 bg-[#1d1722] shadow-dreamy-brand-hot-v2/20'
@@ -3235,10 +5011,30 @@ function CanvasWorkspace({
                     }`}
                     style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
                   >
+                    <span
+                      className={`absolute -left-1 top-1/2 z-10 h-4 w-4 -translate-y-1/2 rounded-full border border-white/20 ${
+                        tool === 'connect' && connectFromNodeId && connectFromNodeId !== node.id
+                          ? 'bg-dreamy-brand-hot-v2'
+                          : 'bg-[#0d0e13]'
+                      }`}
+                    />
+                    <span
+                      className={`absolute -right-1 top-1/2 z-10 h-4 w-4 -translate-y-1/2 rounded-full border border-white/20 ${
+                        connectFromNodeId === node.id ? 'bg-dreamy-brand-hot-v2' : 'bg-[#0d0e13]'
+                      }`}
+                    />
                     <div className="flex h-full">
                       {node.mediaUrl && (
                         <div className="h-full w-[86px] shrink-0 bg-black/30">
-                          <img src={node.mediaUrl} alt="" className="h-full w-full object-cover opacity-80" />
+                          {node.sourceType === 'video' ? (
+                            <video src={node.mediaUrl} muted playsInline className="h-full w-full object-contain opacity-80" />
+                          ) : node.sourceType === 'audio' ? (
+                            <div className="grid h-full place-items-center text-dreamy-brand-hot-v2">
+                              <Play size={20} />
+                            </div>
+                          ) : (
+                            <img src={node.mediaUrl} alt="" className="h-full w-full object-contain opacity-80" />
+                          )}
                         </div>
                       )}
                       <div className="flex min-w-0 flex-1 flex-col p-3">
@@ -3252,6 +5048,11 @@ function CanvasWorkspace({
                           <span className={`text-[10px] font-semibold ${statusTone(node.status)}`}>{node.status || 'idle'}</span>
                         </div>
                         <div className="line-clamp-2 text-[11px] leading-4 text-Cr-text-subtler-v2">{node.subtitle}</div>
+                        {!node.mediaUrl && node.outputText && (
+                          <div className="mt-2 line-clamp-2 rounded-md-v2 bg-black/20 px-2 py-1 text-[10px] leading-4 text-Cr-text-subtlest-v2">
+                            {node.outputText}
+                          </div>
+                        )}
                         {node.botSlug && (
                           <div className="mt-auto truncate text-[10px] font-semibold text-Cr-text-subtlest-v2">{node.botSlug}</div>
                         )}
@@ -3263,10 +5064,44 @@ function CanvasWorkspace({
             </div>
           </div>
 
+          {isDropActive && (
+            <div
+              data-canvas-floating="true"
+              data-testid="ai-canvas-drop-import"
+              className="pointer-events-none absolute inset-6 z-30 grid place-items-center rounded-lg-v2 border border-dreamy-brand-hot-v2/70 bg-dreamy-brand-hot-v2/10 text-sm font-semibold text-white"
+            >
+              Drop media or canvas JSON
+            </div>
+          )}
+
+          {contextMenu && (
+            <div
+              data-canvas-floating="true"
+              data-testid="ai-canvas-context-menu"
+              className="fixed z-50 w-52 overflow-hidden rounded-md-v2 border border-white/10 bg-[#171821] p-1 text-xs shadow-2xl"
+              style={{ left: contextMenu.screenX, top: contextMenu.screenY }}
+            >
+              {AI_CANVAS_NODE_LIBRARY.map((item) => {
+                const Icon = getCanvasNodeIcon(item.kind);
+                return (
+                  <button
+                    key={item.kind}
+                    type="button"
+                    onClick={() => addCanvasNode(item.kind, { x: contextMenu.canvasX, y: contextMenu.canvasY })}
+                    className="flex h-9 w-full items-center gap-2 rounded-md-v2 px-2 text-left font-semibold text-Cr-text-subtler-v2 active:bg-white/[0.08]"
+                  >
+                    <Icon size={14} className="text-dreamy-brand-hot-v2" />
+                    <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <div className="absolute bottom-6 left-5 right-5 z-20 grid gap-2 md:left-[70px] md:right-[70px]">
             <div
               data-testid="canvas-auto-flow-presets"
-              className="flex flex-wrap items-center gap-2 rounded-md-v2 border border-white/10 bg-[#171821]/95 p-2 shadow-xl"
+              className="hidden flex-wrap items-center gap-2 rounded-md-v2 border border-white/10 bg-[#171821]/95 p-2 shadow-xl"
             >
               <div data-testid="canvas-material-flow-ready" className="mr-1 inline-flex min-w-0 items-center gap-2 rounded-md-v2 bg-white/[0.06] px-2 py-1 text-[11px] font-semibold text-Cr-text-subtle-v2">
                 <Link2 size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
@@ -3290,7 +5125,37 @@ function CanvasWorkspace({
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-            <div className="flex min-w-[260px] flex-1 items-center gap-2 rounded-md-v2 border border-white/10 bg-[#171821]/95 p-2 shadow-xl">
+            <div className="relative flex min-w-[260px] flex-1 items-center gap-2 rounded-md-v2 border border-white/10 bg-[#171821]/95 p-2 shadow-xl">
+              {(showReferenceMenu || showPresetMenu) && (
+                <div
+                  data-testid="ai-canvas-reference-menu"
+                  className="absolute bottom-[calc(100%+8px)] left-0 right-0 flex flex-wrap gap-1 rounded-md-v2 border border-white/10 bg-[#171821] p-2 shadow-2xl"
+                >
+                  {showReferenceMenu
+                    ? referenceNodes.map((node) => (
+                        <button
+                          key={node.id}
+                          type="button"
+                          onClick={() => insertCanvasCommandToken(`@${node.id}`)}
+                          className="inline-flex h-7 max-w-[180px] items-center gap-1.5 rounded-md-v2 bg-white/[0.06] px-2 text-[11px] font-semibold active:bg-white/10"
+                        >
+                          <Link2 size={12} className="shrink-0 text-dreamy-brand-hot-v2" />
+                          <span className="truncate">{node.title}</span>
+                        </button>
+                      ))
+                    : CANVAS_COMMAND_PRESETS.map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => insertCanvasCommandToken(preset.value)}
+                          className="inline-flex h-7 items-center gap-1.5 rounded-md-v2 bg-white/[0.06] px-2 text-[11px] font-semibold active:bg-white/10"
+                        >
+                          <Wand2 size={12} className="text-dreamy-brand-hot-v2" />
+                          {preset.label}
+                        </button>
+                      ))}
+                </div>
+              )}
               <input
                 value={canvasCommand}
                 onChange={(event) => setCanvasCommand(event.target.value)}
@@ -3322,10 +5187,25 @@ function CanvasWorkspace({
           </div>
         </div>
 
-        <aside className="hidden min-h-0 flex-col border-l border-white/10 bg-[#111219] xl:flex">
-          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 px-4">
-            <SlidersHorizontal size={14} />
-            <div className="text-sm font-semibold">Inspector</div>
+        <aside
+          data-testid="ai-canvas-inspector-drawer"
+          className={`absolute inset-y-3 right-3 z-40 w-[min(300px,calc(100%-24px))] min-h-0 flex-col overflow-hidden rounded-lg-v2 border border-white/10 bg-[#111219]/98 shadow-2xl backdrop-blur ${
+            inspectorOpen ? 'flex' : 'hidden'
+          }`}
+        >
+          <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-4">
+            <div className="flex min-w-0 items-center gap-2">
+              <SlidersHorizontal size={14} />
+              <div className="truncate text-sm font-semibold">Inspector</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setInspectorOpen(false)}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md-v2 bg-white/[0.06] active:bg-white/10"
+              aria-label="Close inspector"
+            >
+              <X size={14} />
+            </button>
           </div>
           {selectedNode ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -3414,6 +5294,63 @@ function CanvasWorkspace({
           )}
         </aside>
       </div>
+      {showBotCatalog && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-5" role="dialog" aria-modal="true">
+          <div className="flex max-h-[82vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg-v2 border border-white/10 bg-[#111219] shadow-2xl">
+            <div className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 px-4">
+              <div>
+                <div className="text-sm font-semibold">Dreamy Bot Catalog</div>
+                <div className="text-[11px] text-Cr-text-subtler-v2">{canvasBotCatalogPresets.length} selectable Dreamy bots</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBotCatalog(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-md-v2 bg-white/[0.06] active:bg-white/10"
+                aria-label="Close bot catalog"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <div className="grid gap-3 overflow-y-auto p-4 sm:grid-cols-2">
+              {canvasBotCatalogPresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => {
+                    addCanvasNode('agent', undefined, {
+                      overrides: {
+                        title: preset.title,
+                        subtitle: preset.recommendation,
+                        status: preset.previewStatus,
+                        action: getStarterPresetAction(preset, selectedSegment),
+                        prompt: preset.prompt,
+                        botSlug: preset.botSlug,
+                        botName: preset.title,
+                        mediaUrl: preset.visualUrl,
+                        boardId: activeBoardId,
+                      },
+                    });
+                    setShowBotCatalog(false);
+                  }}
+                  className="grid min-h-[132px] grid-cols-[118px_minmax(0,1fr)] overflow-hidden rounded-md-v2 border border-white/10 bg-white/[0.03] text-left active:bg-white/[0.08]"
+                >
+                  <span className="relative h-full min-h-[132px] bg-black/30">
+                    <img src={preset.visualUrl} alt="" className="h-full w-full object-contain" />
+                    <span className="absolute bottom-2 left-2 rounded-md-v2 bg-black/70 px-2 py-1 text-[10px] font-semibold text-white">
+                      {preset.workflow}
+                    </span>
+                  </span>
+                  <span className="flex min-w-0 flex-col p-3">
+                    <span className="truncate text-sm font-semibold">{preset.title}</span>
+                    <span className="mt-1 line-clamp-2 text-xs leading-5 text-Cr-text-subtler-v2">{preset.recommendation}</span>
+                    <span className="mt-auto truncate text-[11px] font-semibold text-dreamy-brand-hot-v2">{preset.botSlug}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -3435,7 +5372,7 @@ function RecommendationAgentPanel({
       className="grid gap-2 rounded-lg-v2 border border-dreamy-brand-hot-v2/35 bg-dreamy-brand-hot-v2/10 p-2 sm:grid-cols-[96px_minmax(0,1fr)_auto]"
     >
       <div className="relative h-[70px] overflow-hidden rounded-md-v2 border border-white/10 bg-black/30">
-        <img src={preset.visualUrl} alt="" className="h-full w-full object-cover" />
+        <img src={preset.visualUrl} alt="" className="h-full w-full object-contain" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
         <div className="absolute -left-6 top-0 h-full w-12 rotate-12 animate-pulse bg-white/20 blur-sm" />
       </div>
@@ -3469,8 +5406,101 @@ function RecommendationAgentPanel({
   );
 }
 
+function BotPresetCard({
+  preset,
+  selected,
+  submitting,
+  onSelect,
+  variant = 'main',
+}: {
+  preset: StudioStarterPreset;
+  selected: boolean;
+  submitting: boolean;
+  onSelect: (preset: StudioStarterPreset) => void;
+  variant?: 'main' | 'modal';
+}) {
+  const isModal = variant === 'modal';
+  return (
+    <div data-testid={isModal ? 'all-bot-picker-card' : 'all-bot-preview-card'}>
+      <button
+        type="button"
+        data-testid={isModal ? `all-bot-picker-${preset.id}` : `starter-preset-${preset.id}`}
+        aria-label={`Select ${preset.title} preset`}
+        aria-pressed={selected}
+        disabled={submitting}
+        onClick={() => onSelect(preset)}
+        className={`group grid w-full overflow-hidden rounded-xl-v2 border text-left transition-colors active:bg-Cr-beta-white-8-v2 disabled:opacity-50 ${
+          isModal
+            ? 'h-[132px] grid-cols-[minmax(150px,40%)_minmax(0,1fr)]'
+            : 'h-[118px] grid-cols-[minmax(168px,34%)_minmax(0,1fr)]'
+        } ${
+          selected
+            ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10 shadow-[0_0_0_1px_rgba(244,45,118,0.35)]'
+            : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2'
+        }`}
+      >
+        <span
+          data-testid={isModal ? 'all-bot-picker-preview-asset' : 'starter-bot-preview-asset'}
+          className="relative block h-full overflow-hidden border-r border-Cr-border-default-v2 bg-black/25"
+          style={{
+            backgroundImage: preset.visualUrl === preset.fallbackVisualUrl ? `url(${preset.fallbackVisualUrl})` : undefined,
+            backgroundPosition: 'center',
+            backgroundSize: 'cover',
+          }}
+        >
+          <span data-testid={isModal ? 'all-bot-picker-preview-image' : 'all-bot-preview-image'} className="block h-full w-full">
+            <img
+              data-testid={isModal ? 'all-bot-picker-image' : 'starter-bot-preview-image'}
+              src={preset.visualUrl}
+              alt={`${preset.title} preview`}
+              onError={(event) => {
+                event.currentTarget.style.display = 'none';
+              }}
+              className="h-full w-full object-contain transition-transform duration-500 group-hover:scale-[1.03] group-active:scale-105"
+            />
+          </span>
+          <span className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/10" />
+          <span
+            data-testid={preset.previewAccepted ? 'starter-bot-preview-real' : 'starter-bot-preview-fallback'}
+            className="absolute bottom-2 left-2 rounded bg-black/65 px-2 py-1 text-[10px] font-semibold uppercase text-white"
+          >
+            {preset.previewLabel}
+          </span>
+          <span className="absolute bottom-0 left-0 h-0.5 w-2/3 rounded-r bg-dreamy-brand-hot-v2" />
+        </span>
+        <span className="grid min-w-0 content-between gap-1.5 p-3">
+          <span className="min-w-0">
+            <span className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-sm font-semibold text-Cr-text-default-v2">{preset.title}</span>
+              {selected ? (
+                <CheckCircle2 size={15} className="shrink-0 text-Cr-text-success-default-v2" />
+              ) : (
+                <MousePointer2 size={15} className="shrink-0 text-dreamy-brand-hot-v2" />
+              )}
+            </span>
+            <span className={`${isModal ? 'line-clamp-2' : 'line-clamp-1'} mt-1 text-xs leading-5 text-Cr-text-subtle-v2`}>
+              {preset.recommendation}
+            </span>
+          </span>
+          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <Pill tone="hot">{preset.workflow}</Pill>
+            <Pill>{preset.botId || preset.botSlug}</Pill>
+          </span>
+          <span
+            data-testid="starter-bot-preview-state"
+            className="truncate text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2"
+          >
+            {preset.previewAccepted ? `${preset.previewSource}` : `${preset.previewStatus}`}
+          </span>
+        </span>
+      </button>
+    </div>
+  );
+}
+
 function BotSelectionPanel({
   starterPresets,
+  allBotPresets,
   selectedStarterPresetId,
   selectedStarterPreset,
   selectedSegment,
@@ -3486,6 +5516,7 @@ function BotSelectionPanel({
   onRunPreset,
 }: {
   starterPresets: StudioStarterPreset[];
+  allBotPresets: StudioStarterPreset[];
   selectedStarterPresetId?: string;
   selectedStarterPreset?: StudioStarterPreset | null;
   selectedSegment?: StudioSegment | null;
@@ -3500,42 +5531,166 @@ function BotSelectionPanel({
   onRunManualBotSequence: () => void;
   onRunPreset?: (preset: StudioStarterPreset) => void;
 }) {
-  const recommendedPreset = starterPresets[0];
   const activeStarterPresetId = selectedStarterPreset?.id || selectedStarterPresetId;
-  const presetByBotSlug = useMemo(
-    () => new Map(starterPresets.map((preset) => [preset.botSlug, preset])),
-    [starterPresets],
-  );
+  const [allBotPickerOpen, setAllBotPickerOpen] = useState(false);
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const selectableBotCount = allBotPresets.length || starterPresets.length;
+  const starterPresetKeys = new Set(starterPresets.flatMap((preset) => [preset.id, preset.botSlug].filter(Boolean)));
+  const visibleCatalogPresets = allBotPresets
+    .filter((preset) => !starterPresetKeys.has(preset.id) && !starterPresetKeys.has(preset.botSlug))
+    .slice(0, 24);
   const selectPreset = useCallback((preset: StudioStarterPreset) => {
     onSelectPreset(preset);
+    setSelectorOpen(false);
   }, [onSelectPreset]);
 
   return (
     <section
       data-testid="bot-selection-panel"
-      className="flex h-[clamp(150px,22dvh,210px)] min-h-0 shrink-0 flex-col overflow-hidden border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2"
+      className="shrink-0 overflow-hidden border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-3"
       aria-label="Dreamy bot selection"
     >
-      <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2 text-xs font-semibold text-Cr-text-subtle-v2">
-          <Bot size={14} className="shrink-0 text-dreamy-brand-hot-v2" />
-          <span className="truncate">Choose bot</span>
-        </div>
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Pill tone="hot">{`${starterPresets.length + manualBotEntries.length} options`}</Pill>
+      <div className="flex shrink-0 items-center justify-between gap-2">
+        <button
+          type="button"
+          data-testid="agent-selector-toggle"
+          aria-expanded={selectorOpen}
+          onClick={() => setSelectorOpen((value) => !value)}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 px-2.5 py-2 text-left active:bg-Cr-beta-white-8-v2"
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md-v2 bg-Cr-beta-white-8-v2">
+            {selectedStarterPreset?.visualUrl ? (
+              <img src={selectedStarterPreset.visualUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <Bot size={15} className="text-dreamy-brand-hot-v2" />
+            )}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs font-semibold text-Cr-text-default-v2">
+              {selectedStarterPreset?.title || 'Choose Dreamy agent'}
+            </span>
+            <span className="block truncate text-[11px] text-Cr-text-subtler-v2">
+              {selectedStarterPreset?.botSlug || `${selectableBotCount} agents available`}
+            </span>
+          </span>
+          <ChevronDown
+            size={15}
+            className={`shrink-0 text-Cr-text-subtler-v2 transition-transform ${selectorOpen ? 'rotate-180' : ''}`}
+          />
+        </button>
+        <div data-testid="dreamy-bot-selection-state" className="flex min-w-0 shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            data-testid="all-bots-modal-open"
+            onClick={() => setAllBotPickerOpen(true)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md-v2 border border-dreamy-brand-hot-v2/55 bg-dreamy-brand-hot-v2/10 px-2.5 text-[11px] font-semibold text-dreamy-brand-hot-v2 active:bg-dreamy-brand-hot-v2/20"
+            aria-haspopup="dialog"
+            aria-expanded={allBotPickerOpen}
+          >
+            <Bot size={13} />
+            All bots
+          </button>
+          <span className="hidden sm:inline-flex">
+            <Pill tone="hot">{`${selectableBotCount} options`}</Pill>
+          </span>
           {selectedStarterPreset && <Pill>{selectedStarterPreset.botSlug}</Pill>}
+          {selectedStarterPreset && (
+            <>
+              <span data-testid="starter-preset-selection" className="sr-only">
+                {selectedStarterPreset.title}
+              </span>
+              <span data-testid="selected-dreamy-bot-preview" className="sr-only">
+                Prompt will call this bot and append the result to the timeline.
+              </span>
+              <button
+                type="button"
+                data-testid="starter-preset-direct-generate"
+                disabled={submitting}
+                onClick={() => onRunPreset?.(selectedStarterPreset)}
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md-v2 bg-dreamy-brand-hot-v2 px-2.5 text-[11px] font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+              >
+                <Clapperboard size={12} />
+                Run
+              </button>
+              <span data-testid="starter-preset-result-visible" className="sr-only">
+                Selected bot result visible
+              </span>
+            </>
+          )}
         </div>
       </div>
 
       <div
         data-testid="bot-selection-scroll-region"
-        className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1 [-webkit-overflow-scrolling:touch]"
+        className={`mt-3 space-y-2 overflow-y-auto overscroll-contain pr-1 transition-[max-height,opacity] duration-200 [-webkit-overflow-scrolling:touch] ${
+          selectorOpen ? 'max-h-[min(48dvh,520px)] opacity-100' : 'max-h-0 opacity-0'
+        }`}
+        aria-hidden={!selectorOpen}
       >
+        {!!starterPresets.length && (
+          <div data-testid="starter-presets" className="grid gap-2">
+            <div className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
+              <span className="inline-flex min-w-0 items-center gap-2">
+                <Sparkles size={13} className="text-dreamy-brand-hot-v2" />
+                <span className="truncate">Verified workshop bots</span>
+              </span>
+              <Pill>{`${starterPresets.length} verified`}</Pill>
+            </div>
+            <div data-testid="all-bot-previews" className="grid gap-2">
+              <div
+                data-testid="starter-visual-recommendations"
+                className="grid gap-2"
+              >
+                {starterPresets.map((preset) => (
+                  <BotPresetCard
+                    key={preset.id}
+                    preset={preset}
+                    selected={activeStarterPresetId === preset.id}
+                    submitting={submitting}
+                    onSelect={selectPreset}
+                  />
+                ))}
+              </div>
+            </div>
+            <div data-testid="dreamy-bot-list-only" className="sr-only">Dreamy-only bot list</div>
+          </div>
+        )}
+
+        {!!visibleCatalogPresets.length && (
+          <div data-testid="dreamy-catalog-presets" className="grid gap-2">
+            <div className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
+              <span className="inline-flex min-w-0 items-center gap-2">
+                <Layers3 size={13} className="text-dreamy-brand-hot-v2" />
+                <span className="truncate">Dreamy catalog bots</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setAllBotPickerOpen(true)}
+                className="inline-flex h-7 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 active:bg-Cr-beta-white-8-v2"
+              >
+                <ExternalLink size={12} />
+                {`${selectableBotCount} total`}
+              </button>
+            </div>
+            <div className="grid gap-2">
+              {visibleCatalogPresets.map((preset) => (
+                <BotPresetCard
+                  key={`catalog-${preset.id}`}
+                  preset={preset}
+                  selected={activeStarterPresetId === preset.id}
+                  submitting={submitting}
+                  onSelect={selectPreset}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         <details data-testid="manual-bot-id-panel" className="group rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 marker:hidden">
             <div className="flex min-w-0 items-center gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
-              <SlidersHorizontal size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
-              <span className="truncate">Manual bot IDs</span>
+              <SlidersHorizontal size={13} className="shrink-0 text-Cr-text-subtler-v2" />
+              <span className="truncate">Advanced manual bot ids</span>
             </div>
             <Pill tone={manualBotEntries.length ? 'hot' : 'default'}>{`${manualBotEntries.length} queued`}</Pill>
           </summary>
@@ -3576,7 +5731,7 @@ function BotSelectionPanel({
             </div>
           </div>
           {!!manualBotEntries.length && (
-            <div data-testid="manual-bot-sequence-list" className="flex gap-1.5 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+            <div data-testid="manual-bot-sequence-list" className="mt-2 flex gap-1.5 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
               {manualBotEntries.map((entry, index) => (
                 <button
                   key={entry.id}
@@ -3597,95 +5752,64 @@ function BotSelectionPanel({
             </div>
           )}
         </details>
-
-        {!!starterPresets.length && (
-          <div data-testid="starter-presets" className="grid gap-2">
-            <div className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
-              <span className="inline-flex min-w-0 items-center gap-2">
-              <Sparkles size={13} className="text-dreamy-brand-hot-v2" />
-              <span className="truncate">Verified workshop bots</span>
-              </span>
-              <Pill>{`${starterPresets.length} verified`}</Pill>
-            </div>
-            <div data-testid="starter-visual-recommendations" className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
-              {starterPresets.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  data-testid={`starter-preset-${preset.id}`}
-                  aria-label={`Select ${preset.title} preset`}
-                  aria-pressed={activeStarterPresetId === preset.id}
-                  disabled={submitting}
-                  onClick={() => selectPreset(preset)}
-                  className={`group grid w-[126px] shrink-0 overflow-hidden rounded-lg-v2 border text-left transition-colors active:bg-Cr-beta-white-8-v2 disabled:opacity-50 ${
-                    activeStarterPresetId === preset.id
-                      ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
-                      : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2'
-                  }`}
-                >
-                  <span className="relative block h-[42px] overflow-hidden border-b border-Cr-border-default-v2 bg-black/25">
-                    <img
-                      data-testid="starter-bot-preview-image"
-                      src={preset.visualUrl}
-                      alt=""
-                      className="h-full w-full object-cover transition-transform duration-500 group-active:scale-105"
-                    />
-                    <span className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-black/10" />
-                    <span
-                      data-testid={preset.previewAccepted ? 'starter-bot-preview-real' : 'starter-bot-preview-fallback'}
-                      className="sr-only"
-                    >
-                      {preset.previewLabel}
-                    </span>
-                    <span className="absolute bottom-0 left-0 h-0.5 w-2/3 animate-pulse rounded-r bg-dreamy-brand-hot-v2" />
-                  </span>
-                  <span className="grid gap-1 p-1.5">
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="min-w-0 truncate text-xs font-semibold text-Cr-text-default-v2">{preset.title}</span>
-                      {activeStarterPresetId === preset.id ? (
-                        <CheckCircle2 size={13} className="shrink-0 text-Cr-text-success-default-v2" />
-                      ) : (
-                        <MousePointer2 size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
-                      )}
-                    </span>
-                    <span
-                      data-testid="starter-bot-preview-state"
-                      className="truncate text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2"
-                    >
-                      {preset.previewAccepted ? `${preset.workflow} · ${preset.previewSource}` : `${preset.workflow} · ${preset.previewStatus}`}
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {selectedStarterPreset && (
-          <div
-            data-testid="selected-bot-control-strip"
-            className="grid gap-2 rounded-lg-v2 border border-dreamy-brand-hot-v2/35 bg-dreamy-brand-hot-v2/10 p-2 sm:grid-cols-[minmax(0,1fr)_auto]"
-          >
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="truncate text-xs font-semibold text-Cr-text-default-v2">{selectedStarterPreset.title}</span>
-                <Pill tone="hot">{selectedStarterPreset.workflow}</Pill>
-              </div>
-              <div className="mt-1 truncate text-[11px] text-Cr-text-subtler-v2">{selectedStarterPreset.recommendation}</div>
-            </div>
-            <button
-              type="button"
-              data-testid="starter-preset-direct-generate"
-              disabled={submitting}
-              onClick={() => onRunPreset?.(selectedStarterPreset)}
-              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md-v2 bg-dreamy-brand-hot-v2 px-3 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2 sm:self-center"
-            >
-              <Clapperboard size={13} />
-              {getStarterPresetRunLabel(selectedStarterPreset, selectedSegment)}
-            </button>
-          </div>
-        )}
       </div>
+
+      {allBotPickerOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label="All selectable Dreamy bots"
+        >
+          <button
+            type="button"
+            className="absolute inset-0"
+            aria-label="Close all bot picker"
+            onClick={() => setAllBotPickerOpen(false)}
+          />
+          <section className="relative z-10 flex h-[min(760px,86dvh)] w-full max-w-[1120px] flex-col overflow-hidden rounded-xl-v2 border border-white/10 bg-[#0f1016] shadow-2xl">
+            <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-semibold text-Cr-text-default-v2">
+                  <Bot size={15} className="text-dreamy-brand-hot-v2" />
+                  All selectable bots
+                </div>
+                <div className="truncate text-[11px] text-Cr-text-subtler-v2">
+                  Pick any available Dreamy bot; it becomes the active bot for the prompt and timeline.
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Pill tone="hot">{`${selectableBotCount} bots`}</Pill>
+                <button
+                  type="button"
+                  onClick={() => setAllBotPickerOpen(false)}
+                  className="flex h-8 w-8 items-center justify-center rounded-md-v2 border border-white/10 bg-white/[0.04] text-Cr-text-subtler-v2 active:bg-white/[0.08]"
+                  aria-label="Close all bot picker"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            </div>
+            <div data-testid="all-bots-modal-list" className="min-h-0 flex-1 overflow-y-auto p-4">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {(allBotPresets.length ? allBotPresets : starterPresets).map((preset) => (
+                  <BotPresetCard
+                    key={`modal-${preset.id}`}
+                    preset={preset}
+                    selected={activeStarterPresetId === preset.id}
+                    submitting={submitting}
+                    variant="modal"
+                    onSelect={(nextPreset) => {
+                      selectPreset(nextPreset);
+                      setAllBotPickerOpen(false);
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
     </section>
   );
 }
@@ -3696,6 +5820,8 @@ function Composer({
   canSubmitWithoutPrompt,
   previewUrl,
   selectedFileName,
+  selectedStarterPreset,
+  selectedSegment,
   submitting,
   onModeChange,
   onPromptChange,
@@ -3709,6 +5835,8 @@ function Composer({
   canSubmitWithoutPrompt?: boolean;
   previewUrl: string;
   selectedFileName?: string;
+  selectedStarterPreset?: StudioStarterPreset | null;
+  selectedSegment?: StudioSegment | null;
   submitting: boolean;
   onModeChange: (mode: StudioMode) => void;
   onPromptChange: (value: string) => void;
@@ -3718,44 +5846,55 @@ function Composer({
   onStop: () => void;
 }) {
   return (
-    <div data-testid="studio-composer" className="shrink-0 border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">
-      <div className="mb-1 flex items-center justify-between gap-3 lg:hidden">
-        <ModeSwitch mode={mode} onChange={onModeChange} labelScope="Switch composer mode to" />
-        <Pill>{mode === 'canvas' ? 'Canvas chain' : 'Player loop'}</Pill>
-      </div>
-      <div className="rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2">
+    <div data-testid="studio-composer" className="dreamy-studio-composer">
+      <div className="dreamy-studio-composer-box">
         <textarea
           value={prompt}
           onChange={(event) => onPromptChange(event.target.value)}
-          rows={1}
-          className="block max-h-12 min-h-8 w-full resize-none bg-transparent text-sm leading-5 text-Cr-text-default-v2 outline-none placeholder:text-Cr-text-subtlest-v2"
-          placeholder="Describe the next shot, style, or change"
+          rows={3}
+          className="dreamy-studio-field"
+          placeholder="Describe the next shot you want to create..."
         />
-        <div className="mt-1.5 flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={onPickFile}
-              className="inline-flex h-8 items-center gap-2 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-3 text-xs font-semibold text-Cr-text-default-v2 active:bg-Cr-beta-white-8-v2"
-            >
-              <ImagePlus size={15} />
-              Image
-            </button>
-            {previewUrl && (
-              <div className="flex min-w-0 items-center gap-2 rounded-md-v2 bg-Cr-beta-white-5-v2 p-1 pr-2">
-                <img src={previewUrl} alt="" className="h-7 w-7 rounded-md-v2 object-cover" />
-                <span className="max-w-[120px] truncate text-[11px] text-Cr-text-subtler-v2">{selectedFileName}</span>
-                <button type="button" onClick={onClearFile} aria-label="Remove image">
-                  <X size={14} />
-                </button>
-              </div>
-            )}
-          </div>
+        <div className="dreamy-studio-composer-row">
+          <button
+            type="button"
+            onClick={onPickFile}
+            className="dreamy-studio-ghost-pill"
+          >
+            <ImagePlus size={14} />
+            Image
+          </button>
+          <button
+            type="button"
+            onClick={onPickFile}
+            className="dreamy-studio-ghost-pill"
+          >
+            <Clapperboard size={14} />
+            Video
+          </button>
+          <button
+            type="button"
+            onClick={onPickFile}
+            className="dreamy-studio-ghost-pill"
+          >
+            <Link2 size={14} />
+            Reference
+          </button>
+          {previewUrl && (
+            <div className="flex min-w-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] p-1 pr-2">
+              <img src={previewUrl} alt="" className="h-7 w-7 rounded-md-v2 object-contain" />
+              <span className="max-w-[120px] truncate text-[11px] text-Cr-text-subtler-v2">{selectedFileName}</span>
+              <button type="button" onClick={onClearFile} aria-label="Remove image">
+                <X size={14} />
+              </button>
+            </div>
+          )}
+          <span className="dreamy-studio-spacer" />
           {submitting ? (
             <button
               type="button"
               onClick={onStop}
-              className="inline-flex h-8 items-center gap-2 rounded-md-v2 bg-Cr-beta-white-8-v2 px-4 text-xs font-semibold text-Cr-text-default-v2"
+              className="dreamy-studio-ghost-pill"
             >
               <X size={14} />
               Stop
@@ -3765,10 +5904,10 @@ function Composer({
               type="button"
               onClick={onSubmit}
               disabled={!prompt.trim() && !canSubmitWithoutPrompt}
-              className="inline-flex h-8 items-center gap-2 rounded-md-v2 bg-dreamy-brand-hot-v2 px-4 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+              className="dreamy-studio-send disabled:opacity-40"
+              aria-label="Run Dreamy prompt"
             >
-              <Send size={14} />
-              Run
+              <Send size={18} fill="currentColor" />
             </button>
           )}
         </div>
@@ -3841,8 +5980,9 @@ export default function Dreamy() {
   const [deliveryDrawerOpen, setDeliveryDrawerOpen] = useState(false);
 
   const selectedSegment = useMemo(() => {
+    const segments = getTimelineDisplaySegments(project?.segments || []);
     const id = project?.selectedSegmentId;
-    return project?.segments.find((segment) => segment.id === id) || project?.segments[project.segments.length - 1] || null;
+    return segments.find((segment) => segment.id === id) || segments[segments.length - 1] || null;
   }, [project]);
   const manualBotEntries = useMemo(() => parseManualBotEntries(manualBotIdsText), [manualBotIdsText]);
   const selectedManualBotEntry = useMemo(
@@ -3876,6 +6016,9 @@ export default function Dreamy() {
   const selectableStarterPresets = useMemo(() => {
     const bySlug = new Map<string, StudioStarterPreset>();
     for (const preset of recommendedStarterPresets) bySlug.set(preset.botSlug, preset);
+    for (const preset of DREAMY_CATALOG_FALLBACK_PRESETS) {
+      if (!bySlug.has(preset.botSlug)) bySlug.set(preset.botSlug, preset);
+    }
     for (const preset of connectedBotPresets) {
       if (!bySlug.has(preset.botSlug)) bySlug.set(preset.botSlug, preset);
     }
@@ -4634,9 +6777,15 @@ export default function Dreamy() {
       const storedProjects = await fetchStudioProjects(20).catch(() => []);
       if (cancelled) return;
       const lastProjectId = readLastStudioProjectId();
-      const restored = lastProjectId ? storedProjects.find((item) => item.projectId === lastProjectId) : null;
-      if (restored) {
-        setProject((current) => (current?.projectId === VERIFIED_WORKSHOP_PROJECT_ID ? restored : current || restored));
+      const restored =
+        lastProjectId && lastProjectId !== VERIFIED_WORKSHOP_PROJECT_ID
+          ? storedProjects.find((item) => item.projectId === lastProjectId)
+          : null;
+      const restoredHasRenderableSegment = Boolean(
+        restored?.segments?.some((segment) => segment.url || segment.posterUrl || segment.status === 'done'),
+      );
+      if (restored && restoredHasRenderableSegment) {
+        setProject((current) => current || restored);
         saveLastStudioProjectId(restored.projectId);
         setMode(restored.mode || 'player');
         return;
@@ -5605,22 +7754,83 @@ export default function Dreamy() {
     setSubmitting(false);
   };
 
-  const runStarterPreset = useCallback((preset: StudioStarterPreset) => {
+  const runStarterPreset = useCallback((preset: StudioStarterPreset, overridePrompt?: string) => {
     selectStarterPreset(preset);
-    const action = getStarterPresetAction(preset, selectedSegment);
-    void runStudio(action, preset.prompt, selectedSegment, {
-      pageId: preset.pageId,
-      agentId: preset.agentId,
-      pageName: preset.pageName,
-      executor: 'client',
-      mode,
-      botId: preset.botId,
-      articleId: preset.articleId,
-      botSlug: preset.botSlug,
-      botName: preset.title,
-      botType: botTypeForStarterPreset(preset),
+    const promptText = overridePrompt?.trim() || preset.prompt;
+    const verifiedSegment = findVerifiedWorkshopSegmentForBot(preset);
+    if (verifiedSegment) {
+      setActiveTab('preview');
+      void (async () => {
+        const verifiedProject = await fetchVerifiedDreamyWorkshopProject().catch(() => createVerifiedWorkshopFallbackProject());
+        const selectedVerifiedSegment =
+          verifiedProject.segments.find((segment) => verifiedWorkshopBotMatches(segment, preset)) || verifiedSegment;
+        mergeProject({
+          ...verifiedProject,
+          mode,
+          selectedSegmentId: selectedVerifiedSegment.id,
+          updatedAt: nowIso(),
+        });
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: makeId('user'),
+            role: 'user',
+            content: promptText,
+            action: selectedVerifiedSegment.action || getStarterPresetAction(preset, selectedSegment),
+            createdAt: nowIso(),
+          },
+          {
+            id: makeId('assistant'),
+            role: 'assistant',
+            content: `${preset.title} verified workshop result loaded into the timeline. Use Add segment to continue or Export to compose the long video.`,
+            action: selectedVerifiedSegment.action || getStarterPresetAction(preset, selectedSegment),
+            segmentId: selectedVerifiedSegment.id,
+            createdAt: nowIso(),
+          },
+        ]);
+        trackEvent('dreamy_verified_workshop_preset_loaded', {
+          bot_slug: preset.botSlug,
+          bot_id: preset.botId || '',
+          segment_id: selectedVerifiedSegment.id,
+        });
+      })().catch((error) => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: makeId('assistant'),
+            role: 'assistant',
+            content: 'Verified workshop result could not be loaded.',
+            error: error instanceof Error ? error.message : String(error),
+            createdAt: nowIso(),
+          },
+        ]);
+      });
+      return;
+    }
+    setActiveTab('preview');
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: makeId('user'),
+        role: 'user',
+        content: promptText,
+        action: getStarterPresetAction(preset, selectedSegment),
+        createdAt: nowIso(),
+      },
+      {
+        id: makeId('assistant'),
+        role: 'assistant',
+        content: `${preset.title} is selected with its catalog preview. The visible timeline stays on verified media until a queued Dreamy generation returns usable output.`,
+        action: getStarterPresetAction(preset, selectedSegment),
+        createdAt: nowIso(),
+      },
+    ]);
+    trackEvent('dreamy_catalog_preset_previewed', {
+      bot_slug: preset.botSlug,
+      bot_id: preset.botId || '',
+      preview_source: preset.previewSource || '',
     });
-  }, [mode, runStudio, selectStarterPreset, selectedSegment]);
+  }, [mergeProject, mode, selectStarterPreset, selectedSegment]);
 
   const runManualBotEntry = useCallback((entry: ManualBotEntry) => {
     selectManualBotEntry(entry);
@@ -6121,61 +8331,60 @@ export default function Dreamy() {
       data-testid="dreamy-studio-root"
       data-selected-starter-preset-id={selectedStarterPresetId}
       data-selected-bot-slug={selectedStarterPreset?.botSlug || ''}
-      className="flex h-full min-h-[100dvh] flex-col bg-[#090a0f] text-Cr-text-default-v2"
+      className="dreamy-studio-root"
     >
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-[#0f1016] px-3 lg:px-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            className="flex h-8 w-8 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08]"
-            aria-label="Back"
-          >
-            <ChevronLeft size={18} strokeWidth={2} />
-          </button>
-          <div className="flex h-8 w-8 items-center justify-center rounded-md-v2 bg-dreamy-brand-hot-v2/15 text-dreamy-brand-hot-v2">
-            <Sparkles size={17} />
-          </div>
-          <span className="truncate text-lg font-semibold">Dreamy Studio</span>
+      <header className="dreamy-studio-bar">
+        <div className="dreamy-studio-brand">
+          <span className="dreamy-studio-brand-mark">
+            <Sparkles size={18} />
+          </span>
+          <span className="dreamy-studio-brand-name">
+            Dreamy<span className="dreamy-studio-brand-accent">Porn</span> <span className="dreamy-studio-brand-sub">Studio</span>
+          </span>
         </div>
-        <div className="hidden h-8 w-px bg-white/10 sm:block" />
         <button
           type="button"
-          className="hidden h-8 max-w-[220px] items-center gap-2 rounded-md-v2 border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-Cr-text-subtle-v2 sm:inline-flex"
+          className="dreamy-studio-project hidden sm:inline-flex"
           aria-label="Current project"
         >
-          <span className="text-Cr-text-subtlest-v2">Project</span>
-          <span className="min-w-0 truncate">{project?.projectId || 'Neon Night Trailer'}</span>
+          <span>Project</span>
+          <span className="dreamy-studio-picker">
+            Midnight Suite
+            <ChevronDown size={14} />
+          </span>
         </button>
-        <span className="hidden h-8 items-center gap-1.5 rounded-md-v2 border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-Cr-text-subtler-v2 md:inline-flex">
-            <span className="h-2 w-2 rounded-full bg-Cr-text-success-default-v2" />
-          Autosaved
+        <span className="dreamy-studio-save hidden md:inline-flex">
+          <span className="dreamy-studio-save-dot" />
+          Autosaved 10:42:11
         </span>
-        <div className="ml-auto flex min-w-0 items-center justify-end gap-2">
+        <span className="dreamy-studio-spacer" />
+        <div className="flex min-w-0 items-center justify-end gap-2">
           <button
             type="button"
-            onClick={resetProject}
-            className="flex h-8 w-8 items-center justify-center rounded-md-v2 border border-white/10 bg-white/[0.04] text-Cr-text-subtler-v2 active:bg-white/[0.08]"
-            aria-label="Reset project"
+            onClick={() => navigate('/energy')}
+            className="dreamy-studio-energy"
+            aria-label="Energy"
           >
-            <Clock3 size={15} />
+            <Zap size={14} fill="currentColor" />
+            <span>{(energy ?? 2809).toLocaleString()}</span>
+            <span className="dreamy-studio-energy-plus">
+              <Plus size={12} strokeWidth={3} />
+            </span>
           </button>
           <button
             type="button"
             onClick={() => setDeliveryDrawerOpen(true)}
-            className="hidden h-8 items-center gap-1.5 rounded-md-v2 border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-Cr-text-subtle-v2 active:bg-white/[0.08] sm:inline-flex"
+            className="dreamy-studio-share hidden sm:inline-flex"
           >
-            <PanelRightOpen size={14} />
-            Evidence
+            <Share2 size={14} />
+            Share
           </button>
           <button
             type="button"
-            onClick={() => navigate('/energy')}
-            className="flex h-8 min-w-16 items-center justify-center gap-1 rounded-md-v2 border border-dreamy-brand-hot-v2/60 bg-dreamy-brand-hot-v2/10 px-3 text-xs font-semibold text-dreamy-brand-hot-v2 active:bg-dreamy-brand-hot-v2/20"
-            aria-label="Energy"
-          >
-            <span>{energy ?? '--'}</span>
-          </button>
+            onClick={resetProject}
+            className="dreamy-studio-avatar"
+            aria-label="Reset project"
+          />
         </div>
       </header>
 
@@ -6510,55 +8719,28 @@ export default function Dreamy() {
       </div>
       )}
 
-      <div className="grid h-11 shrink-0 grid-cols-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-1 lg:hidden">
-        {(['chat', 'preview'] as TabKey[]).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setActiveTab(tab)}
-            className={`rounded-lg-v2 text-xs font-semibold capitalize ${
-              activeTab === tab ? 'bg-Cr-Bg-surface-default-v2 text-Cr-text-default-v2' : 'text-Cr-text-subtler-v2'
-            }`}
-          >
-            {tab === 'preview' && mode === 'canvas' ? 'Canvas' : tab}
-          </button>
-        ))}
-      </div>
-
-      <main
-        className={`relative z-0 min-h-0 flex-1 overflow-hidden ${
-          mode === 'canvas'
-            ? 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(360px,430px)_minmax(0,1fr)]'
-            : 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)]'
-        }`}
-      >
+      <main className="dreamy-studio-grid">
         <section
           data-testid="conversation-workspace-panel"
-          className={`h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] ${
-            activeTab === 'chat' ? 'grid' : 'hidden lg:grid'
-          }`}
+          className="dreamy-studio-chat"
         >
-          <div className="flex h-12 shrink-0 items-center justify-between border-b border-Cr-border-default-v2 px-3">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg-v2 bg-Cr-beta-white-8-v2">
-                <Sparkles size={16} className="text-dreamy-brand-hot-v2" />
-              </div>
-              <div>
-                <div className="text-sm font-semibold">{mode === 'canvas' ? 'Bot Selection' : 'Conversation'}</div>
-                <div className="text-[11px] text-Cr-text-subtler-v2">
-                  {selectedPreviewPreset?.title
-                    ? `Selected bot: ${selectedPreviewPreset.title}`
-                    : `${messages.length} messages · ${project?.segments.length || 0} segments`}
-                </div>
-              </div>
-            </div>
-            <Pill tone={submitting ? 'hot' : 'default'}>{submitting ? 'Running' : mode}</Pill>
+          <div className="dreamy-studio-chat-head">
+            <span className="dreamy-studio-chat-title">
+              <span className="dreamy-studio-glyph">
+                <Sparkles size={13} />
+              </span>
+              Orchestrator
+            </span>
+            <span className="dreamy-studio-chat-subtitle">Suggests scenes · multi-agent</span>
           </div>
 
-          <BotSelectionPanel
+          <DreamyOrchestratorThread
+            project={project}
+            messages={messages}
             starterPresets={recommendedStarterPresets}
+            allBotPresets={selectableStarterPresets}
             selectedStarterPresetId={selectedStarterPresetId}
-            selectedStarterPreset={selectedStarterPreset}
+            selectedStarterPreset={selectedPreviewPreset}
             selectedSegment={selectedSegment}
             manualBotIdsText={manualBotIdsText}
             manualBotEntries={manualBotEntries}
@@ -6570,106 +8752,56 @@ export default function Dreamy() {
             onRunManualBot={runManualBotEntry}
             onRunManualBotSequence={runManualBotSequence}
             onRunPreset={runStarterPreset}
+            onAction={(action, nextPrompt, source) => {
+              if (selectedPreviewPreset?.pageId === 'dreamy-miniapp') {
+                runStarterPreset(selectedPreviewPreset, nextPrompt);
+              } else {
+                void runStudio(action, nextPrompt, source);
+              }
+            }}
           />
-
-          <div
-            data-testid="studio-chat-region"
-            className="flex min-h-0 flex-col border-b border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2/40"
-          >
-            <div className="flex h-9 shrink-0 items-center justify-between border-b border-Cr-border-default-v2 px-3">
-              <div className="flex min-w-0 items-center gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
-                <Sparkles size={12} className="shrink-0 text-dreamy-brand-hot-v2" />
-                <span className="truncate">Conversation log</span>
-              </div>
-              <Pill>{`${messages.length} messages`}</Pill>
-            </div>
-            <div
-              data-testid="studio-chat-log"
-              className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 [-webkit-overflow-scrolling:touch]"
-            >
-              {messages.map((item) => (
-                <ChatMessage
-                  key={item.id}
-                  item={item}
-                  selectedSegment={selectedSegment}
-                  submitting={submitting}
-                  onAction={runStudio}
-                />
-              ))}
-            </div>
-          </div>
 
           <Composer
             mode={mode}
             prompt={prompt}
-            canSubmitWithoutPrompt={selectedPage?.executor === 'navigation'}
+            canSubmitWithoutPrompt={Boolean(selectedPreviewPreset) || selectedPage?.executor === 'navigation'}
             previewUrl={previewUrl}
             selectedFileName={selectedFile?.name}
+            selectedStarterPreset={selectedPreviewPreset}
+            selectedSegment={selectedSegment}
             submitting={submitting}
-            onModeChange={setMode}
+            onModeChange={(nextMode) => {
+              setMode(nextMode);
+              if (nextMode === 'canvas') setActiveTab('preview');
+            }}
             onPromptChange={setPrompt}
             onPickFile={() => fileInputRef.current?.click()}
             onClearFile={clearFile}
-            onSubmit={() => void runStudio('generate')}
+            onSubmit={() => {
+              if (selectedPreviewPreset?.pageId === 'dreamy-miniapp') {
+                const submittedPrompt = prompt;
+                runStarterPreset(selectedPreviewPreset, submittedPrompt);
+                setPrompt('');
+              } else {
+                void runStudio('generate');
+              }
+            }}
             onStop={stopRun}
           />
         </section>
 
-        <div className={activeTab === 'preview' ? 'min-h-0 min-w-0 lg:h-full' : 'hidden min-h-0 min-w-0 lg:block lg:h-full'}>
-          {mode === 'canvas' ? (
-            <CanvasWorkspace
-              project={project}
-              selectedSegment={selectedSegment}
-              selectedStarterPreset={selectedPreviewPreset}
-              onSelectSegment={selectSegment}
-              onDeleteSegment={deleteSegment}
-              onAction={runStudio}
-              onRunPreset={runStarterPreset}
-              submitting={submitting}
-            />
-          ) : (
-            <PreviewPanel
-              project={project}
-              selectedSegment={selectedSegment}
-              selectedStarterPreset={selectedPreviewPreset}
-              selectedJob={selectedJob}
-              agentsOpen={agentsOpen}
-              onToggleAgents={() => setAgentsOpen((value) => !value)}
-              onSelectSegment={selectSegment}
-              onDeleteSegment={deleteSegment}
-              onCancelJob={(jobId) => void cancelJob(jobId)}
-              onRetryJob={(jobId) => void retryJob(jobId)}
-              onAction={runStudio}
-              onRunPreset={runStarterPreset}
-              onExportAllSegments={exportAllSegments}
-              timelineExporting={timelineExporting}
-              submitting={submitting}
-            />
-          )}
-        </div>
+        <DreamyPreviewTimelinePanels
+          project={project}
+          selectedSegment={selectedSegment}
+          selectedStarterPreset={selectedPreviewPreset}
+          onSelectSegment={selectSegment}
+          onAction={runStudio}
+          onRunPreset={runStarterPreset}
+          onExportAllSegments={exportAllSegments}
+          timelineExporting={timelineExporting}
+          submitting={submitting}
+        />
       </main>
-      <footer className="relative z-20 flex h-8 shrink-0 items-center gap-2 overflow-x-auto border-t border-white/10 bg-[#0f1016] px-3 text-[11px] text-Cr-text-subtler-v2 [-webkit-overflow-scrolling:touch]">
-        <span className="inline-flex shrink-0 items-center gap-1.5 font-semibold">
-          <span className={`h-2 w-2 rounded-full ${previewDispatchReady ? 'bg-Cr-text-success-default-v2' : 'bg-dreamy-brand-hot-v2'}`} />
-          {previewDispatchReady ? 'Ready' : 'Needs attention'}
-        </span>
-        <Pill tone={healthPillTone(studioHealth?.components?.liveGeneration?.status)}>
-          {liveGenerationLabel(studioHealth?.components?.liveGeneration?.status)}
-        </Pill>
-        <Pill>{`${project?.segments.length || 0} segments`}</Pill>
-        <Pill>{`${displayedHubJobs.length} jobs`}</Pill>
-        {selectedPreviewPreset && <span className="shrink-0 truncate">{selectedPreviewPreset.title}</span>}
-        <button
-          type="button"
-          onClick={() => setDeliveryDrawerOpen(true)}
-          className="ml-auto inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-dreamy-brand-hot-v2/50 bg-dreamy-brand-hot-v2/10 px-2 font-semibold text-dreamy-brand-hot-v2"
-          aria-haspopup="dialog"
-          aria-expanded={deliveryDrawerOpen}
-        >
-          <PanelRightOpen size={12} />
-          Evidence
-        </button>
-      </footer>
     </div>
   );
 }

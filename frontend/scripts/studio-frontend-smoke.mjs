@@ -446,14 +446,20 @@ export async function runStudioFrontendSmoke(options = {}) {
       page.getByTestId('bot-selection-scroll-region'),
       timeoutMs,
     );
+    const manualBotPanel = page.getByTestId('manual-bot-id-panel');
     await checkVisible(
       checks,
       page,
       'manual-bot-id-panel',
       'Manual bot id panel',
-      page.getByTestId('manual-bot-id-panel'),
+      manualBotPanel,
       timeoutMs,
     );
+    await manualBotPanel.first().evaluate((element) => {
+      if (element instanceof HTMLDetailsElement) {
+        element.open = true;
+      }
+    });
     const manualBotInput = page.getByTestId('manual-bot-id-input');
     await checkVisible(checks, page, 'manual-bot-id-input', 'Manual bot id input', manualBotInput, timeoutMs);
     await manualBotInput.fill(

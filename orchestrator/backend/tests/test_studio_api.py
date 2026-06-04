@@ -514,6 +514,8 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(body["summary"]["totalSegments"], 2)
         self.assertEqual(body["summary"]["videoSegments"], 1)
         self.assertEqual(body["summary"]["estimatedDurationSeconds"], 10)
+        self.assertEqual(body["videoSegments"], 1)
+        self.assertEqual(body["estimatedDurationSeconds"], 10)
         self.assertEqual(body["manifest"]["segments"][0]["segmentId"], image_execution["segmentId"])
         self.assertEqual(body["manifest"]["segments"][1]["segmentId"], video_execution["segmentId"])
         self.assertIn(body["status"], {"manifest_ready", "ready", "needs_media"})
@@ -567,7 +569,8 @@ class StudioApiTest(unittest.TestCase):
             generated_dir = Path(tmp_dir)
             clip_paths = [generated_dir / "clip-one.mp4", generated_dir / "clip-two.mp4"]
             colors = ["red", "blue"]
-            for clip_path, color in zip(clip_paths, colors):
+            sizes = ["160x90", "90x160"]
+            for clip_path, color, size in zip(clip_paths, colors, sizes):
                 subprocess.run(
                     [
                         ffmpeg,
@@ -575,7 +578,7 @@ class StudioApiTest(unittest.TestCase):
                         "-f",
                         "lavfi",
                         "-i",
-                        f"color=c={color}:s=160x90:d=0.25",
+                        f"color=c={color}:s={size}:d=0.25",
                         "-an",
                         "-c:v",
                         "libx264",
@@ -639,10 +642,34 @@ class StudioApiTest(unittest.TestCase):
             body = export.json()
             self.assertEqual(body["status"], "ready")
             self.assertEqual(body["summary"]["videoSegments"], 2)
+            self.assertEqual(body["videoSegments"], 2)
+            self.assertEqual(body["estimatedDurationSeconds"], 10)
             self.assertTrue(body["mediaUrl"].startswith("/generated/studio-exports/"))
             exported_file = generated_dir / body["mediaUrl"].removeprefix("/generated/")
             self.assertTrue(exported_file.exists(), body["mediaUrl"])
             self.assertGreater(exported_file.stat().st_size, 0)
+            ffprobe = shutil.which("ffprobe")
+            if ffprobe:
+                probe = subprocess.run(
+                    [
+                        ffprobe,
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "v:0",
+                        "-show_entries",
+                        "stream=width,height",
+                        "-of",
+                        "json",
+                        str(exported_file),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                stream = json.loads(probe.stdout)["streams"][0]
+                self.assertEqual(stream["width"], 160)
+                self.assertEqual(stream["height"], 90)
 
     def test_pages_agents_and_job_lifecycle_endpoints(self) -> None:
         pages = self.client.get("/api/pages")

@@ -19,7 +19,7 @@ from sse_starlette.sse import EventSourceResponse
 from orchestrator import orchestrate_stream
 from bot_catalog import MYSHELL_BOTS, PROMPT_GALLERY, get_bots_by_type
 from bot_previews import list_bot_previews, load_preview_manifest, preview_for_bot
-from studio import register_studio_routes
+from studio import _generated_media_root, register_studio_routes
 from studio_runtime import runtime_health
 from studio_store import STUDIO_STORE
 
@@ -235,12 +235,8 @@ if os.path.exists(frontend_dist):
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-# Serve generated images — public/generated in local dev, dist/generated in Docker.
-generated_dir = _first_existing_path(
-    os.path.join(frontend_public, "generated"),
-    os.path.join(frontend_dist, "generated"),
-)
-os.makedirs(generated_dir, exist_ok=True)
+# Serve generated media from the same directory Studio writes exports into.
+generated_dir = str(_generated_media_root())
 app.mount("/generated", StaticFiles(directory=generated_dir), name="generated")
 
 # Serve the vendored AI CanvasPro static sub-application.
