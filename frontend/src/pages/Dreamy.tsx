@@ -2741,6 +2741,12 @@ function PreviewPanel({
   const media = getSegmentMedia(selectedSegment);
   const selectedSegmentFallback = fallbackVisualForDreamyBot(selectedSegment?.botSlug, selectedSegment?.botName);
   const selectedStarterVisual = resolveStudioDisplayAssetUrl(selectedStarterPreset?.visualUrl);
+  const starterMatchesSelectedSegment = Boolean(
+    selectedStarterPreset && selectedSegment && verifiedWorkshopBotMatches(selectedSegment, selectedStarterPreset),
+  );
+  const showStarterPreview = Boolean(selectedStarterPreset && (!selectedSegment || !starterMatchesSelectedSegment));
+  const stageMedia = showStarterPreview ? selectedStarterVisual : media;
+  const stageFallback = showStarterPreview ? selectedStarterVisual || presetCinematicGif : selectedSegmentFallback;
   const graph = project?.agentGraph?.length ? project.agentGraph : EMPTY_GRAPH;
   const runningAgents = graph.filter((node) => node.status === 'running' || node.status === 'queued').length;
   const segments = getTimelineDisplaySegments(project?.segments || []);
@@ -2790,13 +2796,13 @@ function PreviewPanel({
           data-testid="preview-main-stage"
           className="relative flex h-[clamp(260px,38dvh,420px)] shrink-0 items-center justify-center overflow-hidden rounded-lg-v2 border border-Cr-border-default-v2 bg-[#07080d]"
           style={{
-            backgroundImage: media ? undefined : `url(${selectedSegment ? selectedSegmentFallback : selectedStarterVisual || presetCinematicGif})`,
+            backgroundImage: stageMedia ? undefined : `url(${stageFallback})`,
             backgroundPosition: 'center',
             backgroundRepeat: 'no-repeat',
             backgroundSize: 'contain',
           }}
         >
-          {selectedSegment?.type === 'video' && selectedSegment.url ? (
+          {!showStarterPreview && selectedSegment?.type === 'video' && selectedSegment.url ? (
             <img
               src={media || selectedSegmentFallback}
               alt={`${selectedSegment.botName || 'Selected'} segment preview`}
@@ -2806,7 +2812,7 @@ function PreviewPanel({
               }}
               className="h-full w-full object-contain"
             />
-          ) : media ? (
+          ) : !showStarterPreview && media ? (
             <img src={media} alt="Selected segment" className="h-full w-full object-contain" />
           ) : selectedStarterPreset ? (
             <div
@@ -2832,7 +2838,12 @@ function PreviewPanel({
           )}
 
           <div className="absolute left-3 top-3 flex flex-wrap gap-2">
-            {selectedSegment ? (
+            {showStarterPreview && selectedStarterPreset ? (
+              <>
+                <Pill tone={selectedStarterPreset.previewAccepted ? 'success' : 'hot'}>{selectedStarterPreset.previewLabel}</Pill>
+                <Pill>{selectedStarterPreset.title}</Pill>
+              </>
+            ) : selectedSegment ? (
               <>
                 <Pill tone={statusPillTone(selectedSegment.status)}>{selectedSegment.status}</Pill>
                 <Pill>{selectedSegment.botName}</Pill>
