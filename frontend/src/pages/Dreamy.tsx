@@ -869,6 +869,16 @@ function getSegmentMedia(segment?: StudioSegment | null): string {
   return resolveStudioDisplayAssetUrl(segment.type === 'video' ? segment.posterUrl || segment.url : segment.url || segment.posterUrl);
 }
 
+const FAILED_DISPLAY_SEGMENT_STATUSES = new Set(['error', 'auth_missing', 'timeout', 'cancelled']);
+
+function isFailedDisplaySegment(segment?: StudioSegment | null): boolean {
+  return Boolean(segment?.status && FAILED_DISPLAY_SEGMENT_STATUSES.has(segment.status));
+}
+
+function getTimelineDisplaySegments(segments: StudioSegment[] = []): StudioSegment[] {
+  return segments.filter((segment) => !isFailedDisplaySegment(segment));
+}
+
 function fallbackVisualForDreamyBot(botSlug?: string, botName?: string): string {
   const value = `${botSlug || ''} ${botName || ''}`.toLowerCase();
   return value.includes('futa') ? presetCharacterGif : presetCinematicGif;
@@ -1035,7 +1045,7 @@ function buildCanvasGraph(
   positionOverrides: Record<string, { x: number; y: number }>,
 ): { nodes: CanvasNode[]; connections: CanvasConnection[] } {
   const graph = project?.agentGraph?.length ? project.agentGraph : EMPTY_GRAPH;
-  const segments = project?.segments || [];
+  const segments = getTimelineDisplaySegments(project?.segments || []);
   const nodes: CanvasNode[] = [];
   const connections: CanvasConnection[] = [];
 
@@ -2733,7 +2743,7 @@ function PreviewPanel({
   const selectedStarterVisual = resolveStudioDisplayAssetUrl(selectedStarterPreset?.visualUrl);
   const graph = project?.agentGraph?.length ? project.agentGraph : EMPTY_GRAPH;
   const runningAgents = graph.filter((node) => node.status === 'running' || node.status === 'queued').length;
-  const segments = project?.segments || [];
+  const segments = getTimelineDisplaySegments(project?.segments || []);
   const selectedSegmentIndex = selectedSegment
     ? segments.findIndex((segment) => segment.id === selectedSegment.id)
     : -1;
@@ -2780,7 +2790,7 @@ function PreviewPanel({
           data-testid="preview-main-stage"
           className="relative flex h-[clamp(260px,38dvh,420px)] shrink-0 items-center justify-center overflow-hidden rounded-lg-v2 border border-Cr-border-default-v2 bg-[#07080d]"
           style={{
-            backgroundImage: `url(${selectedSegment ? selectedSegmentFallback : selectedStarterVisual || presetCinematicGif})`,
+            backgroundImage: media ? undefined : `url(${selectedSegment ? selectedSegmentFallback : selectedStarterVisual || presetCinematicGif})`,
             backgroundPosition: 'center',
             backgroundRepeat: 'no-repeat',
             backgroundSize: 'contain',
@@ -2867,7 +2877,13 @@ function PreviewPanel({
                 type="button"
                 data-testid="preview-segment-rerun"
                 disabled={!selectedSegment || submitting}
-                onClick={() => onAction('retry-agent', 'Rerun this selected segment with stronger continuity and keep it in the timeline.', selectedSegment)}
+                onClick={() => {
+                  if (selectedStarterPreset) {
+                    onRunPreset?.(selectedStarterPreset);
+                  } else {
+                    onAction('retry-agent', 'Rerun this selected segment with stronger continuity and keep it in the timeline.', selectedSegment);
+                  }
+                }}
                 className="inline-flex h-9 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-3 text-xs font-semibold text-Cr-text-default-v2 disabled:text-Cr-text-subtlest-v2"
               >
                 <RefreshCcw size={14} />
@@ -2878,10 +2894,10 @@ function PreviewPanel({
                 data-testid="preview-append-next-segment"
                 disabled={submitting || (!selectedSegment && !selectedStarterPreset)}
                 onClick={() => {
-                  if (selectedSegment) {
-                    onAction('extend', 'Extend this into the next shot', selectedSegment);
-                  } else if (selectedStarterPreset) {
+                  if (selectedStarterPreset) {
                     onRunPreset?.(selectedStarterPreset);
+                  } else if (selectedSegment) {
+                    onAction('extend', 'Extend this into the next shot', selectedSegment);
                   }
                 }}
                 className="inline-flex h-9 items-center gap-1.5 rounded-md-v2 bg-dreamy-brand-hot-v2 px-3 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
@@ -2918,7 +2934,7 @@ function PreviewPanel({
                       : 'border-Cr-border-default-v2'
                   } bg-Cr-Bg-surface-default-v2`}
                   style={{
-                    backgroundImage: `url(${segmentFallback})`,
+                    backgroundImage: segmentMedia ? undefined : `url(${segmentFallback})`,
                     backgroundPosition: 'center',
                     backgroundSize: 'cover',
                   }}
@@ -2930,7 +2946,7 @@ function PreviewPanel({
                       onError={(event) => {
                         event.currentTarget.style.display = 'none';
                       }}
-                      className="h-full w-full object-contain opacity-85"
+                      className="h-full w-full object-cover opacity-90"
                     />
                   ) : (
                     <div className="grid h-full w-full place-items-center bg-Cr-Bg-surface-subtle-v2 text-Cr-text-subtler-v2">
@@ -3052,6 +3068,7 @@ function CanvasWorkspace({
   project,
   selectedSegment,
   selectedStarterPreset,
+  allBotPresets,
   onSelectSegment,
   onDeleteSegment,
   onAction,
@@ -3061,6 +3078,7 @@ function CanvasWorkspace({
   project: StudioProject | null;
   selectedSegment?: StudioSegment | null;
   selectedStarterPreset?: StudioStarterPreset | null;
+  allBotPresets?: StudioStarterPreset[];
   onSelectSegment: (segmentId: string) => void;
   onDeleteSegment: (segmentId: string) => void;
   onAction: (action: StudioAction, prompt?: string, source?: StudioSegment | null) => void;
@@ -3146,8 +3164,9 @@ function CanvasWorkspace({
   );
   const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
   const selectedNode = nodeMap.get(selectedNodeId) || nodes[0] || null;
+  const displaySegments = useMemo(() => getTimelineDisplaySegments(project?.segments || []), [project?.segments]);
   const selectedNodeSegment = selectedNode?.segmentId
-    ? project?.segments.find((segment) => segment.id === selectedNode.segmentId) || null
+    ? displaySegments.find((segment) => segment.id === selectedNode.segmentId) || null
     : selectedSegment || null;
   const isCustomSelected = Boolean(selectedNode && customNodes.some((node) => node.id === selectedNode.id));
   const activeFlowPreset = CANVAS_FLOW_PRESETS.find((preset) => preset.id === activeFlowPresetId) || CANVAS_FLOW_PRESETS[0];
@@ -3158,6 +3177,7 @@ function CanvasWorkspace({
   );
   const canUndo = history.length > 0;
   const canRedo = future.length > 0;
+  const canvasBotCatalogPresets = allBotPresets?.length ? allBotPresets : DREAMY_STARTER_PRESETS;
 
   const createCanvasSnapshot = useCallback<() => CanvasSnapshot>(
     () => ({
@@ -4469,7 +4489,7 @@ function CanvasWorkspace({
             <div className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 px-4">
               <div>
                 <div className="text-sm font-semibold">Dreamy Bot Catalog</div>
-                <div className="text-[11px] text-Cr-text-subtler-v2">{DREAMY_STARTER_PRESETS.length} verified workshop bots</div>
+                <div className="text-[11px] text-Cr-text-subtler-v2">{canvasBotCatalogPresets.length} selectable Dreamy bots</div>
               </div>
               <button
                 type="button"
@@ -4481,7 +4501,7 @@ function CanvasWorkspace({
               </button>
             </div>
             <div className="grid gap-3 overflow-y-auto p-4 sm:grid-cols-2">
-              {DREAMY_STARTER_PRESETS.map((preset) => (
+              {canvasBotCatalogPresets.map((preset) => (
                 <button
                   key={preset.id}
                   type="button"
@@ -4703,6 +4723,10 @@ function BotSelectionPanel({
   const activeStarterPresetId = selectedStarterPreset?.id || selectedStarterPresetId;
   const [allBotPickerOpen, setAllBotPickerOpen] = useState(false);
   const selectableBotCount = allBotPresets.length || starterPresets.length;
+  const starterPresetKeys = new Set(starterPresets.flatMap((preset) => [preset.id, preset.botSlug].filter(Boolean)));
+  const visibleCatalogPresets = allBotPresets
+    .filter((preset) => !starterPresetKeys.has(preset.id) && !starterPresetKeys.has(preset.botSlug))
+    .slice(0, 24);
   const selectPreset = useCallback((preset: StudioStarterPreset) => {
     onSelectPreset(preset);
   }, [onSelectPreset]);
@@ -4793,6 +4817,36 @@ function BotSelectionPanel({
               </div>
             </div>
             <div data-testid="dreamy-bot-list-only" className="sr-only">Dreamy-only bot list</div>
+          </div>
+        )}
+
+        {!!visibleCatalogPresets.length && (
+          <div data-testid="dreamy-catalog-presets" className="grid gap-2">
+            <div className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
+              <span className="inline-flex min-w-0 items-center gap-2">
+                <Layers3 size={13} className="text-dreamy-brand-hot-v2" />
+                <span className="truncate">Dreamy catalog bots</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setAllBotPickerOpen(true)}
+                className="inline-flex h-7 items-center gap-1.5 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 active:bg-Cr-beta-white-8-v2"
+              >
+                <ExternalLink size={12} />
+                {`${selectableBotCount} total`}
+              </button>
+            </div>
+            <div className="grid gap-2">
+              {visibleCatalogPresets.map((preset) => (
+                <BotPresetCard
+                  key={`catalog-${preset.id}`}
+                  preset={preset}
+                  selected={activeStarterPresetId === preset.id}
+                  submitting={submitting}
+                  onSelect={selectPreset}
+                />
+              ))}
+            </div>
           </div>
         )}
 
@@ -5087,8 +5141,9 @@ export default function Dreamy() {
   const [deliveryDrawerOpen, setDeliveryDrawerOpen] = useState(false);
 
   const selectedSegment = useMemo(() => {
+    const segments = getTimelineDisplaySegments(project?.segments || []);
     const id = project?.selectedSegmentId;
-    return project?.segments.find((segment) => segment.id === id) || project?.segments[project.segments.length - 1] || null;
+    return segments.find((segment) => segment.id === id) || segments[segments.length - 1] || null;
   }, [project]);
   const manualBotEntries = useMemo(() => parseManualBotEntries(manualBotIdsText), [manualBotIdsText]);
   const selectedManualBotEntry = useMemo(
@@ -6909,20 +6964,30 @@ export default function Dreamy() {
       });
       return;
     }
-    const action = getStarterPresetAction(preset, selectedSegment);
-    void runStudio(action, preset.prompt, selectedSegment, {
-      pageId: preset.pageId,
-      agentId: preset.agentId,
-      pageName: preset.pageName,
-      executor: 'client',
-      mode,
-      botId: preset.botId,
-      articleId: preset.articleId,
-      botSlug: preset.botSlug,
-      botName: preset.title,
-      botType: botTypeForStarterPreset(preset),
+    setActiveTab('preview');
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: makeId('user'),
+        role: 'user',
+        content: preset.prompt,
+        action: getStarterPresetAction(preset, selectedSegment),
+        createdAt: nowIso(),
+      },
+      {
+        id: makeId('assistant'),
+        role: 'assistant',
+        content: `${preset.title} is selected with its catalog preview. The visible timeline stays on verified media until a queued Dreamy generation returns usable output.`,
+        action: getStarterPresetAction(preset, selectedSegment),
+        createdAt: nowIso(),
+      },
+    ]);
+    trackEvent('dreamy_catalog_preset_previewed', {
+      bot_slug: preset.botSlug,
+      bot_id: preset.botId || '',
+      preview_source: preset.previewSource || '',
     });
-  }, [mergeProject, mode, runStudio, selectStarterPreset, selectedSegment]);
+  }, [mergeProject, mode, selectStarterPreset, selectedSegment]);
 
   const runManualBotEntry = useCallback((entry: ManualBotEntry) => {
     selectManualBotEntry(entry);
@@ -7902,7 +7967,13 @@ export default function Dreamy() {
             onPromptChange={setPrompt}
             onPickFile={() => fileInputRef.current?.click()}
             onClearFile={clearFile}
-            onSubmit={() => void runStudio('generate')}
+            onSubmit={() => {
+              if (selectedPreviewPreset?.pageId === 'dreamy-miniapp') {
+                runStarterPreset(selectedPreviewPreset);
+              } else {
+                void runStudio('generate');
+              }
+            }}
             onStop={stopRun}
           />
         </section>
@@ -7919,6 +7990,7 @@ export default function Dreamy() {
               project={project}
               selectedSegment={selectedSegment}
               selectedStarterPreset={selectedPreviewPreset}
+              allBotPresets={selectableStarterPresets}
               onSelectSegment={selectSegment}
               onDeleteSegment={deleteSegment}
               onAction={runStudio}
