@@ -3662,6 +3662,73 @@ def _prepare_timeline_video_input(media_url: str, target_dir: Path, index: int) 
     raise ValueError(f"Unsupported timeline media URL: {media_url}")
 
 
+def _even_video_dimension(value: int) -> int:
+    return max(2, int(value) - (int(value) % 2))
+
+
+def _probe_video_dimensions(video_path: Path) -> tuple[int, int] | None:
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return None
+    command = [
+        ffprobe,
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height",
+        "-of",
+        "json",
+        str(video_path),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        return None
+    try:
+        streams = json.loads(result.stdout or "{}").get("streams") or []
+    except json.JSONDecodeError:
+        return None
+    for stream in streams:
+        width = int(stream.get("width") or 0)
+        height = int(stream.get("height") or 0)
+        if width > 0 and height > 0:
+            return _even_video_dimension(width), _even_video_dimension(height)
+    return None
+
+
+def _normalize_timeline_video_inputs(ffmpeg: str, input_paths: list[Path], target_dir: Path) -> list[Path]:
+    target_width, target_height = _probe_video_dimensions(input_paths[0]) or (1080, 1920)
+    normalized_paths: list[Path] = []
+    for index, input_path in enumerate(input_paths, start=1):
+        output_path = target_dir / f"normalized-{index:03d}.mp4"
+        normalize_command = [
+            ffmpeg,
+            "-y",
+            "-i",
+            str(input_path),
+            "-vf",
+            (
+                f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
+                f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:color=black,"
+                "setsar=1"
+            ),
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-pix_fmt",
+            "yuv420p",
+            str(output_path),
+        ]
+        result = subprocess.run(normalize_command, capture_output=True, text=True, timeout=180)
+        if result.returncode != 0:
+            raise RuntimeError(f"FFmpeg normalize failed for segment {index}: {(result.stderr or '').strip()[-1200:]}")
+        normalized_paths.append(output_path)
+    return normalized_paths
+
+
 def _compose_timeline_video(export_id: str, video_segments: list[dict[str, Any]]) -> dict[str, Any]:
     if not video_segments:
         return {"status": "needs_media", "message": "No video segments are ready to compose."}
@@ -3685,8 +3752,9 @@ def _compose_timeline_video(export_id: str, video_segments: list[dict[str, Any]]
                 "message": "Composed 1 video segment.",
             }
         concat_path = temp_dir / "concat.txt"
+        normalized_paths = _normalize_timeline_video_inputs(ffmpeg, input_paths, temp_dir)
         concat_path.write_text(
-            "\n".join(f"file '{path.as_posix()}'" for path in input_paths) + "\n",
+            "\n".join(f"file '{path.as_posix()}'" for path in normalized_paths) + "\n",
             encoding="utf-8",
         )
         copy_command = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_path), "-c", "copy", str(output_path)]
@@ -3707,8 +3775,7 @@ def _compose_timeline_video(export_id: str, video_segments: list[dict[str, Any]]
                 "veryfast",
                 "-pix_fmt",
                 "yuv420p",
-                "-c:a",
-                "aac",
+                "-an",
                 str(output_path),
             ]
             encode_result = subprocess.run(encode_command, capture_output=True, text=True, timeout=240)
@@ -3718,7 +3785,7 @@ def _compose_timeline_video(export_id: str, video_segments: list[dict[str, Any]]
     return {
         "status": "ready",
         "mediaUrl": f"/generated/studio-exports/{output_path.name}",
-        "message": f"Composed {len(video_segments)} video segment{'' if len(video_segments) == 1 else 's'}.",
+        "message": f"Composed {len(video_segments)} video segment{'' if len(video_segments) == 1 else 's'} with aspect-safe padding.",
     }
 
 

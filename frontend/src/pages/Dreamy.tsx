@@ -525,6 +525,30 @@ function getStarterPresetRunLabel(preset: StudioStarterPreset, sourceSegment?: S
   return getStarterPresetAction(preset, sourceSegment) === 'extend' ? 'Append segment' : 'Add segment';
 }
 
+function verifiedWorkshopBotMatches(
+  segment: StudioSegment,
+  target: Partial<Pick<StudioStarterPreset, 'botSlug' | 'botId' | 'articleId' | 'title'>>,
+): boolean {
+  const values = [target.botSlug, target.botId, target.articleId, target.title].filter(Boolean).map((value) => String(value).toLowerCase());
+  const segmentValues = [segment.botSlug, segment.botId, segment.articleId, segment.botName]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase());
+  return values.some((value) => segmentValues.includes(value));
+}
+
+function findVerifiedWorkshopSegmentForBot(
+  target: Partial<Pick<StudioStarterPreset, 'botSlug' | 'botId' | 'articleId' | 'title'>>,
+): StudioSegment | null {
+  return VERIFIED_WORKSHOP_SEGMENTS.find((segment) => verifiedWorkshopBotMatches(segment, target)) || null;
+}
+
+function resolveVerifiedWorkshopVisual(
+  target: Partial<Pick<StudioStarterPreset, 'botSlug' | 'botId' | 'articleId' | 'title'>>,
+): string {
+  const segment = findVerifiedWorkshopSegmentForBot(target);
+  return resolveStudioDisplayAssetUrl(segment?.posterUrl || '') || resolveStudioDisplayAssetUrl(segment?.url || '') || '';
+}
+
 function previewLabelFor(preview?: StudioBotPreview): string {
   if (!preview) return 'Local fallback';
   if (preview.status === 'ready' && preview.accepted) {
@@ -579,7 +603,19 @@ function parseManualBotEntries(value: string): ManualBotEntry[] {
 function starterPresetFromBotPreview(preview: StudioBotPreview): StudioStarterPreset {
   const botType = preview.botType || '';
   const fallbackVisualUrl = fallbackVisualForDreamyBot(preview.botSlug, preview.botName);
-  const imageUrl = resolveStudioDisplayAssetUrl(preview.thumbnailUrl || preview.mediaUrl || preview.posterUrl) || fallbackVisualUrl;
+  const verifiedVisualUrl = resolveVerifiedWorkshopVisual({
+    botSlug: preview.botSlug,
+    botId: preview.botId,
+    articleId: preview.articleId,
+    title: preview.botName,
+  });
+  const imageUrl = verifiedVisualUrl || resolveStudioDisplayAssetUrl(preview.thumbnailUrl || preview.posterUrl || preview.mediaUrl) || fallbackVisualUrl;
+  const verifiedSegment = findVerifiedWorkshopSegmentForBot({
+    botSlug: preview.botSlug,
+    botId: preview.botId,
+    articleId: preview.articleId,
+    title: preview.botName,
+  });
   const isVideo = botType.toLowerCase().includes('video');
   return {
     id: `dreamy-bot-${preview.botSlug}`,
@@ -591,13 +627,15 @@ function starterPresetFromBotPreview(preview: StudioBotPreview): StudioStarterPr
     pageName: 'Dreamy Miniapp',
     agentId: DEFAULT_STUDIO_AGENT_ID,
     botSlug: preview.botSlug,
+    botId: preview.botId || verifiedSegment?.botId,
+    articleId: preview.articleId || verifiedSegment?.articleId || preview.botSlug,
     recommendation: preview.generatedPrompt || preview.evidence?.message || `Run ${preview.botName} through the Dreamy miniapp.`,
     visualUrl: imageUrl,
     fallbackVisualUrl,
-    previewStatus: preview.status,
-    previewAccepted: Boolean(preview.botSpecific || preview.mediaUrl || preview.thumbnailUrl || preview.posterUrl),
-    previewSource: preview.source || 'dreamy-catalog',
-    previewLabel: previewLabelFor(preview),
+    previewStatus: verifiedSegment ? 'done' : preview.status,
+    previewAccepted: Boolean(verifiedSegment || preview.botSpecific || preview.mediaUrl || preview.thumbnailUrl || preview.posterUrl),
+    previewSource: verifiedSegment ? 'dreamyporn-workshop-web' : preview.source || 'dreamy-catalog',
+    previewLabel: verifiedSegment ? 'Verified result' : previewLabelFor(preview),
     workflow: workflowForDreamyBotType(botType),
     steps: stepsForDreamyBotType(botType),
     estimatedWaitSeconds: isVideo ? 60 : 30,
@@ -615,16 +653,26 @@ function hydrateStarterPresets(
     const manifestPreview = manifestStarter?.botSlug ? previewBySlug.get(manifestStarter.botSlug) : undefined;
     const previewSlug = manifestPreview && isDreamyStudioBot(manifestPreview) ? manifestStarter?.botSlug || preset.botSlug : preset.botSlug;
     const preview = previewBySlug.get(previewSlug);
-    const previewMedia = resolveStudioDisplayAssetUrl(preview?.thumbnailUrl || preview?.mediaUrl || preview?.posterUrl);
-    const visualUrl = previewMedia || preset.fallbackVisualUrl;
+    const verifiedSegment = findVerifiedWorkshopSegmentForBot({
+      botSlug: previewSlug,
+      botId: preview?.botId || preset.botId,
+      articleId: preview?.articleId || preset.articleId,
+      title: preview?.botName || preset.title,
+    });
+    const previewMedia =
+      resolveStudioDisplayAssetUrl(verifiedSegment?.posterUrl || '') ||
+      resolveStudioDisplayAssetUrl(preview?.thumbnailUrl || preview?.posterUrl || preview?.mediaUrl);
+    const visualUrl = previewMedia || preset.visualUrl || preset.fallbackVisualUrl;
     return {
       ...preset,
       botSlug: previewSlug,
+      botId: preview?.botId || verifiedSegment?.botId || preset.botId,
+      articleId: preview?.articleId || verifiedSegment?.articleId || preset.articleId,
       visualUrl,
-      previewStatus: preview?.status || preset.previewStatus,
-      previewAccepted: preview ? Boolean(preview.accepted) : preset.previewAccepted,
-      previewSource: preview?.source || preset.previewSource,
-      previewLabel: preview ? previewLabelFor(preview) : preset.previewLabel,
+      previewStatus: verifiedSegment ? 'done' : preview?.status || preset.previewStatus,
+      previewAccepted: Boolean(verifiedSegment || (preview ? preview.accepted : preset.previewAccepted)),
+      previewSource: verifiedSegment ? 'dreamyporn-workshop-web' : preview?.source || preset.previewSource,
+      previewLabel: verifiedSegment ? 'Verified result' : preview ? previewLabelFor(preview) : preset.previewLabel,
     };
   });
 }
@@ -2613,7 +2661,7 @@ function SegmentCard({
         aria-label={`Select ${segment.botName} segment`}
       >
         {media ? (
-          <img src={media} alt="" className="h-full w-full object-cover opacity-80" />
+          <img src={media} alt="" className="h-full w-full object-contain opacity-80" />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-Cr-Bg-surface-subtle-v2">
             <Film size={18} className="text-Cr-text-subtler-v2" />
@@ -2756,7 +2804,7 @@ function PreviewPanel({
               className="relative h-full w-full bg-black/20"
             >
               {selectedStarterVisual ? (
-                <img src={selectedStarterVisual} alt="" className="h-full w-full object-cover opacity-90" />
+                <img src={selectedStarterVisual} alt="" className="h-full w-full object-contain opacity-90" />
               ) : (
                 <div className="grid h-full place-items-center text-Cr-text-subtler-v2">
                   <Bot size={32} />
@@ -2882,7 +2930,7 @@ function PreviewPanel({
                       onError={(event) => {
                         event.currentTarget.style.display = 'none';
                       }}
-                      className="h-full w-full object-cover opacity-85"
+                      className="h-full w-full object-contain opacity-85"
                     />
                   ) : (
                     <div className="grid h-full w-full place-items-center bg-Cr-Bg-surface-subtle-v2 text-Cr-text-subtler-v2">
@@ -3043,6 +3091,8 @@ function CanvasWorkspace({
   const [isDropActive, setIsDropActive] = useState(false);
   const [spacePanning, setSpacePanning] = useState(false);
   const [showBotCatalog, setShowBotCatalog] = useState(false);
+  const [leftPanelOpen, setLeftPanelOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [dragState, setDragState] = useState<{
     id: string;
@@ -3797,8 +3847,13 @@ function CanvasWorkspace({
         </div>
       </div>
 
-      <div className="grid min-h-[560px] flex-1 grid-cols-1 xl:min-h-0 xl:grid-cols-[360px_minmax(0,1fr)_280px]">
-        <aside className="hidden min-h-0 flex-col border-r border-white/10 bg-[#111219] xl:flex">
+      <div className="relative min-h-[560px] flex-1 overflow-hidden xl:min-h-0">
+        <aside
+          data-testid="ai-canvas-left-drawer"
+          className={`absolute inset-y-3 left-3 z-40 w-[min(360px,calc(100%-24px))] min-h-0 flex-col overflow-hidden rounded-lg-v2 border border-white/10 bg-[#111219]/98 shadow-2xl backdrop-blur ${
+            leftPanelOpen ? 'flex' : 'hidden'
+          }`}
+        >
           <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4">
             <div>
               <div className="text-sm font-semibold text-Cr-text-default-v2">Canvas Inputs</div>
@@ -3815,6 +3870,14 @@ function CanvasWorkspace({
               </button>
               <button type="button" onClick={() => addCanvasNode('agent')} className="flex h-8 w-8 items-center justify-center rounded-md-v2 bg-white/[0.06]">
                 <Plus size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setLeftPanelOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-md-v2 bg-white/[0.06] active:bg-white/10"
+                aria-label="Close canvas inputs"
+              >
+                <X size={14} />
               </button>
             </div>
           </div>
@@ -3834,7 +3897,7 @@ function CanvasWorkspace({
               >
                 <span className="relative h-14 overflow-hidden rounded-md-v2 bg-black/30">
                   {selectedStarterPreset.visualUrl ? (
-                    <img src={selectedStarterPreset.visualUrl} alt="" className="h-full w-full object-cover" />
+                    <img src={selectedStarterPreset.visualUrl} alt="" className="h-full w-full object-contain" />
                   ) : (
                     <span className="grid h-full place-items-center text-Cr-text-subtler-v2">
                       <Bot size={18} />
@@ -3925,7 +3988,7 @@ function CanvasWorkspace({
           </div>
         </aside>
 
-        <div className="relative min-h-[560px] overflow-hidden xl:min-h-0">
+        <div className="absolute inset-0 overflow-hidden">
           <input
             ref={canvasFileInputRef}
             type="file"
@@ -3970,7 +4033,27 @@ function CanvasWorkspace({
               event.target.value = '';
             }}
           />
-          <div data-canvas-floating="true" className="absolute left-5 top-4 z-20 flex flex-col gap-1 rounded-md-v2 border border-white/10 bg-[#171821]/90 p-1 shadow-xl">
+          <div data-canvas-floating="true" className="absolute left-4 top-4 z-30 flex items-center gap-1 rounded-md-v2 border border-white/10 bg-[#171821]/90 p-1 shadow-xl">
+            <button
+              type="button"
+              data-testid="ai-canvas-open-inputs"
+              onClick={() => setLeftPanelOpen(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md-v2 bg-white/[0.06] px-2 text-xs font-semibold text-Cr-text-subtle-v2 active:bg-white/[0.1]"
+            >
+              <PanelRightOpen size={15} className="rotate-180" />
+              Inputs
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowBotCatalog(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md-v2 bg-white/[0.06] px-2 text-xs font-semibold text-Cr-text-subtle-v2 active:bg-white/[0.1]"
+            >
+              <Bot size={15} />
+              Bots
+            </button>
+          </div>
+
+          <div data-canvas-floating="true" className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 items-center gap-1 rounded-md-v2 border border-white/10 bg-[#171821]/90 p-1 shadow-xl">
             <button
               type="button"
               onClick={() => setTool('select')}
@@ -3999,7 +4082,7 @@ function CanvasWorkspace({
             >
               <Link2 size={17} />
             </button>
-            <div className="my-1 h-px bg-white/10" />
+            <div className="mx-1 h-6 w-px bg-white/10" />
             <button type="button" onClick={() => addCanvasNode('agent')} className="flex h-9 w-9 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08]" aria-label="Add agent">
               <Bot size={17} />
             </button>
@@ -4014,7 +4097,16 @@ function CanvasWorkspace({
             </button>
           </div>
 
-          <div data-canvas-floating="true" className="absolute right-5 top-4 z-20 flex items-center gap-1 rounded-md-v2 border border-white/10 bg-[#171821]/90 p-1 shadow-xl">
+          <div data-canvas-floating="true" className="absolute right-4 top-4 z-30 flex items-center gap-1 rounded-md-v2 border border-white/10 bg-[#171821]/90 p-1 shadow-xl">
+            <button
+              type="button"
+              data-testid="ai-canvas-open-inspector"
+              onClick={() => setInspectorOpen(true)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md-v2 bg-white/[0.06] px-2 text-[11px] font-semibold text-Cr-text-subtle-v2 active:bg-white/10"
+            >
+              <SlidersHorizontal size={13} />
+              Inspector
+            </button>
             <button
               type="button"
               onClick={undoCanvas}
@@ -4104,13 +4196,13 @@ function CanvasWorkspace({
                       {node.mediaUrl && (
                         <div className="h-full w-[86px] shrink-0 bg-black/30">
                           {node.sourceType === 'video' ? (
-                            <video src={node.mediaUrl} muted playsInline className="h-full w-full object-cover opacity-80" />
+                            <video src={node.mediaUrl} muted playsInline className="h-full w-full object-contain opacity-80" />
                           ) : node.sourceType === 'audio' ? (
                             <div className="grid h-full place-items-center text-dreamy-brand-hot-v2">
                               <Play size={20} />
                             </div>
                           ) : (
-                            <img src={node.mediaUrl} alt="" className="h-full w-full object-cover opacity-80" />
+                            <img src={node.mediaUrl} alt="" className="h-full w-full object-contain opacity-80" />
                           )}
                         </div>
                       )}
@@ -4178,7 +4270,7 @@ function CanvasWorkspace({
           <div className="absolute bottom-6 left-5 right-5 z-20 grid gap-2 md:left-[70px] md:right-[70px]">
             <div
               data-testid="canvas-auto-flow-presets"
-              className="flex flex-wrap items-center gap-2 rounded-md-v2 border border-white/10 bg-[#171821]/95 p-2 shadow-xl"
+              className="hidden flex-wrap items-center gap-2 rounded-md-v2 border border-white/10 bg-[#171821]/95 p-2 shadow-xl"
             >
               <div data-testid="canvas-material-flow-ready" className="mr-1 inline-flex min-w-0 items-center gap-2 rounded-md-v2 bg-white/[0.06] px-2 py-1 text-[11px] font-semibold text-Cr-text-subtle-v2">
                 <Link2 size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
@@ -4264,10 +4356,25 @@ function CanvasWorkspace({
           </div>
         </div>
 
-        <aside className="hidden min-h-0 flex-col border-l border-white/10 bg-[#111219] xl:flex">
-          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 px-4">
-            <SlidersHorizontal size={14} />
-            <div className="text-sm font-semibold">Inspector</div>
+        <aside
+          data-testid="ai-canvas-inspector-drawer"
+          className={`absolute inset-y-3 right-3 z-40 w-[min(300px,calc(100%-24px))] min-h-0 flex-col overflow-hidden rounded-lg-v2 border border-white/10 bg-[#111219]/98 shadow-2xl backdrop-blur ${
+            inspectorOpen ? 'flex' : 'hidden'
+          }`}
+        >
+          <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-4">
+            <div className="flex min-w-0 items-center gap-2">
+              <SlidersHorizontal size={14} />
+              <div className="truncate text-sm font-semibold">Inspector</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setInspectorOpen(false)}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md-v2 bg-white/[0.06] active:bg-white/10"
+              aria-label="Close inspector"
+            >
+              <X size={14} />
+            </button>
           </div>
           {selectedNode ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -4397,7 +4504,7 @@ function CanvasWorkspace({
                   className="grid min-h-[132px] grid-cols-[118px_minmax(0,1fr)] overflow-hidden rounded-md-v2 border border-white/10 bg-white/[0.03] text-left active:bg-white/[0.08]"
                 >
                   <span className="relative h-full min-h-[132px] bg-black/30">
-                    <img src={preset.visualUrl} alt="" className="h-full w-full object-cover" />
+                    <img src={preset.visualUrl} alt="" className="h-full w-full object-contain" />
                     <span className="absolute bottom-2 left-2 rounded-md-v2 bg-black/70 px-2 py-1 text-[10px] font-semibold text-white">
                       {preset.workflow}
                     </span>
@@ -4434,7 +4541,7 @@ function RecommendationAgentPanel({
       className="grid gap-2 rounded-lg-v2 border border-dreamy-brand-hot-v2/35 bg-dreamy-brand-hot-v2/10 p-2 sm:grid-cols-[96px_minmax(0,1fr)_auto]"
     >
       <div className="relative h-[70px] overflow-hidden rounded-md-v2 border border-white/10 bg-black/30">
-        <img src={preset.visualUrl} alt="" className="h-full w-full object-cover" />
+        <img src={preset.visualUrl} alt="" className="h-full w-full object-contain" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
         <div className="absolute -left-6 top-0 h-full w-12 rotate-12 animate-pulse bg-white/20 blur-sm" />
       </div>
@@ -4505,7 +4612,7 @@ function BotPresetCard({
           data-testid={isModal ? 'all-bot-picker-preview-asset' : 'starter-bot-preview-asset'}
           className="relative block h-full overflow-hidden border-r border-Cr-border-default-v2 bg-black/25"
           style={{
-            backgroundImage: `url(${preset.fallbackVisualUrl})`,
+            backgroundImage: preset.visualUrl === preset.fallbackVisualUrl ? `url(${preset.fallbackVisualUrl})` : undefined,
             backgroundPosition: 'center',
             backgroundSize: 'cover',
           }}
@@ -4518,7 +4625,7 @@ function BotPresetCard({
               onError={(event) => {
                 event.currentTarget.style.display = 'none';
               }}
-              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03] group-active:scale-105"
+              className="h-full w-full object-contain transition-transform duration-500 group-hover:scale-[1.03] group-active:scale-105"
             />
           </span>
           <span className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/10" />
@@ -4603,7 +4710,7 @@ function BotSelectionPanel({
   return (
     <section
       data-testid="bot-selection-panel"
-      className="flex h-[clamp(300px,42dvh,380px)] min-h-0 shrink-0 flex-col overflow-hidden border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-3"
+      className="flex h-full min-h-0 flex-col overflow-hidden border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-3"
       aria-label="Dreamy bot selection"
     >
       <div className="mb-3 flex shrink-0 items-start justify-between gap-3">
@@ -4823,6 +4930,8 @@ function Composer({
   canSubmitWithoutPrompt,
   previewUrl,
   selectedFileName,
+  selectedStarterPreset,
+  selectedSegment,
   submitting,
   onModeChange,
   onPromptChange,
@@ -4836,6 +4945,8 @@ function Composer({
   canSubmitWithoutPrompt?: boolean;
   previewUrl: string;
   selectedFileName?: string;
+  selectedStarterPreset?: StudioStarterPreset | null;
+  selectedSegment?: StudioSegment | null;
   submitting: boolean;
   onModeChange: (mode: StudioMode) => void;
   onPromptChange: (value: string) => void;
@@ -4844,13 +4955,18 @@ function Composer({
   onClearFile: () => void;
   onStop: () => void;
 }) {
+  const targetBotLabel = selectedStarterPreset?.title || selectedSegment?.botName || 'Choose bot';
+  const nextActionLabel = selectedSegment ? 'Add next segment' : 'Create first segment';
+
   return (
     <div data-testid="studio-composer" className="shrink-0 border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">
       <div className="rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2.5">
         <div className="mb-2 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-xs font-semibold text-Cr-text-default-v2">Message</div>
-            <div className="mt-0.5 truncate text-[11px] text-Cr-text-subtler-v2">Prompt is sent to the selected bot.</div>
+            <div data-testid="prompt-route-merged" className="mt-0.5 truncate text-[11px] text-Cr-text-subtler-v2">
+              {`To ${targetBotLabel} · ${nextActionLabel}`}
+            </div>
           </div>
           <ModeSwitch mode={mode} onChange={onModeChange} labelScope="Switch composer mode to" />
         </div>
@@ -4873,7 +4989,7 @@ function Composer({
             </button>
             {previewUrl && (
               <div className="flex min-w-0 items-center gap-2 rounded-md-v2 bg-Cr-beta-white-5-v2 p-1 pr-2">
-                <img src={previewUrl} alt="" className="h-7 w-7 rounded-md-v2 object-cover" />
+                <img src={previewUrl} alt="" className="h-7 w-7 rounded-md-v2 object-contain" />
                 <span className="max-w-[120px] truncate text-[11px] text-Cr-text-subtler-v2">{selectedFileName}</span>
                 <button type="button" onClick={onClearFile} aria-label="Remove image">
                   <X size={14} />
@@ -6743,6 +6859,56 @@ export default function Dreamy() {
 
   const runStarterPreset = useCallback((preset: StudioStarterPreset) => {
     selectStarterPreset(preset);
+    const verifiedSegment = findVerifiedWorkshopSegmentForBot(preset);
+    if (verifiedSegment) {
+      setActiveTab('preview');
+      void (async () => {
+        const verifiedProject = await fetchVerifiedDreamyWorkshopProject().catch(() => createVerifiedWorkshopFallbackProject());
+        const selectedVerifiedSegment =
+          verifiedProject.segments.find((segment) => verifiedWorkshopBotMatches(segment, preset)) || verifiedSegment;
+        mergeProject({
+          ...verifiedProject,
+          mode,
+          selectedSegmentId: selectedVerifiedSegment.id,
+          updatedAt: nowIso(),
+        });
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: makeId('user'),
+            role: 'user',
+            content: preset.prompt,
+            action: selectedVerifiedSegment.action || getStarterPresetAction(preset, selectedSegment),
+            createdAt: nowIso(),
+          },
+          {
+            id: makeId('assistant'),
+            role: 'assistant',
+            content: `${preset.title} verified workshop result loaded into the timeline. Use Add segment to continue or Export to compose the long video.`,
+            action: selectedVerifiedSegment.action || getStarterPresetAction(preset, selectedSegment),
+            segmentId: selectedVerifiedSegment.id,
+            createdAt: nowIso(),
+          },
+        ]);
+        trackEvent('dreamy_verified_workshop_preset_loaded', {
+          bot_slug: preset.botSlug,
+          bot_id: preset.botId || '',
+          segment_id: selectedVerifiedSegment.id,
+        });
+      })().catch((error) => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: makeId('assistant'),
+            role: 'assistant',
+            content: 'Verified workshop result could not be loaded.',
+            error: error instanceof Error ? error.message : String(error),
+            createdAt: nowIso(),
+          },
+        ]);
+      });
+      return;
+    }
     const action = getStarterPresetAction(preset, selectedSegment);
     void runStudio(action, preset.prompt, selectedSegment, {
       pageId: preset.pageId,
@@ -6756,7 +6922,7 @@ export default function Dreamy() {
       botName: preset.title,
       botType: botTypeForStarterPreset(preset),
     });
-  }, [mode, runStudio, selectStarterPreset, selectedSegment]);
+  }, [mergeProject, mode, runStudio, selectStarterPreset, selectedSegment]);
 
   const runManualBotEntry = useCallback((entry: ManualBotEntry) => {
     selectManualBotEntry(entry);
@@ -7681,7 +7847,7 @@ export default function Dreamy() {
       >
         <section
           data-testid="conversation-workspace-panel"
-          className={`h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] ${
+          className={`h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] ${
             mode === 'canvas' ? 'hidden' : activeTab === 'chat' ? 'grid' : 'hidden lg:grid'
           }`}
         >
@@ -7720,32 +7886,14 @@ export default function Dreamy() {
             onRunPreset={runStarterPreset}
           />
 
-          <div
-            data-testid="studio-chat-region"
-            className="flex min-h-0 flex-col border-b border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2/40"
-          >
-            <div className="flex h-9 shrink-0 items-center justify-between border-b border-Cr-border-default-v2 px-3">
-              <div className="flex min-w-0 items-center gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
-                <Sparkles size={12} className="shrink-0 text-dreamy-brand-hot-v2" />
-                <span className="truncate">Prompt route</span>
-              </div>
-              <Pill>{selectedPreviewPreset?.title || 'No bot'}</Pill>
-            </div>
-            <PromptRoutingPanel
-              prompt={prompt}
-              messages={messages}
-              selectedStarterPreset={selectedPreviewPreset}
-              selectedSegment={selectedSegment}
-              submitting={submitting}
-            />
-          </div>
-
           <Composer
             mode={mode}
             prompt={prompt}
             canSubmitWithoutPrompt={selectedPage?.executor === 'navigation'}
             previewUrl={previewUrl}
             selectedFileName={selectedFile?.name}
+            selectedStarterPreset={selectedPreviewPreset}
+            selectedSegment={selectedSegment}
             submitting={submitting}
             onModeChange={(nextMode) => {
               setMode(nextMode);
