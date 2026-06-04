@@ -13,6 +13,7 @@
 
 @import './styles/design-system-v2.new.css';
 @import './styles/dreamy-tokens.css';
+@import './styles/dreamy-studio-screen.css';
 @import 'tailwindcss';
 
 /* --- 遗留变量桥接（legacy alias，未迁移的 CSS Module 依赖）---

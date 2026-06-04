@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ChangeEvent,
   DragEvent as ReactDragEvent,
@@ -12,7 +12,6 @@ import {
   Bot,
   CheckCircle2,
   ChevronDown,
-  ChevronLeft,
   Clapperboard,
   Clock3,
   Copy,
@@ -34,11 +33,14 @@ import {
   RefreshCcw,
   RotateCcw,
   Send,
+  Share2,
   SlidersHorizontal,
   Sparkles,
   Trash2,
+  Volume2,
   Wand2,
   X,
+  Zap,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
@@ -2606,6 +2608,594 @@ function ChatThreadPanel({
   );
 }
 
+function DreamyOrchestratorThread({
+  project,
+  messages,
+  starterPresets,
+  allBotPresets,
+  selectedStarterPresetId,
+  selectedStarterPreset,
+  selectedSegment,
+  manualBotIdsText,
+  manualBotEntries,
+  selectedManualBotEntryId,
+  submitting,
+  onSelectPreset,
+  onManualBotIdsChange,
+  onSelectManualBot,
+  onRunManualBot,
+  onRunManualBotSequence,
+  onRunPreset,
+  onAction,
+}: {
+  project: StudioProject | null;
+  messages: ChatItem[];
+  starterPresets: StudioStarterPreset[];
+  allBotPresets: StudioStarterPreset[];
+  selectedStarterPresetId?: string;
+  selectedStarterPreset?: StudioStarterPreset | null;
+  selectedSegment?: StudioSegment | null;
+  manualBotIdsText: string;
+  manualBotEntries: ManualBotEntry[];
+  selectedManualBotEntryId?: string;
+  submitting: boolean;
+  onSelectPreset: (preset: StudioStarterPreset) => void;
+  onManualBotIdsChange: (value: string) => void;
+  onSelectManualBot: (entry: ManualBotEntry) => void;
+  onRunManualBot: (entry: ManualBotEntry) => void;
+  onRunManualBotSequence: () => void;
+  onRunPreset?: (preset: StudioStarterPreset, prompt?: string) => void;
+  onAction: (action: StudioAction, prompt?: string, source?: StudioSegment | null) => void;
+}) {
+  const [allBotPickerOpen, setAllBotPickerOpen] = useState(false);
+  const activeStarterPresetId = selectedStarterPreset?.id || selectedStarterPresetId;
+  const selectableBotCount = allBotPresets.length || starterPresets.length;
+  const choicePresets = useMemo(() => {
+    const seen = new Set<string>();
+    const ordered = [selectedStarterPreset, ...starterPresets, ...allBotPresets].filter(Boolean) as StudioStarterPreset[];
+    return ordered.filter((preset) => {
+      const key = preset.botSlug || preset.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 4);
+  }, [allBotPresets, selectedStarterPreset, starterPresets]);
+  const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
+  const latestAssistantError = [...messages].reverse().find((message) => message.error);
+  const displayPrompt =
+    latestUserMessage?.content ||
+    selectedStarterPreset?.prompt ||
+    'Generate a 5s rooftop suite at night - neon skyline through the window, slow push-in, cinematic.';
+  const segments = getTimelineDisplaySegments(project?.segments || []);
+  const selectedSegmentIndex = selectedSegment ? segments.findIndex((segment) => segment.id === selectedSegment.id) : -1;
+  const segmentMedia = getSegmentMedia(selectedSegment);
+  const selectedSegmentNumber = selectedSegmentIndex >= 0 ? selectedSegmentIndex + 1 : Math.max(segments.length, 1);
+  const selectedBotName = selectedStarterPreset?.title || selectedSegment?.botName || choicePresets[0]?.title || 'Dreamy bot';
+  const allPresets = allBotPresets.length ? allBotPresets : starterPresets;
+
+  return (
+    <div data-testid="studio-chat-log" className="dreamy-studio-thread" aria-label="Dreamy orchestrator conversation">
+      <div className="dreamy-studio-msg">
+        <div className="dreamy-studio-msg-avatar dreamy-studio-msg-avatar-user">D</div>
+        <div className="min-w-0">
+          <div className="dreamy-studio-who">
+            <span className="dreamy-studio-name">You</span>
+            <span className="dreamy-studio-time">10:41 AM</span>
+          </div>
+          <div className="dreamy-studio-bubble">{displayPrompt}</div>
+        </div>
+      </div>
+
+      <div className="dreamy-studio-msg">
+        <div className="dreamy-studio-msg-avatar dreamy-studio-msg-avatar-bot">
+          <Bot size={15} />
+        </div>
+        <div className="min-w-0">
+          <div className="dreamy-studio-who">
+            <span className="dreamy-studio-name">Orchestrator</span>
+            <span className="dreamy-studio-time">10:41 AM</span>
+          </div>
+          <div className="dreamy-studio-body-text">
+            I found <b className="text-white">{choicePresets.length || selectableBotCount} scenes</b> that match your prompt.
+            Pick the one you want to bring to life.
+          </div>
+          <div className="dreamy-studio-choice-head">
+            <span className="dreamy-studio-eyebrow">Choose a scene</span>
+            <span className="dreamy-studio-faint">{`${choicePresets.length} options`}</span>
+          </div>
+          <div data-testid="all-bot-previews" className="dreamy-studio-choice-list">
+            {choicePresets.map((preset, index) => {
+              const selected = activeStarterPresetId === preset.id;
+              const cost = preset.workflow.toLowerCase().includes('video') ? (index === 2 ? 56 : 48) : 44;
+              const visual = resolveStudioDisplayAssetUrl(preset.visualUrl) || preset.fallbackVisualUrl || fallbackVisualForDreamyBot(preset.botSlug, preset.title);
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  data-testid="dreamy-scene-choice"
+                  aria-pressed={selected}
+                  onClick={() => onSelectPreset(preset)}
+                  className={`dreamy-studio-choice ${selected ? 'is-on' : ''}`}
+                >
+                  <span className="dreamy-studio-choice-thumb">
+                    {visual ? <img src={visual} alt="" /> : null}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="dreamy-studio-choice-title">{preset.title}</span>
+                    <span className="dreamy-studio-choice-desc">
+                      {preset.workflow} · {preset.previewAccepted ? 'ready media' : preset.previewLabel} · 5s
+                    </span>
+                  </span>
+                  <span className="dreamy-studio-pickside">
+                    <span className="dreamy-studio-cost-mini">
+                      <Zap size={11} fill="currentColor" />
+                      {cost}
+                    </span>
+                    <span className="dreamy-studio-radio">
+                      <CheckCircle2 size={11} />
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="dreamy-studio-choice-foot">
+            <button type="button" className="dreamy-studio-ghost-pill" onClick={() => setAllBotPickerOpen(true)}>
+              <RefreshCcw size={13} />
+              Show other scenes
+            </button>
+            <span className="dreamy-studio-faint">Tap a scene to preview · switch anytime</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="dreamy-studio-msg">
+        <div className="dreamy-studio-msg-avatar dreamy-studio-msg-avatar-bot">
+          <Sparkles size={15} />
+        </div>
+        <div className="min-w-0">
+          <div className="dreamy-studio-who">
+            <span className="dreamy-studio-name">Orchestrator</span>
+            <span className="dreamy-studio-time">10:41 AM</span>
+          </div>
+          <div className="dreamy-studio-body-text">
+            Segment <b className="text-white">{String(selectedSegmentNumber).padStart(2, '0')}</b> is ready. Added to the timeline.
+          </div>
+          <div className="dreamy-studio-segment-card">
+            <div className="dreamy-studio-segment-thumb">
+              {segmentMedia ? <img src={segmentMedia} alt="" /> : null}
+              <button type="button" className="dreamy-studio-segment-play" aria-label="Preview segment">
+                <Play size={16} fill="currentColor" />
+              </button>
+              <span className="dreamy-studio-duration">00:05</span>
+            </div>
+            <div className="dreamy-studio-segment-meta">
+              <div className="dreamy-studio-eyebrow">Inputs used</div>
+              <div className="dreamy-studio-seg-pills">
+                <span className="dreamy-studio-seg-pill"><span className="dreamy-studio-faint">Source</span><b>{selectedSegment?.botSlug || selectedStarterPreset?.botSlug || 'keyframe_02'}</b></span>
+                <span className="dreamy-studio-seg-pill"><span className="dreamy-studio-faint">Prompt</span><b>{selectedBotName}</b></span>
+                <span className="dreamy-studio-seg-pill"><span className="dreamy-studio-faint">Style</span><b>Cinematic</b></span>
+                <span className="dreamy-studio-seg-pill"><span className="dreamy-studio-faint">Motion</span><b>Slow</b></span>
+              </div>
+            </div>
+            <div className="dreamy-studio-seg-actions">
+              <button
+                type="button"
+                data-testid="orchestrator-extend-segment"
+                disabled={submitting || (!selectedSegment && !selectedStarterPreset)}
+                onClick={() => {
+                  if (selectedStarterPreset) onRunPreset?.(selectedStarterPreset, `Extend ${selectedBotName} as the next five second shot.`);
+                  else onAction('extend', 'Extend this into the next shot.', selectedSegment);
+                }}
+                className="dreamy-studio-seg-action dreamy-studio-seg-action-primary disabled:opacity-50"
+              >
+                <Plus size={13} />
+                Extend
+              </button>
+              <button
+                type="button"
+                disabled={!selectedSegment || submitting}
+                onClick={() => onAction('extend', 'Use this segment as the source for the next shot.', selectedSegment)}
+                className="dreamy-studio-seg-action disabled:opacity-50"
+              >
+                Use as next source
+              </button>
+              <span className="dreamy-studio-spacer" />
+              <button type="button" className="dreamy-studio-seg-action !w-8 !px-0" aria-label="More segment actions">
+                ...
+              </button>
+            </div>
+          </div>
+          {latestAssistantError?.error && (
+            <div className="mt-3 rounded-lg border border-red-400/35 bg-red-500/10 p-2 text-xs leading-5 text-red-100">
+              {latestAssistantError.error}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="sr-only">
+        {messages.map((message) => (
+          <span key={message.id}>{message.content}</span>
+        ))}
+      </div>
+
+      {allBotPickerOpen && (
+        <div className="dreamy-studio-dialog-backdrop" role="dialog" aria-modal="true" aria-label="All selectable Dreamy bots">
+          <button
+            type="button"
+            className="absolute inset-0"
+            aria-label="Close all bot picker"
+            onClick={() => setAllBotPickerOpen(false)}
+          />
+          <section className="dreamy-studio-dialog">
+            <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-semibold text-Cr-text-default-v2">
+                  <Bot size={15} className="text-dreamy-brand-hot-v2" />
+                  All selectable bots
+                </div>
+                <div className="truncate text-[11px] text-Cr-text-subtler-v2">
+                  Select one bot for the prompt. The canvas preview follows the active choice.
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Pill tone="hot">{`${allPresets.length} bots`}</Pill>
+                <button
+                  type="button"
+                  onClick={() => setAllBotPickerOpen(false)}
+                  className="flex h-8 w-8 items-center justify-center rounded-md-v2 border border-white/10 bg-white/[0.04] text-Cr-text-subtler-v2 active:bg-white/[0.08]"
+                  aria-label="Close all bot picker"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            </div>
+            <div data-testid="all-bots-modal-list" className="min-h-0 flex-1 overflow-y-auto p-4">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {allPresets.map((preset) => (
+                  <BotPresetCard
+                    key={`modal-${preset.id}`}
+                    preset={preset}
+                    selected={activeStarterPresetId === preset.id}
+                    submitting={submitting}
+                    variant="modal"
+                    onSelect={(nextPreset) => {
+                      onSelectPreset(nextPreset);
+                      setAllBotPickerOpen(false);
+                    }}
+                  />
+                ))}
+              </div>
+              <details data-testid="manual-bot-id-panel" className="mt-4 rounded-lg-v2 border border-white/10 bg-white/[0.03] p-3">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 marker:hidden">
+                  <span className="text-xs font-semibold uppercase text-Cr-text-subtler-v2">Manual Bot IDs</span>
+                  <Pill tone={manualBotEntries.length ? 'hot' : 'default'}>{`${manualBotEntries.length} queued`}</Pill>
+                </summary>
+                <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_160px]">
+                  <textarea
+                    data-testid="manual-bot-id-input"
+                    value={manualBotIdsText}
+                    disabled={submitting}
+                    onChange={(event) => onManualBotIdsChange(event.target.value)}
+                    rows={3}
+                    className="min-h-20 resize-none rounded-md-v2 border border-white/10 bg-black/35 px-3 py-2 text-xs leading-5 text-Cr-text-default-v2 outline-none placeholder:text-Cr-text-subtlest-v2 disabled:opacity-50"
+                    placeholder="botId or botId|name|type|slug|articleId"
+                  />
+                  <div className="grid gap-2">
+                    <button
+                      type="button"
+                      data-testid="manual-bot-run-selected"
+                      disabled={submitting || !manualBotEntries.length}
+                      onClick={() => {
+                        const selected = manualBotEntries.find((entry) => entry.id === selectedManualBotEntryId) || manualBotEntries[0];
+                        if (selected) onRunManualBot(selected);
+                      }}
+                      className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md-v2 bg-white/[0.08] px-3 text-xs font-semibold text-Cr-text-default-v2 disabled:opacity-40"
+                    >
+                      <Clapperboard size={13} />
+                      Run selected
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="manual-bot-run-sequence"
+                      disabled={submitting || manualBotEntries.length < 2}
+                      onClick={onRunManualBotSequence}
+                      className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md-v2 bg-dreamy-brand-hot-v2 px-3 text-xs font-semibold text-white disabled:bg-white/[0.08] disabled:text-Cr-text-subtlest-v2"
+                    >
+                      <GitBranch size={13} />
+                      Run sequence
+                    </button>
+                  </div>
+                </div>
+                {!!manualBotEntries.length && (
+                  <div data-testid="manual-bot-sequence-list" className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                    {manualBotEntries.map((entry, index) => (
+                      <button
+                        key={entry.id}
+                        type="button"
+                        disabled={submitting}
+                        aria-pressed={selectedManualBotEntryId === entry.id}
+                        onClick={() => onSelectManualBot(entry)}
+                        className={`min-w-[144px] rounded-md-v2 border px-2 py-2 text-left disabled:opacity-50 ${
+                          selectedManualBotEntryId === entry.id
+                            ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
+                            : 'border-white/10 bg-white/[0.04]'
+                        }`}
+                      >
+                        <span className="block truncate text-xs font-semibold text-Cr-text-default-v2">{entry.botName}</span>
+                        <span className="block truncate text-[10px] text-Cr-text-subtlest-v2">{`${index + 1}. ${entry.botId || entry.botSlug}`}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </details>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DreamyPreviewTimelinePanels({
+  project,
+  selectedSegment,
+  selectedStarterPreset,
+  onSelectSegment,
+  onAction,
+  onRunPreset,
+  onExportAllSegments,
+  timelineExporting,
+  submitting,
+}: {
+  project: StudioProject | null;
+  selectedSegment?: StudioSegment | null;
+  selectedStarterPreset?: StudioStarterPreset | null;
+  onSelectSegment: (segmentId: string) => void;
+  onAction: (action: StudioAction, prompt?: string, source?: StudioSegment | null) => void;
+  onRunPreset?: (preset: StudioStarterPreset, prompt?: string) => void;
+  onExportAllSegments: () => void;
+  timelineExporting: boolean;
+  submitting: boolean;
+}) {
+  const [playing, setPlaying] = useState(false);
+  const segments = getTimelineDisplaySegments(project?.segments || []);
+  const media = getSegmentMedia(selectedSegment);
+  const selectedStarterVisual = resolveStudioDisplayAssetUrl(selectedStarterPreset?.visualUrl);
+  const selectedSegmentFallback = fallbackVisualForDreamyBot(selectedSegment?.botSlug, selectedSegment?.botName);
+  const starterMatchesSelectedSegment = Boolean(
+    selectedStarterPreset && selectedSegment && verifiedWorkshopBotMatches(selectedSegment, selectedStarterPreset),
+  );
+  const showStarterPreview = Boolean(selectedStarterPreset && (!selectedSegment || !starterMatchesSelectedSegment));
+  const stageMedia = showStarterPreview ? selectedStarterVisual : media;
+  const stageFallback = showStarterPreview ? selectedStarterVisual || presetCinematicGif : selectedSegmentFallback;
+  const selectedIndex = selectedSegment ? segments.findIndex((segment) => segment.id === selectedSegment.id) : -1;
+  const selectedNumber = selectedIndex >= 0 ? selectedIndex + 1 : Math.max(segments.length, 1);
+  const totalSeconds = Math.max(segments.length * 5, 5);
+  const latestTimelineExport = project?.timelineExports?.[0] || null;
+  const latestTimelineMediaUrl = resolveStudioDisplayAssetUrl(latestTimelineExport?.mediaUrl);
+  const markerPositions = segments.length
+    ? segments.map((_, index) => `${((index + 0.5) / segments.length) * 100}%`)
+    : ['8%', '34%', '60%', '84%'];
+  const timelineLabels = Array.from({ length: Math.max(segments.length, 2) + 1 }, (_, index) =>
+    `00:${String(index * 5).padStart(2, '0')}`,
+  );
+  const runAddSegment = () => {
+    if (selectedStarterPreset) {
+      onRunPreset?.(selectedStarterPreset, `Append the next five second segment with ${selectedStarterPreset.title}.`);
+      return;
+    }
+    if (selectedSegment) onAction('extend', 'Extend this into the next shot.', selectedSegment);
+  };
+
+  return (
+    <>
+      <section data-testid="preview-workspace-panel" className="dreamy-studio-preview" aria-label="Preview">
+        <div className="dreamy-studio-preview-stage">
+          <div data-testid="preview-main-stage" className="dreamy-studio-player">
+            <div
+              className="dreamy-studio-player-media"
+              style={{
+                backgroundImage: stageMedia ? undefined : `url(${stageFallback})`,
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat',
+                backgroundSize: 'cover',
+              }}
+            >
+              {stageMedia ? (
+                <img
+                  src={stageMedia}
+                  alt={`${selectedStarterPreset?.title || selectedSegment?.botName || 'Dreamy'} preview`}
+                  onError={(event) => {
+                    event.currentTarget.onerror = null;
+                    event.currentTarget.src = stageFallback;
+                  }}
+                />
+              ) : null}
+            </div>
+            <span className="dreamy-studio-scene-tag">
+              <span className="dreamy-studio-live-dot" />
+              {`Preview · Segment ${String(selectedNumber).padStart(2, '0')}`}
+            </span>
+            <span className="dreamy-studio-scene-cap">1920x1080 · 24fps</span>
+
+            <div className="dreamy-studio-marker-track">
+              <div className="dreamy-studio-marker-line" />
+              {markerPositions.map((left, index) => (
+                <span key={`${left}-${index}`} className="dreamy-studio-marker" style={{ left }} />
+              ))}
+            </div>
+
+            <div className="dreamy-studio-controls">
+              <button
+                type="button"
+                className="dreamy-studio-play"
+                onClick={() => setPlaying((value) => !value)}
+                aria-label={playing ? 'Pause preview' : 'Play preview'}
+              >
+                {playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+              </button>
+              <span className="dreamy-studio-time">
+                00:03.21 <span>{`/ 00:${String(Math.min(totalSeconds, 5)).padStart(2, '0')}.00`}</span>
+              </span>
+              <div className="dreamy-studio-scrub" aria-hidden="true">
+                <div className="dreamy-studio-scrub-fill" />
+                <div className="dreamy-studio-scrub-knob" />
+              </div>
+              <button type="button" className="dreamy-studio-control-icon" aria-label="Volume">
+                <Volume2 size={20} />
+              </button>
+              <button type="button" className="dreamy-studio-fit">
+                Fit
+                <ChevronDown size={13} />
+              </button>
+              <button type="button" className="dreamy-studio-control-icon" aria-label="Fullscreen">
+                <Maximize2 size={18} />
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section data-testid="timeline-workbench" className="dreamy-studio-timeline" aria-label="Timeline">
+        <div className="dreamy-studio-timeline-head">
+          <span className="dreamy-studio-timeline-title">Timeline</span>
+          <span className="dreamy-studio-total">{`Total 00:${String(totalSeconds).padStart(2, '0')}.00 · ${segments.length} segments`}</span>
+          <span className="dreamy-studio-spacer" />
+          <div className="dreamy-studio-tool">
+            <button type="button" className="dreamy-studio-tool-button" aria-label="Undo">
+              <RotateCcw size={17} />
+            </button>
+            <button type="button" className="dreamy-studio-tool-button" aria-label="Redo">
+              <RefreshCcw size={17} />
+            </button>
+          </div>
+          <div className="dreamy-studio-zoom">
+            <button type="button" aria-label="Zoom out">-</button>
+            <span className="dreamy-studio-zoom-bar" />
+            <button type="button" aria-label="Zoom in">+</button>
+          </div>
+          <button
+            type="button"
+            data-testid="preview-append-next-segment"
+            disabled={submitting || (!selectedSegment && !selectedStarterPreset)}
+            onClick={runAddSegment}
+            className="dreamy-studio-add disabled:opacity-50"
+          >
+            <Plus size={14} />
+            Add segment
+          </button>
+        </div>
+
+        <div className="dreamy-studio-timeline-body">
+          <div className="dreamy-studio-ruler">
+            {timelineLabels.map((label) => <span key={label}>{label}</span>)}
+          </div>
+          <div className="dreamy-studio-tracks">
+            {segments.map((segment, index) => {
+              const segmentMedia = getSegmentMedia(segment);
+              const segmentFallback = fallbackVisualForDreamyBot(segment.botSlug, segment.botName);
+              return (
+                <Fragment key={segment.id}>
+                  {index > 0 && (
+                    <span className="dreamy-studio-gap">
+                      <button type="button" aria-label="Insert segment" onClick={runAddSegment}>
+                        <Plus size={12} />
+                      </button>
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    data-testid="timeline-segment-card"
+                    onClick={() => onSelectSegment(segment.id)}
+                    className={`dreamy-studio-clip ${segment.id === selectedSegment?.id ? 'is-sel' : ''}`}
+                    style={{
+                      backgroundImage: segmentMedia ? undefined : `url(${segmentFallback})`,
+                      backgroundPosition: 'center',
+                      backgroundSize: 'cover',
+                    }}
+                  >
+                    {segmentMedia ? (
+                      <img
+                        src={segmentMedia}
+                        alt=""
+                        onError={(event) => {
+                          event.currentTarget.style.display = 'none';
+                        }}
+                      />
+                    ) : null}
+                    <span className="dreamy-studio-clip-no">{index + 1}</span>
+                    <span className="dreamy-studio-clip-len">5.0s</span>
+                  </button>
+                </Fragment>
+              );
+            })}
+            {!segments.length && (
+              <div className="flex h-[86px] flex-1 items-center justify-center rounded-lg border border-dashed border-white/15 text-xs text-Cr-text-subtler-v2">
+                Start now to create segment 1
+              </div>
+            )}
+          </div>
+          <div className="dreamy-studio-hint">Drag to reorder · click a segment to edit or preview</div>
+        </div>
+
+        <div className="dreamy-studio-dock">
+          <div className="dreamy-studio-cost">
+            <span className="dreamy-studio-cost-label">Preview render</span>
+            <span className="dreamy-studio-cost-value energy">
+              <Zap size={16} fill="currentColor" />
+              48
+              <span className="dreamy-studio-unit">/ preview</span>
+            </span>
+          </div>
+          <span className="dreamy-studio-cost-div" />
+          <div className="dreamy-studio-cost">
+            <span className="dreamy-studio-cost-label">Spent this project</span>
+            <span className="dreamy-studio-cost-value">
+              <Zap size={16} fill="currentColor" className="text-Cr-text-subtler-v2" />
+              {Math.max(segments.length * 78, 156)}
+              <span className="dreamy-studio-unit">energy</span>
+            </span>
+          </div>
+          <span className="dreamy-studio-spacer" />
+          <span className="dreamy-studio-cost-note">
+            <Zap size={14} fill="currentColor" className="text-yellow-300" />
+            Final render at 1080p · est. 240 energy
+          </span>
+          <button
+            type="button"
+            data-testid="preview-export-all-segments"
+            disabled={!segments.length || timelineExporting}
+            onClick={onExportAllSegments}
+            className="dreamy-studio-start"
+          >
+            {timelineExporting ? 'Rendering' : 'Start now'}
+            <span className="dreamy-studio-cost-chip">
+              {timelineExporting ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} fill="currentColor" />}
+              240
+            </span>
+          </button>
+        </div>
+
+        {latestTimelineExport && (
+          <div data-testid="timeline-export-output-card" className="dreamy-studio-export-output">
+            <Pill tone={latestTimelineExport.status === 'ready' ? 'success' : statusPillTone(latestTimelineExport.status)}>
+              {latestTimelineExport.status}
+            </Pill>
+            <span>{latestTimelineExport.evidence?.message || `Composed ${latestTimelineExport.summary.videoSegments} video segments.`}</span>
+            {latestTimelineMediaUrl && (
+              <a href={latestTimelineMediaUrl} target="_blank" rel="noreferrer">
+                Open composed video
+              </a>
+            )}
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
 function PromptRoutingPanel({
   prompt,
   messages,
@@ -5084,53 +5674,56 @@ function Composer({
   onClearFile: () => void;
   onStop: () => void;
 }) {
-  const targetBotLabel = selectedStarterPreset?.title || selectedSegment?.botName || 'Choose bot';
-  const nextActionLabel = selectedSegment ? 'Add next segment' : 'Create first segment';
-
   return (
-    <div data-testid="studio-composer" className="shrink-0 border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">
-      <div className="rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2.5">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-xs font-semibold text-Cr-text-default-v2">Message</div>
-            <div data-testid="prompt-route-merged" className="mt-0.5 truncate text-[11px] text-Cr-text-subtler-v2">
-              {`To ${targetBotLabel} · ${nextActionLabel}`}
-            </div>
-          </div>
-          <ModeSwitch mode={mode} onChange={onModeChange} labelScope="Switch composer mode to" />
-        </div>
+    <div data-testid="studio-composer" className="dreamy-studio-composer">
+      <div className="dreamy-studio-composer-box">
         <textarea
           value={prompt}
           onChange={(event) => onPromptChange(event.target.value)}
-          rows={2}
-          className="block max-h-20 min-h-14 w-full resize-none rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-3-v2 px-3 py-2 text-sm leading-5 text-Cr-text-default-v2 outline-none placeholder:text-Cr-text-subtlest-v2"
-          placeholder="Describe the next shot or extension..."
+          rows={3}
+          className="dreamy-studio-field"
+          placeholder="Describe the next shot you want to create..."
         />
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={onPickFile}
-              className="inline-flex h-9 items-center gap-2 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-3 text-xs font-semibold text-Cr-text-default-v2 active:bg-Cr-beta-white-8-v2"
-            >
-              <ImagePlus size={15} />
-              Reference
-            </button>
-            {previewUrl && (
-              <div className="flex min-w-0 items-center gap-2 rounded-md-v2 bg-Cr-beta-white-5-v2 p-1 pr-2">
-                <img src={previewUrl} alt="" className="h-7 w-7 rounded-md-v2 object-contain" />
-                <span className="max-w-[120px] truncate text-[11px] text-Cr-text-subtler-v2">{selectedFileName}</span>
-                <button type="button" onClick={onClearFile} aria-label="Remove image">
-                  <X size={14} />
-                </button>
-              </div>
-            )}
-          </div>
+        <div className="dreamy-studio-composer-row">
+          <button
+            type="button"
+            onClick={onPickFile}
+            className="dreamy-studio-ghost-pill"
+          >
+            <ImagePlus size={14} />
+            Image
+          </button>
+          <button
+            type="button"
+            onClick={onPickFile}
+            className="dreamy-studio-ghost-pill"
+          >
+            <Clapperboard size={14} />
+            Video
+          </button>
+          <button
+            type="button"
+            onClick={onPickFile}
+            className="dreamy-studio-ghost-pill"
+          >
+            <Link2 size={14} />
+            Reference
+          </button>
+          {previewUrl && (
+            <div className="flex min-w-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] p-1 pr-2">
+              <img src={previewUrl} alt="" className="h-7 w-7 rounded-md-v2 object-contain" />
+              <span className="max-w-[120px] truncate text-[11px] text-Cr-text-subtler-v2">{selectedFileName}</span>
+              <button type="button" onClick={onClearFile} aria-label="Remove image">
+                <X size={14} />
+              </button>
+            </div>
+          )}
+          <span className="dreamy-studio-spacer" />
           {submitting ? (
             <button
               type="button"
               onClick={onStop}
-              className="inline-flex h-9 items-center gap-2 rounded-md-v2 bg-Cr-beta-white-8-v2 px-4 text-xs font-semibold text-Cr-text-default-v2"
+              className="dreamy-studio-ghost-pill"
             >
               <X size={14} />
               Stop
@@ -5140,10 +5733,10 @@ function Composer({
               type="button"
               onClick={onSubmit}
               disabled={!prompt.trim() && !canSubmitWithoutPrompt}
-              className="inline-flex h-9 items-center gap-2 rounded-md-v2 bg-dreamy-brand-hot-v2 px-5 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+              className="dreamy-studio-send disabled:opacity-40"
+              aria-label="Run Dreamy prompt"
             >
-              <Send size={14} />
-              Run
+              <Send size={18} fill="currentColor" />
             </button>
           )}
         </div>
@@ -7564,72 +8157,60 @@ export default function Dreamy() {
       data-testid="dreamy-studio-root"
       data-selected-starter-preset-id={selectedStarterPresetId}
       data-selected-bot-slug={selectedStarterPreset?.botSlug || ''}
-      className="flex h-full min-h-[100dvh] flex-col bg-[#090a0f] text-Cr-text-default-v2"
+      className="dreamy-studio-root"
     >
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-[#0f1016] px-3 lg:px-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            className="flex h-8 w-8 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08]"
-            aria-label="Back"
-          >
-            <ChevronLeft size={18} strokeWidth={2} />
-          </button>
-          <div className="flex h-8 w-8 items-center justify-center rounded-md-v2 bg-dreamy-brand-hot-v2/15 text-dreamy-brand-hot-v2">
-            <Sparkles size={17} />
-          </div>
-          <span className="truncate text-lg font-semibold">Dreamy Studio</span>
+      <header className="dreamy-studio-bar">
+        <div className="dreamy-studio-brand">
+          <span className="dreamy-studio-brand-mark">
+            <Sparkles size={18} />
+          </span>
+          <span className="dreamy-studio-brand-name">
+            Dreamy<span className="dreamy-studio-brand-accent">Porn</span> <span className="dreamy-studio-brand-sub">Studio</span>
+          </span>
         </div>
-        <div className="hidden h-8 w-px bg-white/10 sm:block" />
         <button
           type="button"
-          className="hidden h-8 max-w-[220px] items-center gap-2 rounded-md-v2 border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-Cr-text-subtle-v2 sm:inline-flex"
+          className="dreamy-studio-project hidden sm:inline-flex"
           aria-label="Current project"
         >
-          <span className="text-Cr-text-subtlest-v2">Project</span>
-          <span className="min-w-0 truncate">{project?.projectId || 'Neon Night Trailer'}</span>
+          <span>Project</span>
+          <span className="dreamy-studio-picker">
+            Midnight Suite
+            <ChevronDown size={14} />
+          </span>
         </button>
-        <span className="hidden h-8 items-center gap-1.5 rounded-md-v2 border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-Cr-text-subtler-v2 md:inline-flex">
-            <span className="h-2 w-2 rounded-full bg-Cr-text-success-default-v2" />
-          Autosaved
+        <span className="dreamy-studio-save hidden md:inline-flex">
+          <span className="dreamy-studio-save-dot" />
+          Autosaved 10:42:11
         </span>
-        <div className="hidden sm:block">
-          <ModeSwitch
-            mode={mode}
-            onChange={(nextMode) => {
-              setMode(nextMode);
-              if (nextMode === 'canvas') setActiveTab('preview');
-              if (nextMode === 'player') setActiveTab('chat');
-            }}
-            labelScope="Switch studio mode to"
-          />
-        </div>
-        <div className="ml-auto flex min-w-0 items-center justify-end gap-2">
+        <span className="dreamy-studio-spacer" />
+        <div className="flex min-w-0 items-center justify-end gap-2">
           <button
             type="button"
-            onClick={resetProject}
-            className="flex h-8 w-8 items-center justify-center rounded-md-v2 border border-white/10 bg-white/[0.04] text-Cr-text-subtler-v2 active:bg-white/[0.08]"
-            aria-label="Reset project"
+            onClick={() => navigate('/energy')}
+            className="dreamy-studio-energy"
+            aria-label="Energy"
           >
-            <Clock3 size={15} />
+            <Zap size={14} fill="currentColor" />
+            <span>{(energy ?? 2809).toLocaleString()}</span>
+            <span className="dreamy-studio-energy-plus">
+              <Plus size={12} strokeWidth={3} />
+            </span>
           </button>
           <button
             type="button"
             onClick={() => setDeliveryDrawerOpen(true)}
-            className="hidden h-8 items-center gap-1.5 rounded-md-v2 border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-Cr-text-subtle-v2 active:bg-white/[0.08] sm:inline-flex"
+            className="dreamy-studio-share hidden sm:inline-flex"
           >
-            <PanelRightOpen size={14} />
-            Evidence
+            <Share2 size={14} />
+            Share
           </button>
           <button
             type="button"
-            onClick={() => navigate('/energy')}
-            className="flex h-8 min-w-16 items-center justify-center gap-1 rounded-md-v2 border border-dreamy-brand-hot-v2/60 bg-dreamy-brand-hot-v2/10 px-3 text-xs font-semibold text-dreamy-brand-hot-v2 active:bg-dreamy-brand-hot-v2/20"
-            aria-label="Energy"
-          >
-            <span>{energy ?? '--'}</span>
-          </button>
+            onClick={resetProject}
+            className="dreamy-studio-avatar"
+            aria-label="Reset project"
+          />
         </div>
       </header>
 
@@ -7964,56 +8545,28 @@ export default function Dreamy() {
       </div>
       )}
 
-      <div className="grid h-11 shrink-0 grid-cols-2 border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-1 lg:hidden">
-        {(['chat', 'preview'] as TabKey[]).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setActiveTab(tab)}
-            className={`rounded-lg-v2 text-xs font-semibold capitalize ${
-              activeTab === tab ? 'bg-Cr-Bg-surface-default-v2 text-Cr-text-default-v2' : 'text-Cr-text-subtler-v2'
-            }`}
-          >
-            {tab === 'preview' && mode === 'canvas' ? 'Canvas' : tab}
-          </button>
-        ))}
-      </div>
-
-      <main
-        className={`relative z-0 min-h-0 flex-1 overflow-hidden ${
-          mode === 'canvas'
-            ? 'grid h-full gap-3 p-3 lg:grid-cols-1'
-            : 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(360px,0.39fr)_minmax(520px,0.61fr)]'
-        }`}
-      >
+      <main className="dreamy-studio-grid">
         <section
           data-testid="conversation-workspace-panel"
-          className={`h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] ${
-            mode === 'canvas' ? 'hidden' : activeTab === 'chat' ? 'grid' : 'hidden lg:grid'
-          }`}
+          className="dreamy-studio-chat"
         >
-          <div className="flex h-12 shrink-0 items-center justify-between border-b border-Cr-border-default-v2 px-3">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg-v2 bg-Cr-beta-white-8-v2">
-                <Sparkles size={16} className="text-dreamy-brand-hot-v2" />
-              </div>
-              <div>
-                <div className="text-sm font-semibold">{mode === 'canvas' ? 'Bot Selection' : 'Conversation'}</div>
-                <div className="text-[11px] text-Cr-text-subtler-v2">
-                  {selectedPreviewPreset?.title
-                    ? `Selected bot: ${selectedPreviewPreset.title}`
-                    : `${messages.length} messages · ${project?.segments.length || 0} segments`}
-                </div>
-              </div>
-            </div>
-            <Pill tone={submitting ? 'hot' : 'default'}>{submitting ? 'Running' : mode}</Pill>
+          <div className="dreamy-studio-chat-head">
+            <span className="dreamy-studio-chat-title">
+              <span className="dreamy-studio-glyph">
+                <Sparkles size={13} />
+              </span>
+              Orchestrator
+            </span>
+            <span className="dreamy-studio-chat-subtitle">Suggests scenes · multi-agent</span>
           </div>
 
-          <BotSelectionPanel
+          <DreamyOrchestratorThread
+            project={project}
+            messages={messages}
             starterPresets={recommendedStarterPresets}
             allBotPresets={selectableStarterPresets}
             selectedStarterPresetId={selectedStarterPresetId}
-            selectedStarterPreset={selectedStarterPreset}
+            selectedStarterPreset={selectedPreviewPreset}
             selectedSegment={selectedSegment}
             manualBotIdsText={manualBotIdsText}
             manualBotEntries={manualBotEntries}
@@ -8025,12 +8578,6 @@ export default function Dreamy() {
             onRunManualBot={runManualBotEntry}
             onRunManualBotSequence={runManualBotSequence}
             onRunPreset={runStarterPreset}
-          />
-
-          <ChatThreadPanel
-            messages={messages}
-            selectedSegment={selectedSegment}
-            submitting={submitting}
             onAction={(action, nextPrompt, source) => {
               if (selectedPreviewPreset?.pageId === 'dreamy-miniapp') {
                 runStarterPreset(selectedPreviewPreset, nextPrompt);
@@ -8069,68 +8616,18 @@ export default function Dreamy() {
           />
         </section>
 
-        <div
-          className={
-            mode === 'canvas' || activeTab === 'preview'
-              ? 'min-h-0 min-w-0 lg:h-full'
-              : 'hidden min-h-0 min-w-0 lg:block lg:h-full'
-          }
-        >
-          {mode === 'canvas' ? (
-            <CanvasWorkspace
-              project={project}
-              selectedSegment={selectedSegment}
-              selectedStarterPreset={selectedPreviewPreset}
-              allBotPresets={selectableStarterPresets}
-              onSelectSegment={selectSegment}
-              onDeleteSegment={deleteSegment}
-              onAction={runStudio}
-              onRunPreset={runStarterPreset}
-              submitting={submitting}
-            />
-          ) : (
-            <PreviewPanel
-              project={project}
-              selectedSegment={selectedSegment}
-              selectedStarterPreset={selectedPreviewPreset}
-              selectedJob={selectedJob}
-              agentsOpen={agentsOpen}
-              onToggleAgents={() => setAgentsOpen((value) => !value)}
-              onSelectSegment={selectSegment}
-              onDeleteSegment={deleteSegment}
-              onCancelJob={(jobId) => void cancelJob(jobId)}
-              onRetryJob={(jobId) => void retryJob(jobId)}
-              onAction={runStudio}
-              onRunPreset={runStarterPreset}
-              onExportAllSegments={exportAllSegments}
-              timelineExporting={timelineExporting}
-              submitting={submitting}
-            />
-          )}
-        </div>
+        <DreamyPreviewTimelinePanels
+          project={project}
+          selectedSegment={selectedSegment}
+          selectedStarterPreset={selectedPreviewPreset}
+          onSelectSegment={selectSegment}
+          onAction={runStudio}
+          onRunPreset={runStarterPreset}
+          onExportAllSegments={exportAllSegments}
+          timelineExporting={timelineExporting}
+          submitting={submitting}
+        />
       </main>
-      <footer className="relative z-20 flex h-8 shrink-0 items-center gap-2 overflow-x-auto border-t border-white/10 bg-[#0f1016] px-3 text-[11px] text-Cr-text-subtler-v2 [-webkit-overflow-scrolling:touch]">
-        <span className="inline-flex shrink-0 items-center gap-1.5 font-semibold">
-          <span className={`h-2 w-2 rounded-full ${previewDispatchReady ? 'bg-Cr-text-success-default-v2' : 'bg-dreamy-brand-hot-v2'}`} />
-          {previewDispatchReady ? 'Ready' : 'Needs attention'}
-        </span>
-        <Pill tone={healthPillTone(studioHealth?.components?.liveGeneration?.status)}>
-          {liveGenerationLabel(studioHealth?.components?.liveGeneration?.status)}
-        </Pill>
-        <Pill>{`${project?.segments.length || 0} segments`}</Pill>
-        <Pill>{`${displayedHubJobs.length} jobs`}</Pill>
-        {selectedPreviewPreset && <span className="shrink-0 truncate">{selectedPreviewPreset.title}</span>}
-        <button
-          type="button"
-          onClick={() => setDeliveryDrawerOpen(true)}
-          className="ml-auto inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md-v2 border border-dreamy-brand-hot-v2/50 bg-dreamy-brand-hot-v2/10 px-2 font-semibold text-dreamy-brand-hot-v2"
-          aria-haspopup="dialog"
-          aria-expanded={deliveryDrawerOpen}
-        >
-          <PanelRightOpen size={12} />
-          Evidence
-        </button>
-      </footer>
     </div>
   );
 }
