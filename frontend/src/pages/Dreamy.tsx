@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   Bot,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   Clapperboard,
   Clock3,
@@ -2567,6 +2568,44 @@ function ChatMessage({
   );
 }
 
+function ChatThreadPanel({
+  messages,
+  selectedSegment,
+  submitting,
+  onAction,
+}: {
+  messages: ChatItem[];
+  selectedSegment?: StudioSegment | null;
+  submitting: boolean;
+  onAction: (action: StudioAction, prompt?: string, source?: StudioSegment | null) => void;
+}) {
+  const endRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: 'end' });
+  }, [messages.length, submitting]);
+
+  return (
+    <div
+      data-testid="studio-chat-log"
+      className="min-h-0 flex-1 overflow-y-auto bg-Cr-Bg-soft-v2 p-3 [-webkit-overflow-scrolling:touch]"
+      aria-label="Dreamy chat conversation"
+    >
+      <div className="grid min-h-full content-end gap-3">
+        {messages.map((message) => (
+          <ChatMessage
+            key={message.id}
+            item={message}
+            selectedSegment={selectedSegment}
+            submitting={submitting}
+            onAction={onAction}
+          />
+        ))}
+        <div ref={endRef} />
+      </div>
+    </div>
+  );
+}
+
 function PromptRoutingPanel({
   prompt,
   messages,
@@ -4733,6 +4772,7 @@ function BotSelectionPanel({
 }) {
   const activeStarterPresetId = selectedStarterPreset?.id || selectedStarterPresetId;
   const [allBotPickerOpen, setAllBotPickerOpen] = useState(false);
+  const [selectorOpen, setSelectorOpen] = useState(false);
   const selectableBotCount = allBotPresets.length || starterPresets.length;
   const starterPresetKeys = new Set(starterPresets.flatMap((preset) => [preset.id, preset.botSlug].filter(Boolean)));
   const visibleCatalogPresets = allBotPresets
@@ -4740,24 +4780,43 @@ function BotSelectionPanel({
     .slice(0, 24);
   const selectPreset = useCallback((preset: StudioStarterPreset) => {
     onSelectPreset(preset);
+    setSelectorOpen(false);
   }, [onSelectPreset]);
 
   return (
     <section
       data-testid="bot-selection-panel"
-      className="flex h-full min-h-0 flex-col overflow-hidden border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-3"
+      className="shrink-0 overflow-hidden border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-3"
       aria-label="Dreamy bot selection"
     >
-      <div className="mb-3 flex shrink-0 items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-Cr-text-default-v2">
-            <Bot size={15} className="shrink-0 text-dreamy-brand-hot-v2" />
-            <span className="truncate">Bot previews</span>
-          </div>
-          <div className="mt-0.5 truncate text-[11px] text-Cr-text-subtler-v2">
-            Select one Dreamy bot; the canvas follows it.
-          </div>
-        </div>
+      <div className="flex shrink-0 items-center justify-between gap-2">
+        <button
+          type="button"
+          data-testid="agent-selector-toggle"
+          aria-expanded={selectorOpen}
+          onClick={() => setSelectorOpen((value) => !value)}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 px-2.5 py-2 text-left active:bg-Cr-beta-white-8-v2"
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md-v2 bg-Cr-beta-white-8-v2">
+            {selectedStarterPreset?.visualUrl ? (
+              <img src={selectedStarterPreset.visualUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <Bot size={15} className="text-dreamy-brand-hot-v2" />
+            )}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs font-semibold text-Cr-text-default-v2">
+              {selectedStarterPreset?.title || 'Choose Dreamy agent'}
+            </span>
+            <span className="block truncate text-[11px] text-Cr-text-subtler-v2">
+              {selectedStarterPreset?.botSlug || `${selectableBotCount} agents available`}
+            </span>
+          </span>
+          <ChevronDown
+            size={15}
+            className={`shrink-0 text-Cr-text-subtler-v2 transition-transform ${selectorOpen ? 'rotate-180' : ''}`}
+          />
+        </button>
         <div data-testid="dreamy-bot-selection-state" className="flex min-w-0 shrink-0 items-center gap-1.5">
           <button
             type="button"
@@ -4770,7 +4829,9 @@ function BotSelectionPanel({
             <Bot size={13} />
             All bots
           </button>
-          <Pill tone="hot">{`${selectableBotCount} options`}</Pill>
+          <span className="hidden sm:inline-flex">
+            <Pill tone="hot">{`${selectableBotCount} options`}</Pill>
+          </span>
           {selectedStarterPreset && <Pill>{selectedStarterPreset.botSlug}</Pill>}
           {selectedStarterPreset && (
             <>
@@ -4800,7 +4861,10 @@ function BotSelectionPanel({
 
       <div
         data-testid="bot-selection-scroll-region"
-        className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1 [-webkit-overflow-scrolling:touch]"
+        className={`mt-3 space-y-2 overflow-y-auto overscroll-contain pr-1 transition-[max-height,opacity] duration-200 [-webkit-overflow-scrolling:touch] ${
+          selectorOpen ? 'max-h-[min(48dvh,520px)] opacity-100' : 'max-h-0 opacity-0'
+        }`}
+        aria-hidden={!selectorOpen}
       >
         {!!starterPresets.length && (
           <div data-testid="starter-presets" className="grid gap-2">
@@ -6923,8 +6987,9 @@ export default function Dreamy() {
     setSubmitting(false);
   };
 
-  const runStarterPreset = useCallback((preset: StudioStarterPreset) => {
+  const runStarterPreset = useCallback((preset: StudioStarterPreset, overridePrompt?: string) => {
     selectStarterPreset(preset);
+    const promptText = overridePrompt?.trim() || preset.prompt;
     const verifiedSegment = findVerifiedWorkshopSegmentForBot(preset);
     if (verifiedSegment) {
       setActiveTab('preview');
@@ -6943,7 +7008,7 @@ export default function Dreamy() {
           {
             id: makeId('user'),
             role: 'user',
-            content: preset.prompt,
+            content: promptText,
             action: selectedVerifiedSegment.action || getStarterPresetAction(preset, selectedSegment),
             createdAt: nowIso(),
           },
@@ -6981,7 +7046,7 @@ export default function Dreamy() {
       {
         id: makeId('user'),
         role: 'user',
-        content: preset.prompt,
+        content: promptText,
         action: getStarterPresetAction(preset, selectedSegment),
         createdAt: nowIso(),
       },
@@ -7918,12 +7983,12 @@ export default function Dreamy() {
         className={`relative z-0 min-h-0 flex-1 overflow-hidden ${
           mode === 'canvas'
             ? 'grid h-full gap-3 p-3 lg:grid-cols-1'
-            : 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(560px,0.55fr)_minmax(420px,0.45fr)]'
+            : 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(360px,0.39fr)_minmax(520px,0.61fr)]'
         }`}
       >
         <section
           data-testid="conversation-workspace-panel"
-          className={`h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] ${
+          className={`h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] ${
             mode === 'canvas' ? 'hidden' : activeTab === 'chat' ? 'grid' : 'hidden lg:grid'
           }`}
         >
@@ -7962,10 +8027,23 @@ export default function Dreamy() {
             onRunPreset={runStarterPreset}
           />
 
+          <ChatThreadPanel
+            messages={messages}
+            selectedSegment={selectedSegment}
+            submitting={submitting}
+            onAction={(action, nextPrompt, source) => {
+              if (selectedPreviewPreset?.pageId === 'dreamy-miniapp') {
+                runStarterPreset(selectedPreviewPreset, nextPrompt);
+              } else {
+                void runStudio(action, nextPrompt, source);
+              }
+            }}
+          />
+
           <Composer
             mode={mode}
             prompt={prompt}
-            canSubmitWithoutPrompt={selectedPage?.executor === 'navigation'}
+            canSubmitWithoutPrompt={Boolean(selectedPreviewPreset) || selectedPage?.executor === 'navigation'}
             previewUrl={previewUrl}
             selectedFileName={selectedFile?.name}
             selectedStarterPreset={selectedPreviewPreset}
@@ -7980,7 +8058,9 @@ export default function Dreamy() {
             onClearFile={clearFile}
             onSubmit={() => {
               if (selectedPreviewPreset?.pageId === 'dreamy-miniapp') {
-                runStarterPreset(selectedPreviewPreset);
+                const submittedPrompt = prompt;
+                runStarterPreset(selectedPreviewPreset, submittedPrompt);
+                setPrompt('');
               } else {
                 void runStudio('generate');
               }
