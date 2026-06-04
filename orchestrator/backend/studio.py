@@ -2957,10 +2957,7 @@ def _project(project_id: Optional[str] = None, mode: str = "player") -> StudioPr
 
 def _verified_dreamy_workshop_project() -> StudioProject:
     existing = _get_project(VERIFIED_DREAMY_WORKSHOP_PROJECT_ID)
-    if existing and len(existing.get("segments") or []) >= len(VERIFIED_DREAMY_WORKSHOP_SEGMENTS):
-        existing["jobs"] = STUDIO_STORE.list_jobs(existing["projectId"])
-        return existing
-
+    timeline_exports = list(existing.get("timelineExports") or [])[:20] if existing else []
     checked_at = now_iso()
     project = {
         "projectId": VERIFIED_DREAMY_WORKSHOP_PROJECT_ID,
@@ -2992,9 +2989,10 @@ def _verified_dreamy_workshop_project() -> StudioProject:
             {"id": "timeline", "label": "Timeline", "status": "done", "detail": "Two clips ready for export"},
         ],
         "jobs": [],
-        "timelineExports": [],
+        "timelineExports": timeline_exports,
         "updatedAt": checked_at,
     }
+    project["jobs"] = STUDIO_STORE.list_jobs(project["projectId"])
     _save_project(project)
     return project
 
@@ -3746,6 +3744,7 @@ def _create_timeline_export(project: StudioProject, segment_ids: list[str] | Non
         task_id=export_id,
         message=compose_result.get("message") or "Timeline manifest is ready.",
     )
+    summary = manifest["summary"]
     export = {
         "exportId": export_id,
         "projectId": project["projectId"],
@@ -3754,7 +3753,9 @@ def _create_timeline_export(project: StudioProject, segment_ids: list[str] | Non
         "checkedAt": evidence["checkedAt"],
         "mediaUrl": media_url,
         "manifest": manifest,
-        "summary": manifest["summary"],
+        "summary": summary,
+        "videoSegments": summary.get("videoSegments", 0),
+        "estimatedDurationSeconds": summary.get("estimatedDurationSeconds", 0),
         "evidence": evidence,
     }
     exports = project.setdefault("timelineExports", [])

@@ -316,7 +316,7 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
     articleId: DEFAULT_DREAMY_SLUG,
     recommendation: 'Verified workshop bot with completed media already staged in the timeline.',
     visualUrl: VERIFIED_WORKSHOP_SEGMENTS[0].posterUrl || presetCinematicGif,
-    fallbackVisualUrl: VERIFIED_WORKSHOP_SEGMENTS[0].posterUrl || presetCinematicGif,
+    fallbackVisualUrl: presetCinematicGif,
     previewStatus: 'done',
     previewAccepted: true,
     previewSource: 'dreamyporn-workshop-web',
@@ -337,7 +337,7 @@ const DREAMY_STARTER_PRESETS: StudioStarterPreset[] = [
     articleId: DREAMY_VIDEO_SLUG,
     recommendation: 'Verified workshop bot used as the second timeline segment.',
     visualUrl: VERIFIED_WORKSHOP_SEGMENTS[1].posterUrl || presetCharacterGif,
-    fallbackVisualUrl: VERIFIED_WORKSHOP_SEGMENTS[1].posterUrl || presetCharacterGif,
+    fallbackVisualUrl: presetCharacterGif,
     previewStatus: 'done',
     previewAccepted: true,
     previewSource: 'dreamyporn-workshop-web',
@@ -538,7 +538,8 @@ function parseManualBotEntries(value: string): ManualBotEntry[] {
 
 function starterPresetFromBotPreview(preview: StudioBotPreview): StudioStarterPreset {
   const botType = preview.botType || '';
-  const imageUrl = resolveStudioDisplayAssetUrl(preview.thumbnailUrl || preview.mediaUrl || preview.posterUrl) || presetCinematicGif;
+  const fallbackVisualUrl = fallbackVisualForDreamyBot(preview.botSlug, preview.botName);
+  const imageUrl = resolveStudioDisplayAssetUrl(preview.thumbnailUrl || preview.mediaUrl || preview.posterUrl) || fallbackVisualUrl;
   const isVideo = botType.toLowerCase().includes('video');
   return {
     id: `dreamy-bot-${preview.botSlug}`,
@@ -552,7 +553,7 @@ function starterPresetFromBotPreview(preview: StudioBotPreview): StudioStarterPr
     botSlug: preview.botSlug,
     recommendation: preview.generatedPrompt || preview.evidence?.message || `Run ${preview.botName} through the Dreamy miniapp.`,
     visualUrl: imageUrl,
-    fallbackVisualUrl: imageUrl,
+    fallbackVisualUrl,
     previewStatus: preview.status,
     previewAccepted: Boolean(preview.botSpecific || preview.mediaUrl || preview.thumbnailUrl || preview.posterUrl),
     previewSource: preview.source || 'dreamy-catalog',
@@ -778,6 +779,11 @@ function resolveStudioDisplayAssetUrl(url?: string): string {
 function getSegmentMedia(segment?: StudioSegment | null): string {
   if (!segment) return '';
   return resolveStudioDisplayAssetUrl(segment.type === 'video' ? segment.posterUrl || segment.url : segment.url || segment.posterUrl);
+}
+
+function fallbackVisualForDreamyBot(botSlug?: string, botName?: string): string {
+  const value = `${botSlug || ''} ${botName || ''}`.toLowerCase();
+  return value.includes('futa') ? presetCharacterGif : presetCinematicGif;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -2315,6 +2321,85 @@ function ChatMessage({
   );
 }
 
+function PromptRoutingPanel({
+  prompt,
+  messages,
+  selectedStarterPreset,
+  selectedSegment,
+  submitting,
+}: {
+  prompt: string;
+  messages: ChatItem[];
+  selectedStarterPreset?: StudioStarterPreset | null;
+  selectedSegment?: StudioSegment | null;
+  submitting: boolean;
+}) {
+  const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
+  const latestAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant');
+  const acceptedPrompt = prompt.trim() || latestUserMessage?.content || selectedStarterPreset?.prompt || '';
+  const targetBotName = selectedStarterPreset?.title || selectedSegment?.botName || 'Choose a bot';
+  const targetBotId = selectedStarterPreset?.botId || selectedSegment?.botId || selectedStarterPreset?.botSlug || selectedSegment?.botSlug || '';
+  const nextAction = selectedSegment ? 'Add next segment' : 'Generate first segment';
+
+  return (
+    <div
+      data-testid="studio-chat-log"
+      className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto p-3 [-webkit-overflow-scrolling:touch]"
+    >
+      <div className="rounded-xl-v2 border border-dreamy-brand-hot-v2/35 bg-dreamy-brand-hot-v2/10 p-3">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-Cr-text-default-v2">Prompt to bot</div>
+            <div className="mt-0.5 truncate text-[11px] text-Cr-text-subtler-v2">
+              {submitting ? 'Calling Dreamy now' : 'One prompt, one selected bot, one timeline result'}
+            </div>
+          </div>
+          <Pill tone={submitting ? 'hot' : acceptedPrompt ? 'success' : 'default'}>
+            {submitting ? 'Running' : acceptedPrompt ? 'Prompt accepted' : 'Waiting'}
+          </Pill>
+        </div>
+
+        <div className="grid gap-2 text-xs">
+          <div className="rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2.5">
+            <div className="mb-1 text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2">Input prompt</div>
+            <div className="line-clamp-3 min-h-5 leading-5 text-Cr-text-default-v2">
+              {acceptedPrompt || 'Type the next shot in the box below.'}
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2.5">
+              <div className="mb-1 text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2">Bot to call</div>
+              <div className="truncate font-semibold text-Cr-text-default-v2">{targetBotName}</div>
+              {targetBotId && <div className="mt-0.5 truncate text-[11px] text-Cr-text-subtler-v2">{targetBotId}</div>}
+            </div>
+            <div className="rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2.5">
+              <div className="mb-1 text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2">Next action</div>
+              <div className="truncate font-semibold text-Cr-text-default-v2">{nextAction}</div>
+              <div className="mt-0.5 truncate text-[11px] text-Cr-text-subtler-v2">
+                {selectedSegment ? `Source: ${selectedSegment.botName}` : 'Starts the timeline'}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {latestAssistantMessage && (
+        <div className="rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-3 text-xs leading-5 text-Cr-text-subtle-v2">
+          <div className="mb-1 text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2">Latest result</div>
+          <div className="line-clamp-3">{latestAssistantMessage.content}</div>
+        </div>
+      )}
+
+      <div className="sr-only">
+        {messages.map((message) => (
+          <span key={message.id}>{message.content}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SegmentCard({
   segment,
   active,
@@ -2408,6 +2493,7 @@ function PreviewPanel({
   submitting: boolean;
 }) {
   const media = getSegmentMedia(selectedSegment);
+  const selectedSegmentFallback = fallbackVisualForDreamyBot(selectedSegment?.botSlug, selectedSegment?.botName);
   const selectedStarterVisual = resolveStudioDisplayAssetUrl(selectedStarterPreset?.visualUrl);
   const graph = project?.agentGraph?.length ? project.agentGraph : EMPTY_GRAPH;
   const runningAgents = graph.filter((node) => node.status === 'running' || node.status === 'queued').length;
@@ -2453,18 +2539,26 @@ function PreviewPanel({
         </button>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-3 p-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3">
         <div
           data-testid="preview-main-stage"
-          className="relative flex min-h-[320px] items-center justify-center overflow-hidden rounded-lg-v2 border border-Cr-border-default-v2 bg-[#07080d]"
+          className="relative flex h-[clamp(260px,38dvh,420px)] shrink-0 items-center justify-center overflow-hidden rounded-lg-v2 border border-Cr-border-default-v2 bg-[#07080d]"
+          style={{
+            backgroundImage: `url(${selectedSegment ? selectedSegmentFallback : selectedStarterVisual || presetCinematicGif})`,
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+            backgroundSize: 'contain',
+          }}
         >
           {selectedSegment?.type === 'video' && selectedSegment.url ? (
-            <video
-              src={resolveStudioDisplayAssetUrl(selectedSegment.url)}
-              poster={resolveStudioDisplayAssetUrl(selectedSegment.posterUrl)}
+            <img
+              src={media || selectedSegmentFallback}
+              alt={`${selectedSegment.botName || 'Selected'} segment preview`}
+              onError={(event) => {
+                event.currentTarget.onerror = null;
+                event.currentTarget.src = selectedSegmentFallback;
+              }}
               className="h-full w-full object-contain"
-              controls
-              playsInline
             />
           ) : media ? (
             <img src={media} alt="Selected segment" className="h-full w-full object-contain" />
@@ -2523,7 +2617,7 @@ function PreviewPanel({
 
         <div
           data-testid="timeline-workbench"
-          className="shrink-0 rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-3"
+          className="min-h-0 flex-1 overflow-y-auto rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-3 [-webkit-overflow-scrolling:touch]"
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
@@ -2575,20 +2669,33 @@ function PreviewPanel({
           <div className="mt-3 flex items-center gap-3 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
             {segments.map((segment, index) => {
               const segmentMedia = getSegmentMedia(segment);
+              const segmentFallback = fallbackVisualForDreamyBot(segment.botSlug, segment.botName);
               return (
                 <button
                   key={segment.id}
                   type="button"
                   data-testid="timeline-segment-card"
                   onClick={() => onSelectSegment(segment.id)}
-                  className={`relative h-[104px] w-[178px] shrink-0 overflow-hidden rounded-lg-v2 border text-left ${
+                  className={`relative h-[96px] w-[168px] shrink-0 overflow-hidden rounded-lg-v2 border text-left ${
                     segment.id === selectedSegment?.id
                       ? 'border-dreamy-brand-hot-v2 shadow-[0_0_0_1px_rgba(244,45,118,0.45)]'
                       : 'border-Cr-border-default-v2'
                   } bg-Cr-Bg-surface-default-v2`}
+                  style={{
+                    backgroundImage: `url(${segmentFallback})`,
+                    backgroundPosition: 'center',
+                    backgroundSize: 'cover',
+                  }}
                 >
                   {segmentMedia ? (
-                    <img src={segmentMedia} alt="" className="h-full w-full object-cover opacity-85" />
+                    <img
+                      src={segmentMedia}
+                      alt=""
+                      onError={(event) => {
+                        event.currentTarget.style.display = 'none';
+                      }}
+                      className="h-full w-full object-cover opacity-85"
+                    />
                   ) : (
                     <div className="grid h-full w-full place-items-center bg-Cr-Bg-surface-subtle-v2 text-Cr-text-subtler-v2">
                       <Film size={20} />
@@ -2616,7 +2723,11 @@ function PreviewPanel({
           <div className="mt-3 flex min-w-0 items-center gap-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 px-3 py-2 text-xs text-Cr-text-subtle-v2">
             <Clock3 size={14} className="shrink-0 text-dreamy-brand-hot-v2" />
             <span data-testid="video-fast-status" className="min-w-0 flex-1 truncate">
-              {submitting ? 'Generating the next clip...' : 'Preview cost: one short segment per clip.'}
+              {submitting
+                ? 'Generating the next clip...'
+                : segments.length
+                  ? `Timeline cost: ${segments.length} short clip${segments.length === 1 ? '' : 's'} / ${segments.length * 5}s total.`
+                  : 'Timeline cost appears after the first clip.'}
             </span>
             {selectedStarterPreset && (
               <span data-testid="selected-dreamy-bot-preview" className="hidden min-w-0 items-center gap-2 sm:inline-flex">
@@ -3469,8 +3580,101 @@ function RecommendationAgentPanel({
   );
 }
 
+function BotPresetCard({
+  preset,
+  selected,
+  submitting,
+  onSelect,
+  variant = 'main',
+}: {
+  preset: StudioStarterPreset;
+  selected: boolean;
+  submitting: boolean;
+  onSelect: (preset: StudioStarterPreset) => void;
+  variant?: 'main' | 'modal';
+}) {
+  const isModal = variant === 'modal';
+  return (
+    <div data-testid={isModal ? 'all-bot-picker-card' : 'all-bot-preview-card'}>
+      <button
+        type="button"
+        data-testid={isModal ? `all-bot-picker-${preset.id}` : `starter-preset-${preset.id}`}
+        aria-label={`Select ${preset.title} preset`}
+        aria-pressed={selected}
+        disabled={submitting}
+        onClick={() => onSelect(preset)}
+        className={`group grid w-full overflow-hidden rounded-xl-v2 border text-left transition-colors active:bg-Cr-beta-white-8-v2 disabled:opacity-50 ${
+          isModal
+            ? 'h-[132px] grid-cols-[minmax(150px,40%)_minmax(0,1fr)]'
+            : 'h-[118px] grid-cols-[minmax(168px,34%)_minmax(0,1fr)]'
+        } ${
+          selected
+            ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10 shadow-[0_0_0_1px_rgba(244,45,118,0.35)]'
+            : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2'
+        }`}
+      >
+        <span
+          data-testid={isModal ? 'all-bot-picker-preview-asset' : 'starter-bot-preview-asset'}
+          className="relative block h-full overflow-hidden border-r border-Cr-border-default-v2 bg-black/25"
+          style={{
+            backgroundImage: `url(${preset.fallbackVisualUrl})`,
+            backgroundPosition: 'center',
+            backgroundSize: 'cover',
+          }}
+        >
+          <span data-testid={isModal ? 'all-bot-picker-preview-image' : 'all-bot-preview-image'} className="block h-full w-full">
+            <img
+              data-testid={isModal ? 'all-bot-picker-image' : 'starter-bot-preview-image'}
+              src={preset.visualUrl}
+              alt={`${preset.title} preview`}
+              onError={(event) => {
+                event.currentTarget.style.display = 'none';
+              }}
+              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03] group-active:scale-105"
+            />
+          </span>
+          <span className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/10" />
+          <span
+            data-testid={preset.previewAccepted ? 'starter-bot-preview-real' : 'starter-bot-preview-fallback'}
+            className="absolute bottom-2 left-2 rounded bg-black/65 px-2 py-1 text-[10px] font-semibold uppercase text-white"
+          >
+            {preset.previewLabel}
+          </span>
+          <span className="absolute bottom-0 left-0 h-0.5 w-2/3 rounded-r bg-dreamy-brand-hot-v2" />
+        </span>
+        <span className="grid min-w-0 content-between gap-1.5 p-3">
+          <span className="min-w-0">
+            <span className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-sm font-semibold text-Cr-text-default-v2">{preset.title}</span>
+              {selected ? (
+                <CheckCircle2 size={15} className="shrink-0 text-Cr-text-success-default-v2" />
+              ) : (
+                <MousePointer2 size={15} className="shrink-0 text-dreamy-brand-hot-v2" />
+              )}
+            </span>
+            <span className={`${isModal ? 'line-clamp-2' : 'line-clamp-1'} mt-1 text-xs leading-5 text-Cr-text-subtle-v2`}>
+              {preset.recommendation}
+            </span>
+          </span>
+          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <Pill tone="hot">{preset.workflow}</Pill>
+            <Pill>{preset.botId || preset.botSlug}</Pill>
+          </span>
+          <span
+            data-testid="starter-bot-preview-state"
+            className="truncate text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2"
+          >
+            {preset.previewAccepted ? `${preset.previewSource}` : `${preset.previewStatus}`}
+          </span>
+        </span>
+      </button>
+    </div>
+  );
+}
+
 function BotSelectionPanel({
   starterPresets,
+  allBotPresets,
   selectedStarterPresetId,
   selectedStarterPreset,
   selectedSegment,
@@ -3486,6 +3690,7 @@ function BotSelectionPanel({
   onRunPreset,
 }: {
   starterPresets: StudioStarterPreset[];
+  allBotPresets: StudioStarterPreset[];
   selectedStarterPresetId?: string;
   selectedStarterPreset?: StudioStarterPreset | null;
   selectedSegment?: StudioSegment | null;
@@ -3500,12 +3705,9 @@ function BotSelectionPanel({
   onRunManualBotSequence: () => void;
   onRunPreset?: (preset: StudioStarterPreset) => void;
 }) {
-  const recommendedPreset = starterPresets[0];
   const activeStarterPresetId = selectedStarterPreset?.id || selectedStarterPresetId;
-  const presetByBotSlug = useMemo(
-    () => new Map(starterPresets.map((preset) => [preset.botSlug, preset])),
-    [starterPresets],
-  );
+  const [allBotPickerOpen, setAllBotPickerOpen] = useState(false);
+  const selectableBotCount = allBotPresets.length || starterPresets.length;
   const selectPreset = useCallback((preset: StudioStarterPreset) => {
     onSelectPreset(preset);
   }, [onSelectPreset]);
@@ -3513,17 +3715,56 @@ function BotSelectionPanel({
   return (
     <section
       data-testid="bot-selection-panel"
-      className="flex h-[clamp(150px,22dvh,210px)] min-h-0 shrink-0 flex-col overflow-hidden border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-2"
+      className="flex h-[clamp(300px,42dvh,380px)] min-h-0 shrink-0 flex-col overflow-hidden border-b border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 py-3"
       aria-label="Dreamy bot selection"
     >
-      <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2 text-xs font-semibold text-Cr-text-subtle-v2">
-          <Bot size={14} className="shrink-0 text-dreamy-brand-hot-v2" />
-          <span className="truncate">Choose bot</span>
+      <div className="mb-3 flex shrink-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-Cr-text-default-v2">
+            <Bot size={15} className="shrink-0 text-dreamy-brand-hot-v2" />
+            <span className="truncate">Bot previews</span>
+          </div>
+          <div className="mt-0.5 truncate text-[11px] text-Cr-text-subtler-v2">
+            Select one Dreamy bot; the canvas follows it.
+          </div>
         </div>
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Pill tone="hot">{`${starterPresets.length + manualBotEntries.length} options`}</Pill>
+        <div data-testid="dreamy-bot-selection-state" className="flex min-w-0 shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            data-testid="all-bots-modal-open"
+            onClick={() => setAllBotPickerOpen(true)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md-v2 border border-dreamy-brand-hot-v2/55 bg-dreamy-brand-hot-v2/10 px-2.5 text-[11px] font-semibold text-dreamy-brand-hot-v2 active:bg-dreamy-brand-hot-v2/20"
+            aria-haspopup="dialog"
+            aria-expanded={allBotPickerOpen}
+          >
+            <Bot size={13} />
+            All bots
+          </button>
+          <Pill tone="hot">{`${selectableBotCount} options`}</Pill>
           {selectedStarterPreset && <Pill>{selectedStarterPreset.botSlug}</Pill>}
+          {selectedStarterPreset && (
+            <>
+              <span data-testid="starter-preset-selection" className="sr-only">
+                {selectedStarterPreset.title}
+              </span>
+              <span data-testid="selected-dreamy-bot-preview" className="sr-only">
+                Prompt will call this bot and append the result to the timeline.
+              </span>
+              <button
+                type="button"
+                data-testid="starter-preset-direct-generate"
+                disabled={submitting}
+                onClick={() => onRunPreset?.(selectedStarterPreset)}
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md-v2 bg-dreamy-brand-hot-v2 px-2.5 text-[11px] font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+              >
+                <Clapperboard size={12} />
+                Run
+              </button>
+              <span data-testid="starter-preset-result-visible" className="sr-only">
+                Selected bot result visible
+              </span>
+            </>
+          )}
         </div>
       </div>
 
@@ -3531,11 +3772,40 @@ function BotSelectionPanel({
         data-testid="bot-selection-scroll-region"
         className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1 [-webkit-overflow-scrolling:touch]"
       >
+        {!!starterPresets.length && (
+          <div data-testid="starter-presets" className="grid gap-2">
+            <div className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
+              <span className="inline-flex min-w-0 items-center gap-2">
+                <Sparkles size={13} className="text-dreamy-brand-hot-v2" />
+                <span className="truncate">Verified workshop bots</span>
+              </span>
+              <Pill>{`${starterPresets.length} verified`}</Pill>
+            </div>
+            <div data-testid="all-bot-previews" className="grid gap-2">
+              <div
+                data-testid="starter-visual-recommendations"
+                className="grid gap-2"
+              >
+                {starterPresets.map((preset) => (
+                  <BotPresetCard
+                    key={preset.id}
+                    preset={preset}
+                    selected={activeStarterPresetId === preset.id}
+                    submitting={submitting}
+                    onSelect={selectPreset}
+                  />
+                ))}
+              </div>
+            </div>
+            <div data-testid="dreamy-bot-list-only" className="sr-only">Dreamy-only bot list</div>
+          </div>
+        )}
+
         <details data-testid="manual-bot-id-panel" className="group rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 marker:hidden">
             <div className="flex min-w-0 items-center gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
-              <SlidersHorizontal size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
-              <span className="truncate">Manual bot IDs</span>
+              <SlidersHorizontal size={13} className="shrink-0 text-Cr-text-subtler-v2" />
+              <span className="truncate">Advanced manual bot ids</span>
             </div>
             <Pill tone={manualBotEntries.length ? 'hot' : 'default'}>{`${manualBotEntries.length} queued`}</Pill>
           </summary>
@@ -3576,7 +3846,7 @@ function BotSelectionPanel({
             </div>
           </div>
           {!!manualBotEntries.length && (
-            <div data-testid="manual-bot-sequence-list" className="flex gap-1.5 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+            <div data-testid="manual-bot-sequence-list" className="mt-2 flex gap-1.5 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
               {manualBotEntries.map((entry, index) => (
                 <button
                   key={entry.id}
@@ -3597,95 +3867,64 @@ function BotSelectionPanel({
             </div>
           )}
         </details>
-
-        {!!starterPresets.length && (
-          <div data-testid="starter-presets" className="grid gap-2">
-            <div className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
-              <span className="inline-flex min-w-0 items-center gap-2">
-              <Sparkles size={13} className="text-dreamy-brand-hot-v2" />
-              <span className="truncate">Verified workshop bots</span>
-              </span>
-              <Pill>{`${starterPresets.length} verified`}</Pill>
-            </div>
-            <div data-testid="starter-visual-recommendations" className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
-              {starterPresets.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  data-testid={`starter-preset-${preset.id}`}
-                  aria-label={`Select ${preset.title} preset`}
-                  aria-pressed={activeStarterPresetId === preset.id}
-                  disabled={submitting}
-                  onClick={() => selectPreset(preset)}
-                  className={`group grid w-[126px] shrink-0 overflow-hidden rounded-lg-v2 border text-left transition-colors active:bg-Cr-beta-white-8-v2 disabled:opacity-50 ${
-                    activeStarterPresetId === preset.id
-                      ? 'border-dreamy-brand-hot-v2 bg-dreamy-brand-hot-v2/10'
-                      : 'border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2'
-                  }`}
-                >
-                  <span className="relative block h-[42px] overflow-hidden border-b border-Cr-border-default-v2 bg-black/25">
-                    <img
-                      data-testid="starter-bot-preview-image"
-                      src={preset.visualUrl}
-                      alt=""
-                      className="h-full w-full object-cover transition-transform duration-500 group-active:scale-105"
-                    />
-                    <span className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-black/10" />
-                    <span
-                      data-testid={preset.previewAccepted ? 'starter-bot-preview-real' : 'starter-bot-preview-fallback'}
-                      className="sr-only"
-                    >
-                      {preset.previewLabel}
-                    </span>
-                    <span className="absolute bottom-0 left-0 h-0.5 w-2/3 animate-pulse rounded-r bg-dreamy-brand-hot-v2" />
-                  </span>
-                  <span className="grid gap-1 p-1.5">
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="min-w-0 truncate text-xs font-semibold text-Cr-text-default-v2">{preset.title}</span>
-                      {activeStarterPresetId === preset.id ? (
-                        <CheckCircle2 size={13} className="shrink-0 text-Cr-text-success-default-v2" />
-                      ) : (
-                        <MousePointer2 size={13} className="shrink-0 text-dreamy-brand-hot-v2" />
-                      )}
-                    </span>
-                    <span
-                      data-testid="starter-bot-preview-state"
-                      className="truncate text-[10px] font-semibold uppercase text-Cr-text-subtlest-v2"
-                    >
-                      {preset.previewAccepted ? `${preset.workflow} · ${preset.previewSource}` : `${preset.workflow} · ${preset.previewStatus}`}
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {selectedStarterPreset && (
-          <div
-            data-testid="selected-bot-control-strip"
-            className="grid gap-2 rounded-lg-v2 border border-dreamy-brand-hot-v2/35 bg-dreamy-brand-hot-v2/10 p-2 sm:grid-cols-[minmax(0,1fr)_auto]"
-          >
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="truncate text-xs font-semibold text-Cr-text-default-v2">{selectedStarterPreset.title}</span>
-                <Pill tone="hot">{selectedStarterPreset.workflow}</Pill>
-              </div>
-              <div className="mt-1 truncate text-[11px] text-Cr-text-subtler-v2">{selectedStarterPreset.recommendation}</div>
-            </div>
-            <button
-              type="button"
-              data-testid="starter-preset-direct-generate"
-              disabled={submitting}
-              onClick={() => onRunPreset?.(selectedStarterPreset)}
-              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md-v2 bg-dreamy-brand-hot-v2 px-3 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2 sm:self-center"
-            >
-              <Clapperboard size={13} />
-              {getStarterPresetRunLabel(selectedStarterPreset, selectedSegment)}
-            </button>
-          </div>
-        )}
       </div>
+
+      {allBotPickerOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label="All selectable Dreamy bots"
+        >
+          <button
+            type="button"
+            className="absolute inset-0"
+            aria-label="Close all bot picker"
+            onClick={() => setAllBotPickerOpen(false)}
+          />
+          <section className="relative z-10 flex h-[min(760px,86dvh)] w-full max-w-[1120px] flex-col overflow-hidden rounded-xl-v2 border border-white/10 bg-[#0f1016] shadow-2xl">
+            <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-semibold text-Cr-text-default-v2">
+                  <Bot size={15} className="text-dreamy-brand-hot-v2" />
+                  All selectable bots
+                </div>
+                <div className="truncate text-[11px] text-Cr-text-subtler-v2">
+                  Pick any available Dreamy bot; it becomes the active bot for the prompt and timeline.
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Pill tone="hot">{`${selectableBotCount} bots`}</Pill>
+                <button
+                  type="button"
+                  onClick={() => setAllBotPickerOpen(false)}
+                  className="flex h-8 w-8 items-center justify-center rounded-md-v2 border border-white/10 bg-white/[0.04] text-Cr-text-subtler-v2 active:bg-white/[0.08]"
+                  aria-label="Close all bot picker"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            </div>
+            <div data-testid="all-bots-modal-list" className="min-h-0 flex-1 overflow-y-auto p-4">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {(allBotPresets.length ? allBotPresets : starterPresets).map((preset) => (
+                  <BotPresetCard
+                    key={`modal-${preset.id}`}
+                    preset={preset}
+                    selected={activeStarterPresetId === preset.id}
+                    submitting={submitting}
+                    variant="modal"
+                    onSelect={(nextPreset) => {
+                      selectPreset(nextPreset);
+                      setAllBotPickerOpen(false);
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
     </section>
   );
 }
@@ -3719,27 +3958,30 @@ function Composer({
 }) {
   return (
     <div data-testid="studio-composer" className="shrink-0 border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 p-2">
-      <div className="mb-1 flex items-center justify-between gap-3 lg:hidden">
-        <ModeSwitch mode={mode} onChange={onModeChange} labelScope="Switch composer mode to" />
-        <Pill>{mode === 'canvas' ? 'Canvas chain' : 'Player loop'}</Pill>
-      </div>
-      <div className="rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2">
+      <div className="rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2 p-2.5">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-Cr-text-default-v2">Message</div>
+            <div className="mt-0.5 truncate text-[11px] text-Cr-text-subtler-v2">Prompt is sent to the selected bot.</div>
+          </div>
+          <Pill>{mode === 'canvas' ? 'Canvas' : 'Player'}</Pill>
+        </div>
         <textarea
           value={prompt}
           onChange={(event) => onPromptChange(event.target.value)}
-          rows={1}
-          className="block max-h-12 min-h-8 w-full resize-none bg-transparent text-sm leading-5 text-Cr-text-default-v2 outline-none placeholder:text-Cr-text-subtlest-v2"
-          placeholder="Describe the next shot, style, or change"
+          rows={2}
+          className="block max-h-20 min-h-14 w-full resize-none rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-3-v2 px-3 py-2 text-sm leading-5 text-Cr-text-default-v2 outline-none placeholder:text-Cr-text-subtlest-v2"
+          placeholder="Describe the next shot or extension..."
         />
-        <div className="mt-1.5 flex items-center justify-between gap-2">
+        <div className="mt-2 flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
               onClick={onPickFile}
-              className="inline-flex h-8 items-center gap-2 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-3 text-xs font-semibold text-Cr-text-default-v2 active:bg-Cr-beta-white-8-v2"
+              className="inline-flex h-9 items-center gap-2 rounded-md-v2 border border-Cr-border-default-v2 bg-Cr-beta-white-5-v2 px-3 text-xs font-semibold text-Cr-text-default-v2 active:bg-Cr-beta-white-8-v2"
             >
               <ImagePlus size={15} />
-              Image
+              Reference
             </button>
             {previewUrl && (
               <div className="flex min-w-0 items-center gap-2 rounded-md-v2 bg-Cr-beta-white-5-v2 p-1 pr-2">
@@ -3755,7 +3997,7 @@ function Composer({
             <button
               type="button"
               onClick={onStop}
-              className="inline-flex h-8 items-center gap-2 rounded-md-v2 bg-Cr-beta-white-8-v2 px-4 text-xs font-semibold text-Cr-text-default-v2"
+              className="inline-flex h-9 items-center gap-2 rounded-md-v2 bg-Cr-beta-white-8-v2 px-4 text-xs font-semibold text-Cr-text-default-v2"
             >
               <X size={14} />
               Stop
@@ -3765,7 +4007,7 @@ function Composer({
               type="button"
               onClick={onSubmit}
               disabled={!prompt.trim() && !canSubmitWithoutPrompt}
-              className="inline-flex h-8 items-center gap-2 rounded-md-v2 bg-dreamy-brand-hot-v2 px-4 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
+              className="inline-flex h-9 items-center gap-2 rounded-md-v2 bg-dreamy-brand-hot-v2 px-5 text-xs font-semibold text-white disabled:bg-Cr-Bg-surface-subtle-v2 disabled:text-Cr-text-subtlest-v2"
             >
               <Send size={14} />
               Run
@@ -4634,9 +4876,15 @@ export default function Dreamy() {
       const storedProjects = await fetchStudioProjects(20).catch(() => []);
       if (cancelled) return;
       const lastProjectId = readLastStudioProjectId();
-      const restored = lastProjectId ? storedProjects.find((item) => item.projectId === lastProjectId) : null;
-      if (restored) {
-        setProject((current) => (current?.projectId === VERIFIED_WORKSHOP_PROJECT_ID ? restored : current || restored));
+      const restored =
+        lastProjectId && lastProjectId !== VERIFIED_WORKSHOP_PROJECT_ID
+          ? storedProjects.find((item) => item.projectId === lastProjectId)
+          : null;
+      const restoredHasRenderableSegment = Boolean(
+        restored?.segments?.some((segment) => segment.url || segment.posterUrl || segment.status === 'done'),
+      );
+      if (restored && restoredHasRenderableSegment) {
+        setProject((current) => current || restored);
         saveLastStudioProjectId(restored.projectId);
         setMode(restored.mode || 'player');
         return;
@@ -6528,8 +6776,8 @@ export default function Dreamy() {
       <main
         className={`relative z-0 min-h-0 flex-1 overflow-hidden ${
           mode === 'canvas'
-            ? 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(360px,430px)_minmax(0,1fr)]'
-            : 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)]'
+            ? 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(560px,0.55fr)_minmax(420px,0.45fr)]'
+            : 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(560px,0.55fr)_minmax(420px,0.45fr)]'
         }`}
       >
         <section
@@ -6557,6 +6805,7 @@ export default function Dreamy() {
 
           <BotSelectionPanel
             starterPresets={recommendedStarterPresets}
+            allBotPresets={selectableStarterPresets}
             selectedStarterPresetId={selectedStarterPresetId}
             selectedStarterPreset={selectedStarterPreset}
             selectedSegment={selectedSegment}
@@ -6579,24 +6828,17 @@ export default function Dreamy() {
             <div className="flex h-9 shrink-0 items-center justify-between border-b border-Cr-border-default-v2 px-3">
               <div className="flex min-w-0 items-center gap-2 text-[11px] font-semibold uppercase text-Cr-text-subtlest-v2">
                 <Sparkles size={12} className="shrink-0 text-dreamy-brand-hot-v2" />
-                <span className="truncate">Conversation log</span>
+                <span className="truncate">Prompt route</span>
               </div>
-              <Pill>{`${messages.length} messages`}</Pill>
+              <Pill>{selectedPreviewPreset?.title || 'No bot'}</Pill>
             </div>
-            <div
-              data-testid="studio-chat-log"
-              className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 [-webkit-overflow-scrolling:touch]"
-            >
-              {messages.map((item) => (
-                <ChatMessage
-                  key={item.id}
-                  item={item}
-                  selectedSegment={selectedSegment}
-                  submitting={submitting}
-                  onAction={runStudio}
-                />
-              ))}
-            </div>
+            <PromptRoutingPanel
+              prompt={prompt}
+              messages={messages}
+              selectedStarterPreset={selectedPreviewPreset}
+              selectedSegment={selectedSegment}
+              submitting={submitting}
+            />
           </div>
 
           <Composer
