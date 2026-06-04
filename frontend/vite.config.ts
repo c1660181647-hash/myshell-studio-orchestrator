@@ -10,6 +10,10 @@ const ORCHESTRATOR_PROXY_TARGET =
   process.env.VITE_DREAMY_ORCHESTRATOR_PROXY_TARGET ||
   process.env.STUDIO_ORCHESTRATOR_PROXY_TARGET ||
   'http://127.0.0.1:8090'
+const AI_CANVASPRO_PROXY_TARGET =
+  process.env.VITE_AI_CANVASPRO_PROXY_TARGET ||
+  process.env.AI_CANVASPRO_API_BASE ||
+  'http://127.0.0.1:8777'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -19,6 +23,11 @@ export default defineConfig({
       '/api': {
         target: ORCHESTRATOR_PROXY_TARGET,
         changeOrigin: true,
+      },
+      '/ai-canvaspro-api': {
+        target: AI_CANVASPRO_PROXY_TARGET,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ai-canvaspro-api/, ''),
       },
     },
   },

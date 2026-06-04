@@ -37,6 +37,7 @@ import ShareInvite from './pages/ShareInvite';
 import TestCustomizeScene from './pages/TestCustomizeScene';
 import CheckinDemo from './pages/CheckinDemo';
 import Dreamy from './pages/Dreamy';
+import CanvasPro from './pages/CanvasPro';
 
 
 let communityPushCtaOpenedReported = false;
@@ -230,6 +231,7 @@ function AppRoutes() {
         <Route path="/earn" element={<Earn />} />
         <Route path="/share-invite" element={<ShareInvite />} />
         <Route path="/dreamy" element={<Dreamy />} />
+        <Route path="/canvaspro" element={<CanvasPro />} />
         <Route path="/__test-customize-scene" element={<TestCustomizeScene />} />
         <Route path="/checkin-demo" element={<CheckinDemo />} />
       </Routes>

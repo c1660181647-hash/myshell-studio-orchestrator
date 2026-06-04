@@ -47,6 +47,49 @@ class StudioApiTest(unittest.TestCase):
         STUDIO_STORE.reset_all()
         self.client = TestClient(app)
 
+    def test_ai_canvaspro_proxy_forwards_local_api_requests(self) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            status_code = 202
+            content = b'{"ok": true}'
+            headers = {"content-type": "application/json", "content-length": "999", "x-proxy-test": "ok"}
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs) -> None:
+                captured["client_kwargs"] = kwargs
+
+            async def __aenter__(self) -> "FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, *args) -> None:
+                return None
+
+            async def request(self, method: str, url: str, headers: dict[str, str], content: bytes) -> FakeResponse:
+                captured["method"] = method
+                captured["url"] = url
+                captured["headers"] = headers
+                captured["content"] = content
+                return FakeResponse()
+
+        with (
+            patch.dict(os.environ, {"AI_CANVASPRO_API_BASE": "http://127.0.0.1:18877"}),
+            patch("main.httpx.AsyncClient", FakeAsyncClient),
+        ):
+            response = self.client.post(
+                "/ai-canvaspro-api/api/v2/projects?active=1",
+                json={"name": "demo"},
+                headers={"X-Canvas-Test": "yes"},
+            )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json(), {"ok": True})
+        self.assertEqual(response.headers["x-proxy-test"], "ok")
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["url"], "http://127.0.0.1:18877/api/v2/projects?active=1")
+        self.assertEqual(json.loads(captured["content"].decode()), {"name": "demo"})
+        self.assertEqual(captured["headers"]["x-canvas-test"], "yes")
+
     def test_run_stream_creates_project_and_execution_request(self) -> None:
         with self.client.stream(
             "POST",
@@ -2805,6 +2848,7 @@ class StudioApiTest(unittest.TestCase):
         expected_routes = {
             "explore": "/explore",
             "ai-picks": "/ai-picks",
+            "canvaspro": "/canvaspro",
             "bot-detail": "/bot",
             "upload": "/upload",
             "tag-generator": "/tag-generator",
@@ -3059,8 +3103,8 @@ class StudioApiTest(unittest.TestCase):
 
         self.assertEqual(body["projectId"], source_meta["projectId"])
         self.assertEqual(body["sourceSegmentId"], source_execution["segmentId"])
-        self.assertEqual(body["summary"]["total"], 16)
-        self.assertGreaterEqual(body["summary"]["ready"], 15)
+        self.assertEqual(body["summary"]["total"], 17)
+        self.assertGreaterEqual(body["summary"]["ready"], 16)
         self.assertGreaterEqual(body["summary"]["covered"], 2)
         self.assertGreaterEqual(body["summary"]["blocked"], 1)
         self.assertIn(body["status"], {"ready_with_gaps", "blocked"})
@@ -3291,12 +3335,12 @@ class StudioApiTest(unittest.TestCase):
         self.assertFalse(body["readyForDelivery"])
 
         summary = body["summary"]
-        self.assertEqual(summary["pages"], 16)
-        self.assertGreaterEqual(summary["covered"], 15)
+        self.assertEqual(summary["pages"], 17)
+        self.assertGreaterEqual(summary["covered"], 16)
         self.assertEqual(summary["readyUnverified"], 0)
         self.assertEqual(summary["blocked"], 1)
-        self.assertGreaterEqual(summary["acceptedEvidence"], 15)
-        self.assertGreaterEqual(summary["jobs"], 15)
+        self.assertGreaterEqual(summary["acceptedEvidence"], 16)
+        self.assertGreaterEqual(summary["jobs"], 16)
 
         report_keys = set(body["reports"].keys())
         self.assertTrue(
@@ -3383,11 +3427,11 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(body["sourceMediaUrl"], source_url)
         self.assertEqual(body["status"], "planned")
         self.assertTrue(body["readyForDispatch"])
-        self.assertEqual(body["summary"]["total"], 16)
-        self.assertGreaterEqual(body["summary"]["planned"], 15)
+        self.assertEqual(body["summary"]["total"], 17)
+        self.assertGreaterEqual(body["summary"]["planned"], 16)
         self.assertEqual(body["summary"]["skipped"], 1)
         self.assertEqual(body["summary"]["server"], 0)
-        self.assertGreaterEqual(body["summary"]["navigation"], 14)
+        self.assertGreaterEqual(body["summary"]["navigation"], 15)
         self.assertGreaterEqual(body["summary"]["client"], 1)
 
         target_by_page = {target["pageId"]: target for target in body["targets"]}
@@ -3396,6 +3440,9 @@ class StudioApiTest(unittest.TestCase):
         self.assertIn("library", target_by_page)
         self.assertEqual(target_by_page["library"]["recommendedAction"], "navigate")
         self.assertEqual(target_by_page["library"]["navigationPath"], "/library")
+        self.assertIn("canvaspro", target_by_page)
+        self.assertEqual(target_by_page["canvaspro"]["recommendedAction"], "navigate")
+        self.assertEqual(target_by_page["canvaspro"]["navigationPath"], "/canvaspro")
         self.assertIn("tag-generator", target_by_page)
         self.assertIn("img=https%3A%2F%2Fexample.com%2Fdispatch-batch-source.png", target_by_page["tag-generator"]["navigationPath"])
         self.assertEqual(target_by_page["tag-generator"]["clientAction"], "navigate")
@@ -3406,7 +3453,7 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(skipped_by_page["myshell-art"]["recommendedAction"], "execute-server")
 
         self.assertEqual(body["handoffSnapshot"]["status"], "blocked")
-        self.assertEqual(body["handoffSnapshot"]["summary"]["readyUnverified"], 14)
+        self.assertEqual(body["handoffSnapshot"]["summary"]["readyUnverified"], 15)
 
     def test_dispatch_batch_can_exclude_already_covered_pages_for_resume(self) -> None:
         def fake_auth_status(page_id: str) -> dict:
@@ -3521,7 +3568,7 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(session["summary"]["pending"], session["summary"]["planned"])
         self.assertEqual(session["summary"]["visited"], 0)
         self.assertEqual(session["summary"]["completed"], 0)
-        self.assertGreaterEqual(session["summary"]["planned"], 15)
+        self.assertGreaterEqual(session["summary"]["planned"], 16)
         self.assertEqual(session["summary"]["blocked"], 1)
         self.assertIsNotNone(session["nextTarget"])
 

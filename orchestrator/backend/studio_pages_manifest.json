@@ -1,5 +1,5 @@
 {
-  "version": "2026-06-02",
+  "version": "2026-06-04",
   "pages": [
     {
       "id": "explore",
@@ -14,6 +14,14 @@
       "appRoute": "/ai-picks",
       "capabilities": ["recommendations", "pick-opened", "bot-discovery"],
       "intentKeywords": ["ai picks", "aipicks", "recommendations", "recommended", "featured", "精选", "推荐"]
+    },
+    {
+      "id": "canvaspro",
+      "name": "AI CanvasPro",
+      "kind": "embedded-static-app",
+      "appRoute": "/canvaspro",
+      "capabilities": ["canvas", "visual-workspace", "node-editor", "storyboard", "local-static-app"],
+      "intentKeywords": ["canvas", "canvaspro", "ai canvas", "visual workspace", "node editor", "storyboard", "画布", "视觉工作台", "节点编辑器", "分镜"]
     },
     {
       "id": "bot-detail",

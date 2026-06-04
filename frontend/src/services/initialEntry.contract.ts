@@ -10,6 +10,11 @@ const energyHistoryPathContract = resolveInitialEntry({
   search: '',
 });
 
+const canvasProPathContract = resolveInitialEntry({
+  pathname: '/canvaspro',
+  search: '',
+});
+
 const botPathContract = resolveInitialEntry({
   pathname: '/bot',
   search: '?slug_id=luna-star',
@@ -48,6 +53,7 @@ const queryStartAppSlugContract = resolveInitialEntry({
 
 void libraryDetailPathContract;
 void energyHistoryPathContract;
+void canvasProPathContract;
 void botPathContract;
 void pageParamStillWinsContract;
 void rootSlugFallbackContract;

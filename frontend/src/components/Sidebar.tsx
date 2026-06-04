@@ -41,6 +41,18 @@ const menuItems = [
     )
   },
   {
+    path: '/canvaspro',
+    labelKey: 'nav:canvas',
+    icon: (active: boolean) => (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="3" width="18" height="18" rx="2" stroke={active ? '#f01b5c' : '#ffffff'} strokeWidth="1.8" />
+        <path d="M7 8H17" stroke={active ? '#f01b5c' : '#ffffff'} strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M7 12H15" stroke={active ? '#f01b5c' : '#ffffff'} strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M7 16H12" stroke={active ? '#f01b5c' : '#ffffff'} strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    )
+  },
+  {
     path: '/earn',
     labelKey: 'nav:earn',
     icon: (active: boolean) => (
@@ -167,8 +179,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                   <span className="flex-1">{t(item.labelKey)}</span>
                 </button>
 
-                {/* Check-in entry — after Earn (index 2) */}
-                {idx === 2 && (
+                {/* Check-in entry — after Earn (index 3) */}
+                {idx === 3 && (
                   <button
                     className="flex items-center gap-4 py-[10px] px-4 rounded-xl-v2 text-base font-normal leading-6 text-left w-full transition-[background-color,color] duration-200 bg-transparent text-Cr-text-static-white-v2 hover:bg-white/8"
                     style={{ fontFamily: "'SF Pro', system-ui, sans-serif" }}

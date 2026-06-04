@@ -9,7 +9,8 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+import httpx
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -164,6 +165,48 @@ async def get_conversation(conversation_id: str):
 register_studio_routes(app)
 
 
+def _canvaspro_api_base() -> str:
+    return os.environ.get("AI_CANVASPRO_API_BASE", "http://127.0.0.1:8777").rstrip("/")
+
+
+def _proxy_headers(request: Request) -> dict[str, str]:
+    blocked = {"host", "content-length", "transfer-encoding", "connection"}
+    return {key: value for key, value in request.headers.items() if key.lower() not in blocked}
+
+
+def _response_headers(headers: httpx.Headers) -> dict[str, str]:
+    blocked = {"content-encoding", "content-length", "content-type", "transfer-encoding", "connection"}
+    return {key: value for key, value in headers.items() if key.lower() not in blocked}
+
+
+@app.api_route("/ai-canvaspro-api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def proxy_ai_canvaspro_api(path: str, request: Request):
+    """Same-origin bridge to a local AI CanvasPro server.py instance."""
+    target = f"{_canvaspro_api_base()}/{path}"
+    if request.url.query:
+        target = f"{target}?{request.url.query}"
+    try:
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=False) as client:
+            upstream = await client.request(
+                request.method,
+                target,
+                headers=_proxy_headers(request),
+                content=await request.body(),
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI CanvasPro local server unavailable: {exc}",
+        ) from exc
+
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        headers=_response_headers(upstream.headers),
+        media_type=upstream.headers.get("content-type"),
+    )
+
+
 # Serve frontend static files
 # Frontend paths — works locally from the monorepo and in Docker (/app/ dir)
 _base = os.path.dirname(os.path.abspath(__file__))
@@ -199,6 +242,14 @@ generated_dir = _first_existing_path(
 )
 os.makedirs(generated_dir, exist_ok=True)
 app.mount("/generated", StaticFiles(directory=generated_dir), name="generated")
+
+# Serve the vendored AI CanvasPro static sub-application.
+canvaspro_dir = _first_existing_path(
+    os.path.join(frontend_public, "ai-canvaspro"),
+    os.path.join(frontend_dist, "ai-canvaspro"),
+)
+if os.path.exists(canvaspro_dir):
+    app.mount("/ai-canvaspro", StaticFiles(directory=canvaspro_dir, html=True), name="ai-canvaspro")
 
 # Serve gallery images — try public/gallery first (local dev), then dist/gallery (Docker)
 gallery_dir = os.path.join(frontend_public, "gallery")

@@ -5,6 +5,7 @@ import { useHaptic } from "../hooks/useTelegram";
 const tabs = [
   { path: "/", labelKey: "nav:characters", id: "characters" },
   { path: "/tag-generator", labelKey: "nav:create", id: "create" },
+  { path: "/canvaspro", labelKey: "nav:canvas", id: "canvas" },
   { path: "/library", labelKey: "nav:library", id: "library" },
   { path: "/settings", labelKey: "nav:settings", id: "settings" },
 ] as const;
@@ -23,6 +24,10 @@ const ICON_PATHS = {
     line: "M3.087 9H20.9134C21.4657 9 21.9134 9.44772 21.9134 10C21.9134 10.0277 21.9122 10.0554 21.9099 10.083L21.0766 20.083C21.0334 20.6013 20.6001 21 20.08 21H3.92033C3.40024 21 2.96698 20.6013 2.92379 20.083L2.09045 10.083C2.04459 9.53267 2.45358 9.04932 3.00395 9.00345C3.03158 9.00115 3.05928 9 3.087 9ZM4.84047 19H19.1599L19.8266 11H4.1738L4.84047 19ZM13.4144 5H20.0002C20.5525 5 21.0002 5.44772 21.0002 6V7H3.0002V4C3.0002 3.44772 3.44792 3 4.0002 3H11.4144L13.4144 5Z",
     solid:
       "M13.4144 5H20.0002C20.5525 5 21.0002 5.44772 21.0002 6V7H3.0002V4C3.0002 3.44772 3.44792 3 4.0002 3H11.4144L13.4144 5ZM3.087 9H20.9134C21.4657 9 21.9134 9.44772 21.9134 10C21.9134 10.0277 21.9122 10.0554 21.9099 10.083L21.0766 20.083C21.0334 20.6013 20.6001 21 20.08 21H3.92033C3.40024 21 2.96698 20.6013 2.92379 20.083L2.09045 10.083C2.04459 9.53267 2.45358 9.04932 3.00395 9.00345C3.03158 9.00115 3.05928 9 3.087 9Z",
+  },
+  canvas: {
+    line: "M4 3H20C20.5523 3 21 3.44772 21 4V20C21 20.5523 20.5523 21 20 21H4C3.44772 21 3 20.5523 3 20V4C3 3.44772 3.44772 3 4 3ZM5 5V19H19V5H5ZM8 8H16V10H8V8ZM8 12H14V14H8V12ZM8 16H12V18H8V16Z",
+    solid: "M4 3H20C20.5523 3 21 3.44772 21 4V20C21 20.5523 20.5523 21 20 21H4C3.44772 21 3 20.5523 3 20V4C3 3.44772 3.44772 3 4 3ZM8 8V10H16V8H8ZM8 12V14H14V12H8ZM8 16V18H12V16H8Z",
   },
   settings: {
     line: "M12 1L21.5 6.5V17.5L12 23L2.50003 17.5V6.5L12 1ZM12 3.311L4.50003 7.65311V16.3469L12 20.689L19.5 16.3469V7.65311L12 3.311ZM12 16C9.79089 16 8.00003 14.2091 8.00003 12C8.00003 9.79086 9.79089 8 12 8C14.2091 8 16 9.79086 16 12C16 14.2091 14.2091 16 12 16ZM12 14C13.1046 14 14 13.1046 14 12C14 10.8954 13.1046 10 12 10C10.8954 10 10 10.8954 10 12C10 13.1046 10.8954 14 12 14Z",
@@ -57,7 +62,7 @@ export default function TabBar() {
 
   return (
     <div className="fixed bottom-0 left-0 right-0 flex justify-center px-4 pt-2 pb-[calc(env(safe-area-inset-bottom,8px)+8px)] z-100 bg-transparent pointer-events-none">
-      <div className="flex items-center gap-3 p-1.5 w-full bg-black/20 backdrop-blur-[40px] rounded-full pointer-events-auto">
+      <div className="flex items-center gap-1.5 p-1.5 w-full bg-black/20 backdrop-blur-[40px] rounded-full pointer-events-auto">
         {tabs.map((tab) => {
           const active =
             tab.path === "/"
@@ -66,7 +71,7 @@ export default function TabBar() {
           return (
             <button
               key={tab.id}
-              className={`flex-1 flex flex-col items-center gap-0.5 py-2 rounded-full transition-all duration-[0.25s] ease-[ease] relative ${active ? "bg-Cr-border-opaque-v2" : ""}`}
+              className={`min-w-0 flex-1 flex flex-col items-center gap-0.5 py-2 rounded-full transition-all duration-[0.25s] ease-[ease] relative ${active ? "bg-Cr-border-opaque-v2" : ""}`}
               onClick={() => {
                 if (!active) {
                   haptic("selection");
@@ -78,7 +83,7 @@ export default function TabBar() {
                 <TabIcon active={active} id={tab.id} />
               </span>
               <span
-                className={`text-[10px] font-medium transition-colors duration-[0.25s] ease-[ease] ${active ? "text-dreamy-brand-hot-v2" : "text-Cr-text-subtler-v2"}`}
+                className={`max-w-full truncate text-[9px] sm:text-[10px] font-medium leading-none transition-colors duration-[0.25s] ease-[ease] ${active ? "text-dreamy-brand-hot-v2" : "text-Cr-text-subtler-v2"}`}
               >
                 {t(tab.labelKey)}
               </span>

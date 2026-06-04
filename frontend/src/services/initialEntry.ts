@@ -13,6 +13,7 @@ export interface InitialEntryInput {
 const DIRECT_EXACT_ROUTES = new Set<string>([
   ...Object.values(MINIAPP_PAGE_DEEP_LINKS).map((entry) => entry.route).filter((route) => !route.includes(':')),
   '/__test-customize-scene',
+  '/canvaspro',
 ]);
 
 function normalizeSearch(search: string | undefined): string {
