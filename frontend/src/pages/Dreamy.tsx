@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type {
+  ChangeEvent,
+  DragEvent as ReactDragEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  WheelEvent as ReactWheelEvent,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -139,8 +145,23 @@ import type {
 import { trackEvent } from '../services/tracking';
 
 type TabKey = 'chat' | 'preview';
-type CanvasTool = 'select' | 'pan';
-type CanvasNodeKind = 'prompt' | 'agent' | 'segment' | 'output';
+type CanvasTool = 'select' | 'pan' | 'connect';
+type CanvasNodeKind =
+  | 'prompt'
+  | 'agent'
+  | 'segment'
+  | 'output'
+  | 'source-text'
+  | 'source-image'
+  | 'source-video'
+  | 'source-audio'
+  | 'ai-text'
+  | 'ai-image'
+  | 'ai-video'
+  | 'ai-audio'
+  | 'annotation';
+type CanvasSourceType = 'text' | 'image' | 'video' | 'audio' | 'json';
+type CanvasBoardId = 'story' | 'media' | 'timeline';
 
 interface CanvasNode {
   id: string;
@@ -159,6 +180,10 @@ interface CanvasNode {
   botSlug?: string;
   botName?: string;
   mediaUrl?: string;
+  sourceType?: CanvasSourceType;
+  fileName?: string;
+  outputText?: string;
+  boardId?: CanvasBoardId;
 }
 
 interface CanvasConnection {
@@ -166,6 +191,21 @@ interface CanvasConnection {
   from: string;
   to: string;
   label?: string;
+  sourceHandle?: string;
+  targetHandle?: string;
+}
+
+interface CanvasSnapshot {
+  customNodes: CanvasNode[];
+  customConnections: CanvasConnection[];
+  positionOverrides: Record<string, { x: number; y: number }>;
+}
+
+interface CanvasContextMenuState {
+  screenX: number;
+  screenY: number;
+  canvasX: number;
+  canvasY: number;
 }
 
 function getInitialCanvasView() {
@@ -790,13 +830,156 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+const CANVAS_BOARDS: Array<{ id: CanvasBoardId; label: string }> = [
+  { id: 'story', label: 'Story' },
+  { id: 'media', label: 'Media' },
+  { id: 'timeline', label: 'Timeline' },
+];
+
+const AI_CANVAS_NODE_LIBRARY: Array<{
+  kind: CanvasNodeKind;
+  title: string;
+  subtitle: string;
+  width: number;
+  height: number;
+  action?: StudioAction;
+  botSlug?: string;
+  sourceType?: CanvasSourceType;
+}> = [
+  {
+    kind: 'source-text',
+    title: 'Source Text',
+    subtitle: 'Prompt, character notes, or shot brief',
+    width: 248,
+    height: 118,
+    sourceType: 'text',
+  },
+  {
+    kind: 'source-image',
+    title: 'Source Image',
+    subtitle: 'Reference image dropped into the canvas',
+    width: 258,
+    height: 146,
+    sourceType: 'image',
+  },
+  {
+    kind: 'source-video',
+    title: 'Source Video',
+    subtitle: 'Reference clip or generated video source',
+    width: 266,
+    height: 150,
+    sourceType: 'video',
+  },
+  {
+    kind: 'source-audio',
+    title: 'Source Audio',
+    subtitle: 'Audio reference or voice material',
+    width: 244,
+    height: 116,
+    sourceType: 'audio',
+  },
+  {
+    kind: 'ai-image',
+    title: 'AI Image',
+    subtitle: 'Generate a source frame from prompt or references',
+    width: 258,
+    height: 132,
+    action: 'generate',
+    botSlug: DEFAULT_DREAMY_SLUG,
+  },
+  {
+    kind: 'ai-video',
+    title: 'AI Video',
+    subtitle: 'Animate selected sources into a short clip',
+    width: 266,
+    height: 136,
+    action: 'extend',
+    botSlug: DREAMY_VIDEO_SLUG,
+  },
+  {
+    kind: 'ai-text',
+    title: 'AI Text',
+    subtitle: 'Rewrite prompt, extract beats, or summarize nodes',
+    width: 248,
+    height: 120,
+    action: 'generate',
+  },
+  {
+    kind: 'annotation',
+    title: 'Annotation',
+    subtitle: 'Planning note pinned on the canvas',
+    width: 220,
+    height: 104,
+  },
+];
+
+const CANVAS_COMMAND_PRESETS = [
+  { label: '/image', value: '/image Generate a polished source frame from the selected references.' },
+  { label: '/video', value: '/video Animate the selected source into a five second Dreamy segment.' },
+  { label: '/extend', value: '/extend Continue the previous timeline segment with matching motion and style.' },
+  { label: '/style', value: '/style Restyle the selected node while preserving the subject and composition.' },
+];
+
+function getCanvasNodeLibraryItem(kind: CanvasNodeKind) {
+  return AI_CANVAS_NODE_LIBRARY.find((item) => item.kind === kind);
+}
+
+function getCanvasDefaultBoard(kind: CanvasNodeKind): CanvasBoardId {
+  if (kind === 'segment' || kind === 'output' || kind === 'ai-video' || kind === 'source-video') return 'timeline';
+  if (kind.startsWith('source-') || kind === 'ai-image' || kind === 'ai-audio') return 'media';
+  return 'story';
+}
+
+function getCanvasNodeMediaMode(kind: CanvasNodeKind): CanvasSourceType | undefined {
+  if (kind === 'source-image') return 'image';
+  if (kind === 'source-video') return 'video';
+  if (kind === 'source-audio') return 'audio';
+  if (kind === 'source-text') return 'text';
+  return undefined;
+}
+
 function getCanvasNodeIcon(kind: CanvasNodeKind) {
   return {
     prompt: Sparkles,
     agent: Bot,
     segment: Film,
     output: Layers3,
+    'source-text': PanelRightOpen,
+    'source-image': ImagePlus,
+    'source-video': Film,
+    'source-audio': Play,
+    'ai-text': Sparkles,
+    'ai-image': ImagePlus,
+    'ai-video': Clapperboard,
+    'ai-audio': Play,
+    annotation: SlidersHorizontal,
   }[kind];
+}
+
+function normalizeCanvasNodeKind(value: unknown): CanvasNodeKind {
+  const raw = String(value || '').toLowerCase();
+  const knownKinds: CanvasNodeKind[] = [
+    'prompt',
+    'agent',
+    'segment',
+    'output',
+    'source-text',
+    'source-image',
+    'source-video',
+    'source-audio',
+    'ai-text',
+    'ai-image',
+    'ai-video',
+    'ai-audio',
+    'annotation',
+  ];
+  if (knownKinds.includes(raw as CanvasNodeKind)) return raw as CanvasNodeKind;
+  if (raw.includes('audio')) return raw.includes('source') ? 'source-audio' : 'ai-audio';
+  if (raw.includes('video') || raw.includes('clip')) return raw.includes('source') || raw.includes('media') ? 'source-video' : 'ai-video';
+  if (raw.includes('image') || raw.includes('photo') || raw.includes('picture')) return raw.includes('source') ? 'source-image' : 'ai-image';
+  if (raw.includes('note') || raw.includes('comment')) return 'annotation';
+  if (raw.includes('text') || raw.includes('prompt')) return raw.includes('source') ? 'source-text' : 'ai-text';
+  return 'agent';
 }
 
 function buildCanvasGraph(
@@ -824,6 +1007,7 @@ function buildCanvasGraph(
     height: 118,
     status: project ? 'ready' : 'idle',
     prompt: project?.messages?.[project.messages.length - 1]?.content,
+    boardId: 'story',
   });
 
   graph.forEach((agent, index) => {
@@ -852,6 +1036,7 @@ function buildCanvasGraph(
       height: position.height,
       status: agent.status,
       agentId: agent.id,
+      boardId: index > 1 ? 'timeline' : 'story',
     });
 
     connections.push({
@@ -882,6 +1067,8 @@ function buildCanvasGraph(
       botSlug: segment.botSlug,
       botName: segment.botName,
       mediaUrl: getSegmentMedia(segment),
+      sourceType: segment.type,
+      boardId: 'timeline',
     });
 
     const parent = segment.parentSegmentId ? `segment-${segment.parentSegmentId}` : null;
@@ -903,6 +1090,7 @@ function buildCanvasGraph(
     width: 360,
     height: 112,
     status: segments.length ? 'ready' : 'idle',
+    boardId: 'timeline',
   });
 
   if (segments.length) {
@@ -2831,12 +3019,16 @@ function CanvasWorkspace({
   onRunPreset?: (preset: StudioStarterPreset) => void;
   submitting: boolean;
 }) {
+  const canvasSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const canvasFileInputRef = useRef<HTMLInputElement | null>(null);
   const [tool, setTool] = useState<CanvasTool>('select');
   const [initialView] = useState(getInitialCanvasView);
   const [zoom, setZoom] = useState(initialView.zoom);
   const [pan, setPan] = useState(initialView.pan);
+  const [activeBoardId, setActiveBoardId] = useState<CanvasBoardId>('timeline');
   const [activeFlowPresetId, setActiveFlowPresetId] = useState(CANVAS_FLOW_PRESETS[0]?.id || '');
   const [selectedNodeId, setSelectedNodeId] = useState(CANVAS_FLOW_PRESETS[0]?.nodes[0]?.id || 'prompt-root');
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([CANVAS_FLOW_PRESETS[0]?.nodes[0]?.id || 'prompt-root']);
   const [canvasAction, setCanvasAction] = useState<StudioAction>('generate');
   const [canvasCommand, setCanvasCommand] = useState('');
   const [positionOverrides, setPositionOverrides] = useState<Record<string, { x: number; y: number }>>({});
@@ -2844,6 +3036,13 @@ function CanvasWorkspace({
   const [customConnections, setCustomConnections] = useState<CanvasConnection[]>(
     () => CANVAS_FLOW_PRESETS[0]?.connections.map((connection) => ({ ...connection })) || [],
   );
+  const [history, setHistory] = useState<CanvasSnapshot[]>([]);
+  const [future, setFuture] = useState<CanvasSnapshot[]>([]);
+  const [contextMenu, setContextMenu] = useState<CanvasContextMenuState | null>(null);
+  const [connectFromNodeId, setConnectFromNodeId] = useState<string | null>(null);
+  const [isDropActive, setIsDropActive] = useState(false);
+  const [spacePanning, setSpacePanning] = useState(false);
+  const [showBotCatalog, setShowBotCatalog] = useState(false);
   const [copied, setCopied] = useState(false);
   const [dragState, setDragState] = useState<{
     id: string;
@@ -2902,17 +3101,80 @@ function CanvasWorkspace({
     : selectedSegment || null;
   const isCustomSelected = Boolean(selectedNode && customNodes.some((node) => node.id === selectedNode.id));
   const activeFlowPreset = CANVAS_FLOW_PRESETS.find((preset) => preset.id === activeFlowPresetId) || CANVAS_FLOW_PRESETS[0];
+  const activeSelectedNodeIds = selectedNodeIds.length ? selectedNodeIds : selectedNodeId ? [selectedNodeId] : [];
+  const boardNodes = useMemo(
+    () => nodes.filter((node) => (node.boardId || getCanvasDefaultBoard(node.kind)) === activeBoardId),
+    [activeBoardId, nodes],
+  );
+  const canUndo = history.length > 0;
+  const canRedo = future.length > 0;
+
+  const createCanvasSnapshot = useCallback<() => CanvasSnapshot>(
+    () => ({
+      customNodes: customNodes.map((node) => ({ ...node })),
+      customConnections: customConnections.map((connection) => ({ ...connection })),
+      positionOverrides: { ...positionOverrides },
+    }),
+    [customConnections, customNodes, positionOverrides],
+  );
+
+  const restoreCanvasSnapshot = useCallback((snapshot: CanvasSnapshot) => {
+    setCustomNodes(snapshot.customNodes.map((node) => ({ ...node })));
+    setCustomConnections(snapshot.customConnections.map((connection) => ({ ...connection })));
+    setPositionOverrides({ ...snapshot.positionOverrides });
+  }, []);
+
+  const commitCanvasSnapshot = useCallback(() => {
+    const snapshot = createCanvasSnapshot();
+    setHistory((prev) => [...prev.slice(-29), snapshot]);
+    setFuture([]);
+  }, [createCanvasSnapshot]);
+
+  const undoCanvas = useCallback(() => {
+    setHistory((prev) => {
+      const snapshot = prev[prev.length - 1];
+      if (!snapshot) return prev;
+      setFuture((next) => [createCanvasSnapshot(), ...next].slice(0, 30));
+      restoreCanvasSnapshot(snapshot);
+      return prev.slice(0, -1);
+    });
+  }, [createCanvasSnapshot, restoreCanvasSnapshot]);
+
+  const redoCanvas = useCallback(() => {
+    setFuture((prev) => {
+      const snapshot = prev[0];
+      if (!snapshot) return prev;
+      setHistory((next) => [...next.slice(-29), createCanvasSnapshot()]);
+      restoreCanvasSnapshot(snapshot);
+      return prev.slice(1);
+    });
+  }, [createCanvasSnapshot, restoreCanvasSnapshot]);
+
+  const getCanvasPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = canvasSurfaceRef.current?.getBoundingClientRect();
+      if (!rect) return { x: 480, y: 260 };
+      return {
+        x: Math.round((clientX - rect.left - pan.x) / zoom),
+        y: Math.round((clientY - rect.top - pan.y) / zoom),
+      };
+    },
+    [pan.x, pan.y, zoom],
+  );
 
   useEffect(() => {
     if (nodes.length && !nodes.some((node) => node.id === selectedNodeId)) {
       const nextId = selectedSegment?.id ? `segment-${selectedSegment.id}` : nodes[0].id;
-      setSelectedNodeId(nodes.some((node) => node.id === nextId) ? nextId : nodes[0].id);
+      const resolvedId = nodes.some((node) => node.id === nextId) ? nextId : nodes[0].id;
+      setSelectedNodeId(resolvedId);
+      setSelectedNodeIds([resolvedId]);
     }
   }, [nodes, selectedNodeId, selectedSegment?.id]);
 
   useEffect(() => {
     if (!selectedStarterNode) return;
     setSelectedNodeId(selectedStarterNode.id);
+    setSelectedNodeIds([selectedStarterNode.id]);
     setCanvasAction(selectedStarterNode.action || 'generate');
     setCanvasCommand(selectedStarterNode.prompt || '');
   }, [selectedStarterNode?.id]);
@@ -2924,8 +3186,16 @@ function CanvasWorkspace({
   }, [selectedNode?.id]);
 
   const selectCanvasNode = useCallback(
-    (node: CanvasNode) => {
+    (node: CanvasNode, additive = false) => {
       setSelectedNodeId(node.id);
+      setSelectedNodeIds((prev) => {
+        if (!additive) return [node.id];
+        if (prev.includes(node.id)) {
+          const next = prev.filter((id) => id !== node.id);
+          return next.length ? next : [node.id];
+        }
+        return [...prev, node.id];
+      });
       if (node.segmentId) onSelectSegment(node.segmentId);
     },
     [onSelectSegment],
@@ -2978,11 +3248,110 @@ function CanvasWorkspace({
     };
   }, [applyNodePosition, dragState, panState, zoom]);
 
+  const connectCanvasNodes = useCallback(
+    (fromId: string, toId: string, label = 'route') => {
+      if (!fromId || !toId || fromId === toId) return;
+      if (connections.some((connection) => connection.from === fromId && connection.to === toId)) {
+        setConnectFromNodeId(null);
+        setTool('select');
+        return;
+      }
+      commitCanvasSnapshot();
+      setCustomConnections((prev) => [
+        ...prev,
+        {
+          id: `${fromId}-to-${toId}-${Date.now()}`,
+          from: fromId,
+          to: toId,
+          label,
+          sourceHandle: 'out',
+          targetHandle: 'in',
+        },
+      ]);
+      setConnectFromNodeId(null);
+      setTool('select');
+    },
+    [commitCanvasSnapshot, connections],
+  );
+
+  const addCanvasNode = useCallback(
+    (
+      kind: CanvasNodeKind,
+      point?: { x: number; y: number },
+      options: { linkFromSelected?: boolean; overrides?: Partial<CanvasNode> } = {},
+    ) => {
+      const anchor = selectedNode || nodes[nodes.length - 1];
+      const libraryItem = getCanvasNodeLibraryItem(kind);
+      const sourceType = options.overrides?.sourceType || libraryItem?.sourceType || getCanvasNodeMediaMode(kind);
+      const id = options.overrides?.id || makeId(`canvas_${kind.replace(/[^a-z0-9]+/gi, '_')}`);
+      const x = point?.x ?? (anchor?.x || 480) + 270;
+      const y = point?.y ?? (anchor?.y || 180) + (kind === 'agent' || kind.startsWith('ai-') ? 26 : 132);
+      const node: CanvasNode = {
+        id,
+        kind,
+        title: options.overrides?.title || libraryItem?.title || (kind === 'segment' ? 'Draft Segment' : 'Custom Agent'),
+        subtitle:
+          options.overrides?.subtitle ||
+          libraryItem?.subtitle ||
+          (kind === 'segment' ? 'Staged media slot' : 'Manual chain step'),
+        x,
+        y,
+        width: options.overrides?.width || libraryItem?.width || (kind === 'agent' ? 228 : 252),
+        height: options.overrides?.height || libraryItem?.height || (kind === 'agent' ? 104 : 122),
+        status: options.overrides?.status || 'idle',
+        action:
+          options.overrides?.action ||
+          libraryItem?.action ||
+          (kind === 'segment' ? 'generate' : kind === 'ai-video' ? 'extend' : undefined),
+        prompt: (options.overrides?.prompt ?? canvasCommand) || anchor?.prompt || '',
+        botName:
+          options.overrides?.botName ||
+          (kind === 'agent'
+            ? 'Unassigned agent'
+            : kind === 'ai-video'
+              ? '3D Futa Porn'
+              : kind === 'ai-image'
+                ? '3D Anime Porn'
+                : 'Dreamy canvas'),
+        botSlug: options.overrides?.botSlug || libraryItem?.botSlug || (kind === 'agent' ? 'manual-agent' : DEFAULT_DREAMY_SLUG),
+        sourceType,
+        fileName: options.overrides?.fileName,
+        mediaUrl: options.overrides?.mediaUrl,
+        outputText: options.overrides?.outputText,
+        boardId: options.overrides?.boardId || activeBoardId || getCanvasDefaultBoard(kind),
+      };
+      commitCanvasSnapshot();
+      setCustomNodes((prev) => [...prev, node]);
+      if (anchor && options.linkFromSelected !== false) {
+        const label = kind.startsWith('source-') ? 'source' : kind.startsWith('ai-') ? 'input' : 'manual';
+        setCustomConnections((prev) => [
+          ...prev,
+          { id: `${anchor.id}-to-${id}`, from: anchor.id, to: id, label, sourceHandle: 'out', targetHandle: 'in' },
+        ]);
+      }
+      setSelectedNodeId(id);
+      setSelectedNodeIds([id]);
+      setContextMenu(null);
+    },
+    [activeBoardId, canvasCommand, commitCanvasSnapshot, nodes, selectedNode],
+  );
+
   const handleNodePointerDown = (event: ReactPointerEvent<HTMLButtonElement>, node: CanvasNode) => {
-    if (tool !== 'select') return;
     event.preventDefault();
     event.stopPropagation();
-    selectCanvasNode(node);
+    setContextMenu(null);
+    if (tool === 'connect') {
+      if (connectFromNodeId && connectFromNodeId !== node.id) {
+        connectCanvasNodes(connectFromNodeId, node.id);
+      } else {
+        setConnectFromNodeId(node.id);
+      }
+      selectCanvasNode(node, event.shiftKey);
+      return;
+    }
+    if (tool !== 'select') return;
+    selectCanvasNode(node, event.shiftKey);
+    commitCanvasSnapshot();
     setDragState({
       id: node.id,
       clientX: event.clientX,
@@ -2993,7 +3362,12 @@ function CanvasWorkspace({
   };
 
   const handleSurfacePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (tool !== 'pan') return;
+    setContextMenu(null);
+    if (tool === 'connect') {
+      setConnectFromNodeId(null);
+      return;
+    }
+    if (tool !== 'pan' && event.button !== 1 && !spacePanning) return;
     event.preventDefault();
     setPanState({
       clientX: event.clientX,
@@ -3003,43 +3377,21 @@ function CanvasWorkspace({
     });
   };
 
-  const addCanvasNode = (kind: 'agent' | 'segment') => {
-    const anchor = selectedNode || nodes[nodes.length - 1];
-    const id = makeId(`canvas_${kind}`);
-    const node: CanvasNode = {
-      id,
-      kind,
-      title: kind === 'agent' ? 'Custom Agent' : 'Draft Segment',
-      subtitle: kind === 'agent' ? 'Manual chain step' : 'Staged media slot',
-      x: (anchor?.x || 480) + 270,
-      y: (anchor?.y || 180) + (kind === 'agent' ? 26 : 132),
-      width: kind === 'agent' ? 228 : 252,
-      height: kind === 'agent' ? 104 : 122,
-      status: 'idle',
-      action: kind === 'segment' ? 'generate' : undefined,
-      prompt: canvasCommand || anchor?.prompt || '',
-      botName: kind === 'agent' ? 'Unassigned agent' : 'Dreamy segment',
-      botSlug: kind === 'agent' ? 'manual-agent' : DEFAULT_DREAMY_SLUG,
-    };
-    setCustomNodes((prev) => [...prev, node]);
-    if (anchor) {
-      setCustomConnections((prev) => [...prev, { id: `${anchor.id}-to-${id}`, from: anchor.id, to: id, label: 'manual' }]);
-    }
-    setSelectedNodeId(id);
-  };
-
   const applyFlowPreset = (preset: CanvasFlowPreset) => {
+    commitCanvasSnapshot();
     setActiveFlowPresetId(preset.id);
     setCustomNodes(preset.nodes.map((node) => ({ ...node })));
     setCustomConnections(preset.connections.map((connection) => ({ ...connection })));
     setCanvasAction(preset.action);
     setCanvasCommand(preset.prompt);
     setSelectedNodeId(preset.nodes[0]?.id || 'prompt-root');
+    setSelectedNodeIds([preset.nodes[0]?.id || 'prompt-root']);
     setPositionOverrides({});
   };
 
   const duplicateSelected = () => {
     if (!selectedNode) return;
+    commitCanvasSnapshot();
     const id = makeId(`copy_${selectedNode.kind}`);
     const copy: CanvasNode = {
       ...selectedNode,
@@ -3054,27 +3406,46 @@ function CanvasWorkspace({
     setCustomNodes((prev) => [...prev, copy]);
     setCustomConnections((prev) => [...prev, { id: `${selectedNode.id}-to-${id}`, from: selectedNode.id, to: id, label: 'copy' }]);
     setSelectedNodeId(id);
+    setSelectedNodeIds([id]);
   };
 
   const deleteSelected = () => {
     if (!selectedNode || selectedNode.id === 'prompt-root' || selectedNode.id === 'timeline-output') return;
-    if (selectedNode.segmentId && !isCustomSelected) {
-      onDeleteSegment(selectedNode.segmentId);
-    } else {
-      setCustomNodes((prev) => prev.filter((node) => node.id !== selectedNode.id));
-    }
-    setCustomConnections((prev) =>
-      prev.filter((connection) => connection.from !== selectedNode.id && connection.to !== selectedNode.id),
-    );
+    const protectedIds = new Set(['prompt-root', 'timeline-output', selectedStarterNode?.id].filter(Boolean) as string[]);
+    const idsToDelete = (activeSelectedNodeIds.length ? activeSelectedNodeIds : [selectedNode.id]).filter((id) => !protectedIds.has(id));
+    if (!idsToDelete.length) return;
+    commitCanvasSnapshot();
+    idsToDelete.forEach((id) => {
+      const node = nodeMap.get(id);
+      if (node?.segmentId && !customNodes.some((customNode) => customNode.id === id)) {
+        onDeleteSegment(node.segmentId);
+      }
+    });
+    setCustomNodes((prev) => prev.filter((node) => !idsToDelete.includes(node.id)));
+    setCustomConnections((prev) => prev.filter((connection) => !idsToDelete.includes(connection.from) && !idsToDelete.includes(connection.to)));
     setSelectedNodeId('prompt-root');
+    setSelectedNodeIds(['prompt-root']);
   };
+
+  const resolveCanvasCommand = useCallback(
+    (value: string) => {
+      const withoutSlashPreset = value.replace(/^\/[a-z-]+\s*/i, '');
+      return withoutSlashPreset.replace(/@([a-zA-Z0-9:_-]+)/g, (_match, id: string) => {
+        const node = nodeMap.get(id);
+        if (!node) return `@${id}`;
+        return [node.title, node.prompt || node.outputText || node.subtitle].filter(Boolean).join(': ');
+      });
+    },
+    [nodeMap],
+  );
 
   const runSelected = () => {
     if (selectedStarterPreset && selectedNode?.id === selectedStarterNode?.id) {
       onRunPreset?.(selectedStarterPreset);
       return;
     }
-    const promptText = canvasCommand.trim() || selectedNode?.prompt || `Run ${selectedNode?.title || 'selected node'}`;
+    const promptText =
+      resolveCanvasCommand(canvasCommand.trim()) || selectedNode?.prompt || `Run ${selectedNode?.title || 'selected node'}`;
     onAction(canvasAction, promptText, selectedNodeSegment);
   };
 
@@ -3107,6 +3478,244 @@ function CanvasWorkspace({
     setPan(nextView.pan);
   };
 
+  const commandTail = canvasCommand.trimEnd();
+  const showReferenceMenu = commandTail.endsWith('@');
+  const showPresetMenu = commandTail.endsWith('/');
+  const referenceNodes = nodes.filter((node) => node.id !== selectedNode?.id).slice(0, 6);
+  const insertCanvasCommandToken = (token: string) => {
+    setCanvasCommand((prev) => {
+      const trimmed = prev.trimEnd();
+      const withoutTrigger = trimmed.endsWith('@') || trimmed.endsWith('/') ? trimmed.slice(0, -1).trimEnd() : trimmed;
+      return `${withoutTrigger}${withoutTrigger ? ' ' : ''}${token} `;
+    });
+  };
+
+  const importCanvasState = useCallback(
+    (rawJson: string, point?: { x: number; y: number }) => {
+      const parsed = JSON.parse(rawJson) as Record<string, unknown>;
+      const readRecord = (value: unknown): Record<string, unknown> =>
+        value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+      const readArrayOrObject = (value: unknown): Record<string, unknown>[] => {
+        if (Array.isArray(value)) return value.map(readRecord);
+        if (value && typeof value === 'object') {
+          return Object.entries(value as Record<string, unknown>).map(([id, item]) => ({ id, ...readRecord(item) }));
+        }
+        return [];
+      };
+      const numeric = (value: unknown, fallback: number) => {
+        const number = Number(value);
+        return Number.isFinite(number) ? number : fallback;
+      };
+
+      const rawNodes = readArrayOrObject(parsed.customNodes || parsed.nodes);
+      const rawConnections = readArrayOrObject(parsed.customConnections || parsed.connections || parsed.edges);
+      const basePoint = point || getCanvasPoint((canvasSurfaceRef.current?.getBoundingClientRect().left || 0) + 420, 260);
+      const existingIds = new Set(nodes.map((node) => node.id));
+      const importedIdMap = new Map<string, string>();
+      const protectedImportIds = new Set(['prompt-root', 'timeline-output']);
+      const importedNodes: CanvasNode[] = rawNodes
+        .map((rawNode, index) => {
+          const sourceId = String(rawNode.id || rawNode.nodeId || rawNode.key || `imported-${index}`);
+          if (
+            protectedImportIds.has(sourceId) ||
+            sourceId.startsWith('agent-') ||
+            sourceId.startsWith('segment-') ||
+            sourceId.startsWith('selected-dreamy-bot')
+          ) {
+            return null;
+          }
+          const kind = normalizeCanvasNodeKind(rawNode.kind || rawNode.type || rawNode.nodeType);
+          const libraryItem = getCanvasNodeLibraryItem(kind);
+          const id = existingIds.has(sourceId) ? makeId(`import_${sourceId.replace(/[^a-z0-9]+/gi, '_')}`) : sourceId;
+          importedIdMap.set(sourceId, id);
+          existingIds.add(id);
+          const position = readRecord(rawNode.position);
+          const data = readRecord(rawNode.data);
+          const sourceType =
+            (String(rawNode.sourceType || data.sourceType || '').toLowerCase() as CanvasSourceType) ||
+            getCanvasNodeMediaMode(kind) ||
+            libraryItem?.sourceType;
+          return {
+            id,
+            kind,
+            title: String(rawNode.title || rawNode.name || data.title || data.name || libraryItem?.title || 'Imported Node'),
+            subtitle: String(
+              rawNode.subtitle ||
+                rawNode.description ||
+                data.subtitle ||
+                data.description ||
+                rawNode.prompt ||
+                data.prompt ||
+                libraryItem?.subtitle ||
+                'Imported from canvas JSON',
+            ),
+            x: numeric(rawNode.x ?? position.x, basePoint.x + index * 34),
+            y: numeric(rawNode.y ?? position.y, basePoint.y + index * 34),
+            width: numeric(rawNode.width, libraryItem?.width || 244),
+            height: numeric(rawNode.height, libraryItem?.height || 120),
+            status: String(rawNode.status || data.status || 'imported'),
+            action: (rawNode.action || data.action || libraryItem?.action) as StudioAction | undefined,
+            prompt: String(rawNode.prompt || data.prompt || rawNode.text || data.text || ''),
+            botSlug: String(rawNode.botSlug || data.botSlug || libraryItem?.botSlug || DEFAULT_DREAMY_SLUG),
+            botName: String(rawNode.botName || data.botName || ''),
+            mediaUrl: String(rawNode.mediaUrl || rawNode.url || data.mediaUrl || data.url || rawNode.thumbnail || ''),
+            outputText: String(rawNode.outputText || data.outputText || rawNode.text || data.text || ''),
+            fileName: String(rawNode.fileName || data.fileName || ''),
+            sourceType,
+            boardId: activeBoardId,
+          } satisfies CanvasNode;
+        })
+        .filter(Boolean) as CanvasNode[];
+
+      const importedConnections: CanvasConnection[] = rawConnections
+        .map((rawConnection, index) => {
+          const source = String(rawConnection.from || rawConnection.source || rawConnection.sourceId || rawConnection.start || '');
+          const target = String(rawConnection.to || rawConnection.target || rawConnection.targetId || rawConnection.end || '');
+          const from = importedIdMap.get(source) || source;
+          const to = importedIdMap.get(target) || target;
+          if (!from || !to || from === to || !existingIds.has(from) || !existingIds.has(to)) return null;
+          return {
+            id: String(rawConnection.id || `${from}-to-${to}-import-${index}`),
+            from,
+            to,
+            label: String(rawConnection.label || rawConnection.type || 'import'),
+            sourceHandle: String(rawConnection.sourceHandle || 'out'),
+            targetHandle: String(rawConnection.targetHandle || 'in'),
+          };
+        })
+        .filter(Boolean) as CanvasConnection[];
+
+      if (!importedNodes.length && !importedConnections.length) return;
+      commitCanvasSnapshot();
+      setCustomNodes((prev) => [...prev, ...importedNodes]);
+      setCustomConnections((prev) => [...prev, ...importedConnections]);
+      if (importedNodes[0]) {
+        setSelectedNodeId(importedNodes[0].id);
+        setSelectedNodeIds([importedNodes[0].id]);
+      }
+    },
+    [activeBoardId, commitCanvasSnapshot, getCanvasPoint, nodes],
+  );
+
+  const handleCanvasWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const rect = canvasSurfaceRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const nextZoom = clamp(zoom - event.deltaY * 0.001, 0.35, 1.8);
+    const cursorX = event.clientX - rect.left;
+    const cursorY = event.clientY - rect.top;
+    const canvasX = (cursorX - pan.x) / zoom;
+    const canvasY = (cursorY - pan.y) / zoom;
+    setZoom(nextZoom);
+    setPan({
+      x: Math.round(cursorX - canvasX * nextZoom),
+      y: Math.round(cursorY - canvasY * nextZoom),
+    });
+  };
+
+  const handleCanvasDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('[data-canvas-node="true"], [data-canvas-floating="true"]')) return;
+    const point = getCanvasPoint(event.clientX, event.clientY);
+    addCanvasNode(activeBoardId === 'timeline' ? 'ai-video' : 'ai-image', point, { linkFromSelected: Boolean(selectedNode) });
+  };
+
+  const handleCanvasContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('[data-canvas-floating="true"]')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getCanvasPoint(event.clientX, event.clientY);
+    setContextMenu({ screenX: event.clientX, screenY: event.clientY, canvasX: point.x, canvasY: point.y });
+  };
+
+  const handleCanvasDrop = async (event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDropActive(false);
+    const point = getCanvasPoint(event.clientX, event.clientY);
+    const files = Array.from(event.dataTransfer.files || []);
+    for (const [index, file] of files.entries()) {
+      const dropPoint = { x: point.x + index * 36, y: point.y + index * 36 };
+      if (file.name.toLowerCase().endsWith('.json')) {
+        try {
+          importCanvasState(await file.text(), dropPoint);
+        } catch {
+          addCanvasNode('annotation', dropPoint, {
+            linkFromSelected: false,
+            overrides: {
+              title: 'JSON import failed',
+              subtitle: file.name,
+              outputText: 'The dropped JSON could not be parsed as a canvas project.',
+            },
+          });
+        }
+        continue;
+      }
+      const mime = file.type || '';
+      const isImage = mime.startsWith('image/');
+      const isVideo = mime.startsWith('video/');
+      const isAudio = mime.startsWith('audio/');
+      const kind: CanvasNodeKind = isImage ? 'source-image' : isVideo ? 'source-video' : isAudio ? 'source-audio' : 'source-text';
+      const outputText = kind === 'source-text' ? (await file.text().catch(() => '')).slice(0, 1200) : '';
+      addCanvasNode(kind, dropPoint, {
+        linkFromSelected: false,
+        overrides: {
+          title: file.name.replace(/\.[^.]+$/, '') || file.name,
+          subtitle: `${mime || 'file'} · ${(file.size / 1024).toFixed(1)} KB`,
+          fileName: file.name,
+          mediaUrl: kind === 'source-text' ? '' : URL.createObjectURL(file),
+          outputText,
+          prompt: outputText.slice(0, 360),
+          sourceType: getCanvasNodeMediaMode(kind),
+        },
+      });
+    }
+  };
+
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      const element = target instanceof HTMLElement ? target : null;
+      if (!element) return false;
+      return ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName) || element.isContentEditable;
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) return;
+      if (event.code === 'Space') {
+        event.preventDefault();
+        setSpacePanning(true);
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        downloadJson();
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) redoCanvas();
+        else undoCanvas();
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'y') {
+        event.preventDefault();
+        redoCanvas();
+      }
+      if (event.key.toLowerCase() === 'd' || event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        deleteSelected();
+      }
+      if (event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        resetView();
+      }
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') setSpacePanning(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [deleteSelected, redoCanvas, undoCanvas]);
+
   const renderConnection = (connection: CanvasConnection) => {
     const from = nodeMap.get(connection.from);
     const to = nodeMap.get(connection.to);
@@ -3117,7 +3726,7 @@ function CanvasWorkspace({
     const endY = to.y + to.height / 2;
     const handle = Math.max(70, Math.abs(endX - startX) * 0.45);
     const path = `M ${startX} ${startY} C ${startX + handle} ${startY}, ${endX - handle} ${endY}, ${endX} ${endY}`;
-    const active = from.id === selectedNodeId || to.id === selectedNodeId;
+    const active = activeSelectedNodeIds.includes(from.id) || activeSelectedNodeIds.includes(to.id);
     const accent =
       connection.label === 'fallback'
         ? '#8b949e'
@@ -3125,6 +3734,8 @@ function CanvasWorkspace({
           ? '#f31272'
           : connection.label === 'route'
             ? '#14b8d4'
+            : connection.label === 'source'
+              ? '#a855f7'
             : '#22c55e';
 
     return (
@@ -3186,13 +3797,26 @@ function CanvasWorkspace({
         </div>
       </div>
 
-      <div className="grid min-h-[560px] flex-1 grid-cols-1 xl:min-h-0 xl:grid-cols-[292px_minmax(0,1fr)_304px]">
+      <div className="grid min-h-[560px] flex-1 grid-cols-1 xl:min-h-0 xl:grid-cols-[360px_minmax(0,1fr)_280px]">
         <aside className="hidden min-h-0 flex-col border-r border-white/10 bg-[#111219] xl:flex">
           <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4">
-            <div className="text-sm font-semibold text-Cr-text-default-v2">Layers & Agents</div>
-            <button type="button" onClick={() => addCanvasNode('agent')} className="flex h-7 w-7 items-center justify-center rounded-md-v2 bg-white/[0.06]">
-              <Plus size={14} />
-            </button>
+            <div>
+              <div className="text-sm font-semibold text-Cr-text-default-v2">Canvas Inputs</div>
+              <div className="text-[11px] text-Cr-text-subtler-v2">{boardNodes.length} visible in {activeBoardId}</div>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setShowBotCatalog(true)}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md-v2 bg-white/[0.06] px-2 text-[11px] font-semibold active:bg-white/10"
+              >
+                <Bot size={13} />
+                Bots
+              </button>
+              <button type="button" onClick={() => addCanvasNode('agent')} className="flex h-8 w-8 items-center justify-center rounded-md-v2 bg-white/[0.06]">
+                <Plus size={14} />
+              </button>
+            </div>
           </div>
           {selectedStarterPreset && (
             <div
@@ -3239,20 +3863,35 @@ function CanvasWorkspace({
             <span>Search layers...</span>
             <span className="ml-auto">Cmd K</span>
           </div>
+          <div data-testid="ai-canvas-board-tabs" className="mx-4 mb-3 grid grid-cols-3 gap-1 rounded-md-v2 border border-white/10 bg-black/20 p-1">
+            {CANVAS_BOARDS.map((board) => (
+              <button
+                key={board.id}
+                type="button"
+                onClick={() => setActiveBoardId(board.id)}
+                className={`h-8 rounded-md-v2 text-[11px] font-semibold ${
+                  activeBoardId === board.id ? 'bg-dreamy-brand-hot-v2 text-white' : 'text-Cr-text-subtler-v2 active:bg-white/[0.08]'
+                }`}
+              >
+                {board.label}
+              </button>
+            ))}
+          </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
             <div className="mb-2 flex items-center justify-between px-1 text-[11px] font-semibold text-Cr-text-subtler-v2">
-              <span>Canvas Root</span>
-              <span>{nodes.length}</span>
+              <span>{CANVAS_BOARDS.find((board) => board.id === activeBoardId)?.label || 'Canvas'} Nodes</span>
+              <span>{boardNodes.length}/{nodes.length}</span>
             </div>
-            {nodes.map((node) => {
+            {boardNodes.map((node) => {
               const Icon = getCanvasNodeIcon(node.kind);
+              const active = activeSelectedNodeIds.includes(node.id);
               return (
                 <button
                   key={node.id}
                   type="button"
                   onClick={() => selectCanvasNode(node)}
                   className={`mb-1 flex w-full min-w-0 items-center gap-2 rounded-md-v2 px-2 py-2 text-left text-xs transition-colors ${
-                    selectedNodeId === node.id ? 'bg-dreamy-brand-hot-v2/15 text-Cr-text-default-v2' : 'text-Cr-text-subtler-v2 active:bg-white/[0.06]'
+                    active ? 'bg-dreamy-brand-hot-v2/15 text-Cr-text-default-v2' : 'text-Cr-text-subtler-v2 active:bg-white/[0.06]'
                   }`}
                 >
                   <Icon size={14} className="shrink-0 text-dreamy-brand-hot-v2" />
@@ -3287,7 +3926,51 @@ function CanvasWorkspace({
         </aside>
 
         <div className="relative min-h-[560px] overflow-hidden xl:min-h-0">
-          <div className="absolute left-5 top-4 z-20 flex flex-col gap-1 rounded-md-v2 border border-white/10 bg-[#171821]/90 p-1 shadow-xl">
+          <input
+            ref={canvasFileInputRef}
+            type="file"
+            className="hidden"
+            multiple
+            accept="image/*,video/*,audio/*,.txt,.md,.json"
+            onChange={(event) => {
+              const files = Array.from(event.target.files || []);
+              const rect = canvasSurfaceRef.current?.getBoundingClientRect();
+              if (!files.length || !rect) return;
+              const syntheticPoint = getCanvasPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+              void Promise.all(
+                files.map(async (file, index) => {
+                  const point = { x: syntheticPoint.x + index * 36, y: syntheticPoint.y + index * 36 };
+                  if (file.name.toLowerCase().endsWith('.json')) {
+                    importCanvasState(await file.text(), point);
+                    return;
+                  }
+                  const mime = file.type || '';
+                  const kind: CanvasNodeKind = mime.startsWith('image/')
+                    ? 'source-image'
+                    : mime.startsWith('video/')
+                      ? 'source-video'
+                      : mime.startsWith('audio/')
+                        ? 'source-audio'
+                        : 'source-text';
+                  const outputText = kind === 'source-text' ? (await file.text().catch(() => '')).slice(0, 1200) : '';
+                  addCanvasNode(kind, point, {
+                    linkFromSelected: false,
+                    overrides: {
+                      title: file.name.replace(/\.[^.]+$/, '') || file.name,
+                      subtitle: `${mime || 'file'} · ${(file.size / 1024).toFixed(1)} KB`,
+                      fileName: file.name,
+                      mediaUrl: kind === 'source-text' ? '' : URL.createObjectURL(file),
+                      outputText,
+                      prompt: outputText.slice(0, 360),
+                      sourceType: getCanvasNodeMediaMode(kind),
+                    },
+                  });
+                }),
+              );
+              event.target.value = '';
+            }}
+          />
+          <div data-canvas-floating="true" className="absolute left-5 top-4 z-20 flex flex-col gap-1 rounded-md-v2 border border-white/10 bg-[#171821]/90 p-1 shadow-xl">
             <button
               type="button"
               onClick={() => setTool('select')}
@@ -3304,6 +3987,18 @@ function CanvasWorkspace({
             >
               <Hand size={17} />
             </button>
+            <button
+              type="button"
+              data-testid="ai-canvas-connect-mode"
+              onClick={() => {
+                setTool('connect');
+                setConnectFromNodeId(selectedNode?.id || null);
+              }}
+              className={`flex h-9 w-9 items-center justify-center rounded-md-v2 ${tool === 'connect' ? 'bg-dreamy-brand-hot-v2 text-white' : 'text-Cr-text-subtler-v2 active:bg-white/[0.08]'}`}
+              aria-label="Connect nodes"
+            >
+              <Link2 size={17} />
+            </button>
             <div className="my-1 h-px bg-white/10" />
             <button type="button" onClick={() => addCanvasNode('agent')} className="flex h-9 w-9 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08]" aria-label="Add agent">
               <Bot size={17} />
@@ -3311,11 +4006,57 @@ function CanvasWorkspace({
             <button type="button" onClick={() => addCanvasNode('segment')} className="flex h-9 w-9 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08]" aria-label="Add segment">
               <Film size={17} />
             </button>
+            <button type="button" onClick={() => addCanvasNode('source-image')} className="flex h-9 w-9 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08]" aria-label="Add source image">
+              <ImagePlus size={17} />
+            </button>
+            <button type="button" onClick={() => canvasFileInputRef.current?.click()} className="flex h-9 w-9 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08]" aria-label="Import file">
+              <Download size={17} className="rotate-180" />
+            </button>
+          </div>
+
+          <div data-canvas-floating="true" className="absolute right-5 top-4 z-20 flex items-center gap-1 rounded-md-v2 border border-white/10 bg-[#171821]/90 p-1 shadow-xl">
+            <button
+              type="button"
+              onClick={undoCanvas}
+              disabled={!canUndo}
+              className="flex h-8 w-8 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08] disabled:opacity-35"
+              aria-label="Undo canvas"
+            >
+              <RotateCcw size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={redoCanvas}
+              disabled={!canRedo}
+              className="flex h-8 w-8 items-center justify-center rounded-md-v2 text-Cr-text-subtler-v2 active:bg-white/[0.08] disabled:opacity-35"
+              aria-label="Redo canvas"
+            >
+              <RefreshCcw size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={downloadJson}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md-v2 bg-white/[0.06] px-2 text-[11px] font-semibold active:bg-white/10"
+            >
+              <Download size={13} />
+              JSON
+            </button>
           </div>
 
           <div
-            className="absolute inset-0 cursor-grab overflow-hidden bg-[#0d0e13] active:cursor-grabbing"
+            ref={canvasSurfaceRef}
+            data-testid="ai-canvas-surface"
+            className={`absolute inset-0 cursor-grab overflow-hidden bg-[#0d0e13] active:cursor-grabbing ${isDropActive ? 'ring-2 ring-inset ring-dreamy-brand-hot-v2' : ''}`}
             onPointerDown={handleSurfacePointerDown}
+            onWheel={handleCanvasWheel}
+            onDoubleClick={handleCanvasDoubleClick}
+            onContextMenu={handleCanvasContextMenu}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setIsDropActive(true);
+            }}
+            onDragLeave={() => setIsDropActive(false)}
+            onDrop={handleCanvasDrop}
             style={{
               backgroundImage:
                 'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.11) 1px, transparent 0)',
@@ -3332,13 +4073,14 @@ function CanvasWorkspace({
 
               {nodes.map((node) => {
                 const Icon = getCanvasNodeIcon(node.kind);
-                const active = selectedNodeId === node.id;
+                const active = activeSelectedNodeIds.includes(node.id);
                 return (
                   <button
                     key={node.id}
                     type="button"
+                    data-canvas-node="true"
                     onPointerDown={(event) => handleNodePointerDown(event, node)}
-                    onClick={() => selectCanvasNode(node)}
+                    onClick={(event) => selectCanvasNode(node, event.shiftKey)}
                     className={`absolute overflow-hidden rounded-md-v2 border text-left shadow-2xl transition-colors ${
                       active
                         ? 'border-dreamy-brand-hot-v2 bg-[#1d1722] shadow-dreamy-brand-hot-v2/20'
@@ -3346,10 +4088,30 @@ function CanvasWorkspace({
                     }`}
                     style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
                   >
+                    <span
+                      className={`absolute -left-1 top-1/2 z-10 h-4 w-4 -translate-y-1/2 rounded-full border border-white/20 ${
+                        tool === 'connect' && connectFromNodeId && connectFromNodeId !== node.id
+                          ? 'bg-dreamy-brand-hot-v2'
+                          : 'bg-[#0d0e13]'
+                      }`}
+                    />
+                    <span
+                      className={`absolute -right-1 top-1/2 z-10 h-4 w-4 -translate-y-1/2 rounded-full border border-white/20 ${
+                        connectFromNodeId === node.id ? 'bg-dreamy-brand-hot-v2' : 'bg-[#0d0e13]'
+                      }`}
+                    />
                     <div className="flex h-full">
                       {node.mediaUrl && (
                         <div className="h-full w-[86px] shrink-0 bg-black/30">
-                          <img src={node.mediaUrl} alt="" className="h-full w-full object-cover opacity-80" />
+                          {node.sourceType === 'video' ? (
+                            <video src={node.mediaUrl} muted playsInline className="h-full w-full object-cover opacity-80" />
+                          ) : node.sourceType === 'audio' ? (
+                            <div className="grid h-full place-items-center text-dreamy-brand-hot-v2">
+                              <Play size={20} />
+                            </div>
+                          ) : (
+                            <img src={node.mediaUrl} alt="" className="h-full w-full object-cover opacity-80" />
+                          )}
                         </div>
                       )}
                       <div className="flex min-w-0 flex-1 flex-col p-3">
@@ -3363,6 +4125,11 @@ function CanvasWorkspace({
                           <span className={`text-[10px] font-semibold ${statusTone(node.status)}`}>{node.status || 'idle'}</span>
                         </div>
                         <div className="line-clamp-2 text-[11px] leading-4 text-Cr-text-subtler-v2">{node.subtitle}</div>
+                        {!node.mediaUrl && node.outputText && (
+                          <div className="mt-2 line-clamp-2 rounded-md-v2 bg-black/20 px-2 py-1 text-[10px] leading-4 text-Cr-text-subtlest-v2">
+                            {node.outputText}
+                          </div>
+                        )}
                         {node.botSlug && (
                           <div className="mt-auto truncate text-[10px] font-semibold text-Cr-text-subtlest-v2">{node.botSlug}</div>
                         )}
@@ -3373,6 +4140,40 @@ function CanvasWorkspace({
               })}
             </div>
           </div>
+
+          {isDropActive && (
+            <div
+              data-canvas-floating="true"
+              data-testid="ai-canvas-drop-import"
+              className="pointer-events-none absolute inset-6 z-30 grid place-items-center rounded-lg-v2 border border-dreamy-brand-hot-v2/70 bg-dreamy-brand-hot-v2/10 text-sm font-semibold text-white"
+            >
+              Drop media or canvas JSON
+            </div>
+          )}
+
+          {contextMenu && (
+            <div
+              data-canvas-floating="true"
+              data-testid="ai-canvas-context-menu"
+              className="fixed z-50 w-52 overflow-hidden rounded-md-v2 border border-white/10 bg-[#171821] p-1 text-xs shadow-2xl"
+              style={{ left: contextMenu.screenX, top: contextMenu.screenY }}
+            >
+              {AI_CANVAS_NODE_LIBRARY.map((item) => {
+                const Icon = getCanvasNodeIcon(item.kind);
+                return (
+                  <button
+                    key={item.kind}
+                    type="button"
+                    onClick={() => addCanvasNode(item.kind, { x: contextMenu.canvasX, y: contextMenu.canvasY })}
+                    className="flex h-9 w-full items-center gap-2 rounded-md-v2 px-2 text-left font-semibold text-Cr-text-subtler-v2 active:bg-white/[0.08]"
+                  >
+                    <Icon size={14} className="text-dreamy-brand-hot-v2" />
+                    <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           <div className="absolute bottom-6 left-5 right-5 z-20 grid gap-2 md:left-[70px] md:right-[70px]">
             <div
@@ -3401,7 +4202,37 @@ function CanvasWorkspace({
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-            <div className="flex min-w-[260px] flex-1 items-center gap-2 rounded-md-v2 border border-white/10 bg-[#171821]/95 p-2 shadow-xl">
+            <div className="relative flex min-w-[260px] flex-1 items-center gap-2 rounded-md-v2 border border-white/10 bg-[#171821]/95 p-2 shadow-xl">
+              {(showReferenceMenu || showPresetMenu) && (
+                <div
+                  data-testid="ai-canvas-reference-menu"
+                  className="absolute bottom-[calc(100%+8px)] left-0 right-0 flex flex-wrap gap-1 rounded-md-v2 border border-white/10 bg-[#171821] p-2 shadow-2xl"
+                >
+                  {showReferenceMenu
+                    ? referenceNodes.map((node) => (
+                        <button
+                          key={node.id}
+                          type="button"
+                          onClick={() => insertCanvasCommandToken(`@${node.id}`)}
+                          className="inline-flex h-7 max-w-[180px] items-center gap-1.5 rounded-md-v2 bg-white/[0.06] px-2 text-[11px] font-semibold active:bg-white/10"
+                        >
+                          <Link2 size={12} className="shrink-0 text-dreamy-brand-hot-v2" />
+                          <span className="truncate">{node.title}</span>
+                        </button>
+                      ))
+                    : CANVAS_COMMAND_PRESETS.map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => insertCanvasCommandToken(preset.value)}
+                          className="inline-flex h-7 items-center gap-1.5 rounded-md-v2 bg-white/[0.06] px-2 text-[11px] font-semibold active:bg-white/10"
+                        >
+                          <Wand2 size={12} className="text-dreamy-brand-hot-v2" />
+                          {preset.label}
+                        </button>
+                      ))}
+                </div>
+              )}
               <input
                 value={canvasCommand}
                 onChange={(event) => setCanvasCommand(event.target.value)}
@@ -3525,6 +4356,63 @@ function CanvasWorkspace({
           )}
         </aside>
       </div>
+      {showBotCatalog && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-5" role="dialog" aria-modal="true">
+          <div className="flex max-h-[82vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg-v2 border border-white/10 bg-[#111219] shadow-2xl">
+            <div className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 px-4">
+              <div>
+                <div className="text-sm font-semibold">Dreamy Bot Catalog</div>
+                <div className="text-[11px] text-Cr-text-subtler-v2">{DREAMY_STARTER_PRESETS.length} verified workshop bots</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBotCatalog(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-md-v2 bg-white/[0.06] active:bg-white/10"
+                aria-label="Close bot catalog"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <div className="grid gap-3 overflow-y-auto p-4 sm:grid-cols-2">
+              {DREAMY_STARTER_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => {
+                    addCanvasNode('agent', undefined, {
+                      overrides: {
+                        title: preset.title,
+                        subtitle: preset.recommendation,
+                        status: preset.previewStatus,
+                        action: getStarterPresetAction(preset, selectedSegment),
+                        prompt: preset.prompt,
+                        botSlug: preset.botSlug,
+                        botName: preset.title,
+                        mediaUrl: preset.visualUrl,
+                        boardId: activeBoardId,
+                      },
+                    });
+                    setShowBotCatalog(false);
+                  }}
+                  className="grid min-h-[132px] grid-cols-[118px_minmax(0,1fr)] overflow-hidden rounded-md-v2 border border-white/10 bg-white/[0.03] text-left active:bg-white/[0.08]"
+                >
+                  <span className="relative h-full min-h-[132px] bg-black/30">
+                    <img src={preset.visualUrl} alt="" className="h-full w-full object-cover" />
+                    <span className="absolute bottom-2 left-2 rounded-md-v2 bg-black/70 px-2 py-1 text-[10px] font-semibold text-white">
+                      {preset.workflow}
+                    </span>
+                  </span>
+                  <span className="flex min-w-0 flex-col p-3">
+                    <span className="truncate text-sm font-semibold">{preset.title}</span>
+                    <span className="mt-1 line-clamp-2 text-xs leading-5 text-Cr-text-subtler-v2">{preset.recommendation}</span>
+                    <span className="mt-auto truncate text-[11px] font-semibold text-dreamy-brand-hot-v2">{preset.botSlug}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -3964,7 +4852,7 @@ function Composer({
             <div className="text-xs font-semibold text-Cr-text-default-v2">Message</div>
             <div className="mt-0.5 truncate text-[11px] text-Cr-text-subtler-v2">Prompt is sent to the selected bot.</div>
           </div>
-          <Pill>{mode === 'canvas' ? 'Canvas' : 'Player'}</Pill>
+          <ModeSwitch mode={mode} onChange={onModeChange} labelScope="Switch composer mode to" />
         </div>
         <textarea
           value={prompt}
@@ -6399,6 +7287,17 @@ export default function Dreamy() {
             <span className="h-2 w-2 rounded-full bg-Cr-text-success-default-v2" />
           Autosaved
         </span>
+        <div className="hidden sm:block">
+          <ModeSwitch
+            mode={mode}
+            onChange={(nextMode) => {
+              setMode(nextMode);
+              if (nextMode === 'canvas') setActiveTab('preview');
+              if (nextMode === 'player') setActiveTab('chat');
+            }}
+            labelScope="Switch studio mode to"
+          />
+        </div>
         <div className="ml-auto flex min-w-0 items-center justify-end gap-2">
           <button
             type="button"
@@ -6776,14 +7675,14 @@ export default function Dreamy() {
       <main
         className={`relative z-0 min-h-0 flex-1 overflow-hidden ${
           mode === 'canvas'
-            ? 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(560px,0.55fr)_minmax(420px,0.45fr)]'
+            ? 'grid h-full gap-3 p-3 lg:grid-cols-1'
             : 'grid h-full gap-3 p-3 lg:grid-cols-[minmax(560px,0.55fr)_minmax(420px,0.45fr)]'
         }`}
       >
         <section
           data-testid="conversation-workspace-panel"
           className={`h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] ${
-            activeTab === 'chat' ? 'grid' : 'hidden lg:grid'
+            mode === 'canvas' ? 'hidden' : activeTab === 'chat' ? 'grid' : 'hidden lg:grid'
           }`}
         >
           <div className="flex h-12 shrink-0 items-center justify-between border-b border-Cr-border-default-v2 px-3">
@@ -6848,7 +7747,10 @@ export default function Dreamy() {
             previewUrl={previewUrl}
             selectedFileName={selectedFile?.name}
             submitting={submitting}
-            onModeChange={setMode}
+            onModeChange={(nextMode) => {
+              setMode(nextMode);
+              if (nextMode === 'canvas') setActiveTab('preview');
+            }}
             onPromptChange={setPrompt}
             onPickFile={() => fileInputRef.current?.click()}
             onClearFile={clearFile}
@@ -6857,7 +7759,13 @@ export default function Dreamy() {
           />
         </section>
 
-        <div className={activeTab === 'preview' ? 'min-h-0 min-w-0 lg:h-full' : 'hidden min-h-0 min-w-0 lg:block lg:h-full'}>
+        <div
+          className={
+            mode === 'canvas' || activeTab === 'preview'
+              ? 'min-h-0 min-w-0 lg:h-full'
+              : 'hidden min-h-0 min-w-0 lg:block lg:h-full'
+          }
+        >
           {mode === 'canvas' ? (
             <CanvasWorkspace
               project={project}
