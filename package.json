@@ -1,0 +1,10 @@
+{
+  "name": "myshell-studio-orchestrator",
+  "private": true,
+  "scripts": {
+    "dev": "bash scripts/dev.sh",
+    "dev:studio": "bash scripts/dev.sh",
+    "build": "npm --prefix frontend run build",
+    "test:studio-smoke": "npm --prefix frontend run test:studio-smoke"
+  }
+}

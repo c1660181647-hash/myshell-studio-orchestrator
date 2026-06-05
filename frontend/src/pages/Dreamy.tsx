@@ -6,7 +6,7 @@ import type {
   PointerEvent as ReactPointerEvent,
   WheelEvent as ReactWheelEvent,
 } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
   Bot,
@@ -146,8 +146,10 @@ import type {
   StudioStatus,
 } from '../services/dreamyUnified';
 import { trackEvent } from '../services/tracking';
+import CanvasPro from './CanvasPro';
 
 type TabKey = 'chat' | 'preview';
+type StudioWorkspace = 'orchestrator' | 'canvaspro';
 type CanvasTool = 'select' | 'pan' | 'connect';
 type CanvasNodeKind =
   | 'prompt'
@@ -1450,6 +1452,51 @@ function Pill({ children, tone = 'default' }: { children: string; tone?: 'defaul
     <span className={`inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-md-v2 border px-2 text-[11px] font-semibold ${toneClass}`}>
       {children}
     </span>
+  );
+}
+
+function getStudioWorkspaceFromSearch(search: string): StudioWorkspace {
+  try {
+    const params = new URLSearchParams(search);
+    const value = params.get('workspace') || params.get('view');
+    return value === 'canvaspro' ? 'canvaspro' : 'orchestrator';
+  } catch {
+    return 'orchestrator';
+  }
+}
+
+function StudioWorkspaceSwitch({
+  workspace,
+  onChange,
+}: {
+  workspace: StudioWorkspace;
+  onChange: (workspace: StudioWorkspace) => void;
+}) {
+  const items: Array<{ id: StudioWorkspace; label: string; Icon: typeof Sparkles }> = [
+    { id: 'orchestrator', label: 'Command', Icon: Sparkles },
+    { id: 'canvaspro', label: 'CanvasPro', Icon: Layers3 },
+  ];
+
+  return (
+    <div className="grid h-9 w-[210px] shrink-0 grid-cols-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 p-1">
+      {items.map(({ id, label, Icon }) => (
+        <button
+          key={id}
+          type="button"
+          aria-label={`Switch Studio workspace to ${label}`}
+          aria-pressed={workspace === id}
+          onClick={() => onChange(id)}
+          className={`inline-flex min-w-0 items-center justify-center gap-1.5 rounded-md-v2 px-2 text-xs font-semibold transition-colors ${
+            workspace === id
+              ? 'bg-Cr-beta-white-12-v2 text-Cr-text-default-v2 shadow-sm'
+              : 'text-Cr-text-subtler-v2 active:text-Cr-text-default-v2'
+          }`}
+        >
+          <Icon size={13} className="shrink-0" />
+          <span className="truncate">{label}</span>
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -5918,11 +5965,15 @@ function Composer({
 
 export default function Dreamy() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { energy, refresh } = useEnergy();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const restoredDispatchUrlRef = useRef('');
   const autoPollNoticeRef = useRef<Record<string, string>>({});
+  const [workspace, setWorkspaceState] = useState<StudioWorkspace>(() =>
+    getStudioWorkspaceFromSearch(location.search),
+  );
   const [mode, setMode] = useState<StudioMode>('player');
   const [activeTab, setActiveTab] = useState<TabKey>('chat');
   const [prompt, setPrompt] = useState('');
@@ -5978,6 +6029,22 @@ export default function Dreamy() {
   const [dispatchSessionRunning, setDispatchSessionRunning] = useState(false);
   const [timelineExporting, setTimelineExporting] = useState(false);
   const [deliveryDrawerOpen, setDeliveryDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    const nextWorkspace = getStudioWorkspaceFromSearch(location.search);
+    setWorkspaceState((current) => (current === nextWorkspace ? current : nextWorkspace));
+  }, [location.search]);
+
+  const setStudioWorkspace = useCallback(
+    (nextWorkspace: StudioWorkspace) => {
+      setWorkspaceState(nextWorkspace);
+      navigate(nextWorkspace === 'canvaspro' ? '/dreamy?workspace=canvaspro' : '/dreamy', { replace: true });
+      trackEvent('dreamy_studio_workspace_switch', {
+        workspace: nextWorkspace,
+      });
+    },
+    [navigate],
+  );
 
   const selectedSegment = useMemo(() => {
     const segments = getTimelineDisplaySegments(project?.segments || []);
@@ -8342,6 +8409,10 @@ export default function Dreamy() {
             Dreamy<span className="dreamy-studio-brand-accent">Porn</span> <span className="dreamy-studio-brand-sub">Studio</span>
           </span>
         </div>
+        <div className="hidden h-8 w-px bg-white/10 sm:block" />
+        <div className="hidden md:block">
+          <StudioWorkspaceSwitch workspace={workspace} onChange={setStudioWorkspace} />
+        </div>
         <button
           type="button"
           className="dreamy-studio-project hidden sm:inline-flex"
@@ -8359,6 +8430,15 @@ export default function Dreamy() {
         </span>
         <span className="dreamy-studio-spacer" />
         <div className="flex min-w-0 items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setStudioWorkspace(workspace === 'canvaspro' ? 'orchestrator' : 'canvaspro')}
+            className="flex h-8 w-8 items-center justify-center rounded-md-v2 border border-white/10 bg-white/[0.04] text-Cr-text-subtler-v2 active:bg-white/[0.08] md:hidden"
+            aria-label={workspace === 'canvaspro' ? 'Switch to Studio command workspace' : 'Switch to CanvasPro workspace'}
+            title={workspace === 'canvaspro' ? 'Command' : 'CanvasPro'}
+          >
+            {workspace === 'canvaspro' ? <Sparkles size={15} /> : <Layers3 size={15} />}
+          </button>
           <button
             type="button"
             onClick={() => navigate('/energy')}
@@ -8719,6 +8799,14 @@ export default function Dreamy() {
       </div>
       )}
 
+      {workspace === 'canvaspro' ? (
+        <section className="relative z-0 min-h-0 flex-1 overflow-hidden border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2">
+          <CanvasPro
+            embeddedInStudio
+            onBackToStudio={() => setStudioWorkspace('orchestrator')}
+          />
+        </section>
+      ) : (
       <main className="dreamy-studio-grid">
         <section
           data-testid="conversation-workspace-panel"
@@ -8802,6 +8890,7 @@ export default function Dreamy() {
           submitting={submitting}
         />
       </main>
+      )}
     </div>
   );
 }

@@ -2875,7 +2875,7 @@ class StudioApiTest(unittest.TestCase):
         expected_routes = {
             "explore": "/explore",
             "ai-picks": "/ai-picks",
-            "canvaspro": "/canvaspro",
+            "canvaspro": "/dreamy?workspace=canvaspro",
             "bot-detail": "/bot",
             "upload": "/upload",
             "tag-generator": "/tag-generator",
@@ -3469,7 +3469,7 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(target_by_page["library"]["navigationPath"], "/library")
         self.assertIn("canvaspro", target_by_page)
         self.assertEqual(target_by_page["canvaspro"]["recommendedAction"], "navigate")
-        self.assertEqual(target_by_page["canvaspro"]["navigationPath"], "/canvaspro")
+        self.assertEqual(target_by_page["canvaspro"]["navigationPath"], "/dreamy?workspace=canvaspro")
         self.assertIn("tag-generator", target_by_page)
         self.assertIn("img=https%3A%2F%2Fexample.com%2Fdispatch-batch-source.png", target_by_page["tag-generator"]["navigationPath"])
         self.assertEqual(target_by_page["tag-generator"]["clientAction"], "navigate")

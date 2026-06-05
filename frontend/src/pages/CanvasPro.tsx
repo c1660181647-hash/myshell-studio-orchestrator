@@ -54,6 +54,11 @@ type PendingBridgeRequest = {
   timeout: number;
 };
 
+interface CanvasProProps {
+  embeddedInStudio?: boolean;
+  onBackToStudio?: () => void;
+}
+
 function createRequestId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
@@ -74,7 +79,7 @@ function formatSavedAt(value?: string) {
   }
 }
 
-export default function CanvasPro() {
+export default function CanvasPro({ embeddedInStudio = false, onBackToStudio }: CanvasProProps) {
   const navigate = useNavigate();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -273,6 +278,8 @@ export default function CanvasPro() {
         : 'Studio Bridge';
   const savedLabel = formatSavedAt(lastAutosave?.savedAt || bridgeStatus.lastAutosave?.savedAt);
   const nodeCount = bridgeStatus.stats?.nodeCount ?? lastAutosave?.stats?.nodeCount;
+  const showBackButton = Boolean(onBackToStudio) || !embeddedInStudio;
+  const backLabel = embeddedInStudio ? 'Command' : 'Studio';
 
   return (
     <main className="relative h-full w-full overflow-hidden bg-Cr-Bg-soft-v2">
@@ -296,16 +303,26 @@ export default function CanvasPro() {
         }}
       />
       <div className="pointer-events-none absolute left-3 right-3 top-3 z-[130] flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => navigate('/dreamy')}
-          className="pointer-events-auto inline-flex h-10 items-center gap-2 rounded-full-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2/90 px-3 text-sm font-semibold text-Cr-text-default-v2 shadow-[0_10px_28px_rgba(0,0,0,0.28)] backdrop-blur-xl active:bg-Cr-beta-white-8-v2"
-          aria-label="Back to Studio"
-          title="Back to Studio"
-        >
-          <ArrowLeft size={16} />
-          <span>Studio</span>
-        </button>
+        {showBackButton ? (
+          <button
+            type="button"
+            onClick={() => {
+              if (onBackToStudio) {
+                onBackToStudio();
+              } else {
+                navigate('/dreamy');
+              }
+            }}
+            className="pointer-events-auto inline-flex h-10 items-center gap-2 rounded-full-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2/90 px-3 text-sm font-semibold text-Cr-text-default-v2 shadow-[0_10px_28px_rgba(0,0,0,0.28)] backdrop-blur-xl active:bg-Cr-beta-white-8-v2"
+            aria-label="Back to Studio command workspace"
+            title="Back to Studio command workspace"
+          >
+            <ArrowLeft size={16} />
+            <span>{backLabel}</span>
+          </button>
+        ) : (
+          <div />
+        )}
         <div className="pointer-events-auto flex max-w-[calc(100vw-108px)] items-center gap-2 overflow-x-auto rounded-full-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2/90 p-1 shadow-[0_10px_28px_rgba(0,0,0,0.28)] backdrop-blur-xl">
           <div
             className="hidden h-9 shrink-0 items-center gap-2 rounded-full-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 text-xs font-semibold text-Cr-text-subtler-v2 sm:inline-flex"

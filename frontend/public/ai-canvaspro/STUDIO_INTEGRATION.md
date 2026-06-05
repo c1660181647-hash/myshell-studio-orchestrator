@@ -1,7 +1,7 @@
 # AI CanvasPro Studio Integration
 
-This folder vendors AI CanvasPro and embeds it inside MyShell Studio through
-`frontend/src/pages/CanvasPro.tsx`.
+This folder vendors AI CanvasPro and embeds it inside the `/dreamy` MyShell Studio shell through
+`frontend/src/pages/CanvasPro.tsx` and the Dreamy workspace switch.
 
 ## Runtime Shape
 

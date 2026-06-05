@@ -19,7 +19,7 @@
       "id": "canvaspro",
       "name": "AI CanvasPro",
       "kind": "embedded-static-app",
-      "appRoute": "/canvaspro",
+      "appRoute": "/dreamy?workspace=canvaspro",
       "capabilities": ["canvas", "visual-workspace", "node-editor", "storyboard", "local-static-app"],
       "intentKeywords": ["canvas", "canvaspro", "ai canvas", "visual workspace", "node editor", "storyboard", "画布", "视觉工作台", "节点编辑器", "分镜"]
     },

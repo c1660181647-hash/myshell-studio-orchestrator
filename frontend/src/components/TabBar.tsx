@@ -5,7 +5,7 @@ import { useHaptic } from "../hooks/useTelegram";
 const tabs = [
   { path: "/", labelKey: "nav:characters", id: "characters" },
   { path: "/tag-generator", labelKey: "nav:create", id: "create" },
-  { path: "/canvaspro", labelKey: "nav:canvas", id: "canvas" },
+  { path: "/dreamy?workspace=canvaspro", labelKey: "nav:canvas", id: "canvas" },
   { path: "/library", labelKey: "nav:library", id: "library" },
   { path: "/settings", labelKey: "nav:settings", id: "settings" },
 ] as const;
@@ -59,13 +59,16 @@ export default function TabBar() {
   const location = useLocation();
   const navigate = useNavigate();
   const haptic = useHaptic();
+  const workspace = new URLSearchParams(location.search).get("workspace");
 
   return (
     <div className="fixed bottom-0 left-0 right-0 flex justify-center px-4 pt-2 pb-[calc(env(safe-area-inset-bottom,8px)+8px)] z-100 bg-transparent pointer-events-none">
       <div className="flex items-center gap-1.5 p-1.5 w-full bg-black/20 backdrop-blur-[40px] rounded-full pointer-events-auto">
         {tabs.map((tab) => {
           const active =
-            tab.path === "/"
+            tab.id === "canvas"
+              ? location.pathname === "/dreamy" && workspace === "canvaspro"
+              : tab.path === "/"
               ? location.pathname === "/"
               : location.pathname.startsWith(tab.path);
           return (

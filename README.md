@@ -30,7 +30,39 @@ MyShell Studio Orchestrator is a unified agent dispatch center for Dreamy miniap
 
 ## Local Run
 
-Backend:
+Install dependencies once:
+
+```bash
+cd orchestrator/backend
+python -m pip install -r requirements.txt
+
+cd ../../frontend
+npm install
+```
+
+Run backend and frontend together from the repository root:
+
+```bash
+npm run dev
+```
+
+Open:
+
+```text
+http://127.0.0.1:5174/dreamy
+```
+
+CanvasPro is available from the Studio workspace switch inside `/dreamy`.
+
+Optional ports and CanvasPro API proxy:
+
+```bash
+BACKEND_PORT=8090 FRONTEND_PORT=5174 \
+VITE_AI_CANVASPRO_PROXY_TARGET=http://127.0.0.1:8777 \
+npm run dev
+```
+
+Manual backend:
 
 ```bash
 cd orchestrator/backend
@@ -38,18 +70,12 @@ python -m pip install -r requirements.txt
 PORT=8090 python main.py
 ```
 
-Frontend:
+Manual frontend:
 
 ```bash
 cd frontend
 npm install
-VITE_DREAMY_ORCHESTRATOR_BASE_URL=http://127.0.0.1:8090 npm run dev -- --host 0.0.0.0 --port 5174
-```
-
-Open:
-
-```text
-http://127.0.0.1:5174/?test_route=dreamy
+VITE_DREAMY_ORCHESTRATOR_PROXY_TARGET=http://127.0.0.1:8090 npm run dev -- --host 0.0.0.0 --port 5174
 ```
 
 ## Studio APIs

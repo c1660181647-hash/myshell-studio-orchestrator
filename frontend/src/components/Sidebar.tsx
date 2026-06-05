@@ -41,7 +41,7 @@ const menuItems = [
     )
   },
   {
-    path: '/canvaspro',
+    path: '/dreamy?workspace=canvaspro',
     labelKey: 'nav:canvas',
     icon: (active: boolean) => (
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
@@ -126,9 +126,16 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const [pendingLang, setPendingLang] = useState<string | null>(null);
 
   const showCheckinDot = checkinStatus ? !checkinStatus.todayClaimed : false;
+  const isMenuItemActive = (path: string) => {
+    if (path === '/') return location.pathname === '/';
+    if (path === '/dreamy?workspace=canvaspro') {
+      return location.pathname === '/dreamy' && new URLSearchParams(location.search).get('workspace') === 'canvaspro';
+    }
+    return location.pathname.startsWith(path);
+  };
 
   const handleItemClick = (path: string) => {
-    const isActive = path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
+    const isActive = isMenuItemActive(path);
 
     if (!isActive) {
       haptic('selection');
@@ -158,9 +165,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       <div className={`fixed top-12 left-0 w-[246px] h-[calc(100vh-48px)] bg-Cr-Bg-soft-v2 z-[300] transition-transform duration-300 ease-in-out flex flex-col ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-4 flex flex-col gap-1">
           {menuItems.map((item, idx) => {
-            const isActive = item.path === '/'
-              ? location.pathname === '/'
-              : location.pathname.startsWith(item.path);
+            const isActive = isMenuItemActive(item.path);
 
             return (
               <div key={item.path}>

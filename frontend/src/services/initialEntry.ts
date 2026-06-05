@@ -13,7 +13,6 @@ export interface InitialEntryInput {
 const DIRECT_EXACT_ROUTES = new Set<string>([
   ...Object.values(MINIAPP_PAGE_DEEP_LINKS).map((entry) => entry.route).filter((route) => !route.includes(':')),
   '/__test-customize-scene',
-  '/canvaspro',
 ]);
 
 function normalizeSearch(search: string | undefined): string {
@@ -43,6 +42,10 @@ function isLibraryDetailPath(pathname: string): boolean {
 export function resolveSpaPathEntry(input: InitialEntryInput): string {
   const pathname = normalizePathname(input.pathname);
   if (pathname === '/') return '';
+  if (pathname === '/canvaspro') {
+    const search = normalizeSearch(input.search);
+    return `/dreamy?workspace=canvaspro${search ? `&${search.slice(1)}` : ''}`;
+  }
   if (DIRECT_EXACT_ROUTES.has(pathname) || isLibraryDetailPath(pathname)) {
     return withSearch(pathname, input.search || '');
   }
