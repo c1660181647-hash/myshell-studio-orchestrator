@@ -10,14 +10,42 @@ const ORCHESTRATOR_PROXY_TARGET =
   process.env.VITE_DREAMY_ORCHESTRATOR_PROXY_TARGET ||
   process.env.STUDIO_ORCHESTRATOR_PROXY_TARGET ||
   'http://127.0.0.1:8090'
-const AI_CANVASPRO_PROXY_TARGET =
+const AI_CANVASPRO_DIRECT_PROXY_TARGET =
   process.env.VITE_AI_CANVASPRO_PROXY_TARGET ||
-  process.env.AI_CANVASPRO_API_BASE ||
-  'http://127.0.0.1:8777'
+  ''
+const AI_CANVASPRO_PROXY_TARGET = AI_CANVASPRO_DIRECT_PROXY_TARGET || ORCHESTRATOR_PROXY_TARGET
+const AI_CANVASPRO_PROXY_DIRECT = Boolean(AI_CANVASPRO_DIRECT_PROXY_TARGET)
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   base: './',
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('/node_modules/')) return undefined
+          if (
+            id.includes('/react/') ||
+            id.includes('/react-dom/') ||
+            id.includes('/react-router/') ||
+            id.includes('/react-router-dom/') ||
+            id.includes('/@remix-run/router/') ||
+            id.includes('/scheduler/') ||
+            id.includes('/@telegram-apps/sdk-react/')
+          ) {
+            return 'react-vendor'
+          }
+          if (id.includes('/i18next/') || id.includes('/react-i18next/') || id.includes('/i18next-browser-languagedetector/')) {
+            return 'i18n-vendor'
+          }
+          if (id.includes('/lucide-react/')) {
+            return 'icons-vendor'
+          }
+          return 'vendor'
+        },
+      },
+    },
+  },
   server: {
     proxy: {
       '/api': {
@@ -27,7 +55,9 @@ export default defineConfig({
       '/ai-canvaspro-api': {
         target: AI_CANVASPRO_PROXY_TARGET,
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/ai-canvaspro-api/, ''),
+        ...(AI_CANVASPRO_PROXY_DIRECT
+          ? { rewrite: (path) => path.replace(/^\/ai-canvaspro-api/, '') }
+          : {}),
       },
     },
   },

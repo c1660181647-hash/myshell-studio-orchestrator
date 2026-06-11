@@ -61,6 +61,14 @@ export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'layers-panel',
   'inspector-panel',
   'canvas-generate',
+  'canvaspro-workspace-switch',
+  'canvaspro-workspace-route',
+  'canvaspro-workspace-panel',
+  'canvaspro-iframe',
+  'canvaspro-iframe-entry',
+  'canvaspro-bridge-status',
+  'canvaspro-runtime-api',
+  'canvaspro-no-direct-proxy-error',
   'footer-evidence',
   'footer-plan-remaining',
   'footer-start-queue',
@@ -86,6 +94,16 @@ export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'no-error-boundary',
 ]);
 
+export const REQUIRED_CANVASPRO_CHECK_IDS = Object.freeze([
+  'canvaspro-workspace-route',
+  'canvaspro-workspace-panel',
+  'canvaspro-iframe',
+  'canvaspro-iframe-entry',
+  'canvaspro-bridge-status',
+  'canvaspro-runtime-api',
+  'canvaspro-no-direct-proxy-error',
+]);
+
 export function normalizeFrontendBaseUrl(value) {
   const trimmed = String(value || '').trim();
   if (!trimmed) throw new Error('Frontend URL is required');
@@ -102,6 +120,15 @@ export function buildStudioSmokeUrl(frontendUrl) {
   const normalized = normalizeFrontendBaseUrl(frontendUrl);
   const url = new URL(normalized);
   if (!url.pathname || url.pathname === '/') url.pathname = '/';
+  return url.toString();
+}
+
+export function buildCanvasProSmokeUrl(frontendUrl) {
+  const normalized = normalizeFrontendBaseUrl(frontendUrl);
+  const url = new URL(normalized);
+  url.pathname = '/dreamy';
+  url.search = 'workspace=canvaspro';
+  url.hash = '';
   return url.toString();
 }
 
@@ -171,6 +198,8 @@ function parseArgs(argv) {
     evidenceScreenshotPath: defaultEvidenceScreenshot,
     reportPath: process.env.STUDIO_FRONTEND_SMOKE_REPORT || '',
     allowConsoleErrors: false,
+    browserExecutablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || process.env.PLAYWRIGHT_EXECUTABLE_PATH || '',
+    canvasproOnly: false,
     headed: false,
   };
 
@@ -206,6 +235,11 @@ function parseArgs(argv) {
       args.evidenceScreenshotPath = '';
     } else if (arg === '--allow-console-errors') {
       args.allowConsoleErrors = true;
+    } else if (arg === '--browser-executable') {
+      args.browserExecutablePath = next;
+      index += 1;
+    } else if (arg === '--canvaspro-only') {
+      args.canvasproOnly = true;
     } else if (arg === '--headed') {
       args.headed = true;
     } else if (arg === '--help' || arg === '-h') {
@@ -238,6 +272,8 @@ function usage() {
     '  --report <path>               Write the full smoke JSON report to a file',
     '  --no-screenshot               Skip screenshot capture',
     '  --allow-console-errors        Record console errors without failing the smoke',
+    '  --browser-executable <path>    Chromium/Chrome executable path. Defaults to PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH',
+    '  --canvaspro-only              Only verify /dreamy?workspace=canvaspro',
     '  --headed                      Launch a visible browser',
   ].join('\n');
 }
@@ -292,6 +328,13 @@ async function checkEnabled(checks, page, id, label, locator, timeoutMs) {
       message: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+function recordedCheckOk(checks, id) {
+  for (let index = checks.length - 1; index >= 0; index -= 1) {
+    if (checks[index].id === id) return Boolean(checks[index].ok);
+  }
+  return false;
 }
 
 async function clickEnabled(checks, page, id, label, locator, timeoutMs) {
@@ -386,6 +429,83 @@ async function captureScreenshot(page, screenshotPath) {
   await page.screenshot({ path: screenshotPath, fullPage: true });
 }
 
+async function checkCanvasProWorkspace(checks, page, frontendUrl, consoleErrors, timeoutMs) {
+  const canvasProUrl = buildCanvasProSmokeUrl(frontendUrl);
+  await page.goto(canvasProUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+  await page.waitForLoadState('networkidle', { timeout: Math.min(timeoutMs, 5000) }).catch(() => undefined);
+
+  checks.push({
+    id: 'canvaspro-workspace-route',
+    label: 'CanvasPro opens inside the single Studio route',
+    ok: page.url().includes('/dreamy') && page.url().includes('workspace=canvaspro'),
+    message: page.url().includes('/dreamy') && page.url().includes('workspace=canvaspro')
+      ? undefined
+      : `Unexpected CanvasPro URL: ${page.url()}`,
+  });
+  await checkVisible(
+    checks,
+    page,
+    'canvaspro-workspace-panel',
+    'CanvasPro workspace panel',
+    page.getByTestId('canvaspro-workspace-panel'),
+    timeoutMs,
+  );
+  const iframe = page.getByTestId('canvaspro-iframe');
+  await checkVisible(checks, page, 'canvaspro-iframe', 'CanvasPro iframe', iframe, timeoutMs);
+  try {
+    const iframeSrc = (await iframe.getAttribute('src')) || '';
+    checks.push({
+      id: 'canvaspro-iframe-entry',
+      label: 'CanvasPro iframe uses the local Studio static mount',
+      ok: /\/ai-canvaspro\/index\.html/i.test(iframeSrc),
+      message: /\/ai-canvaspro\/index\.html/i.test(iframeSrc)
+        ? undefined
+        : `Unexpected CanvasPro iframe src: ${iframeSrc || 'empty'}`,
+    });
+  } catch (error) {
+    checks.push({
+      id: 'canvaspro-iframe-entry',
+      label: 'CanvasPro iframe uses the local Studio static mount',
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+  await checkVisible(
+    checks,
+    page,
+    'canvaspro-bridge-status',
+    'CanvasPro bridge status chip',
+    page.getByTestId('canvaspro-bridge-status'),
+    timeoutMs,
+  );
+
+  try {
+    const runtimeUrl = new URL('/ai-canvaspro-api/api/v2/runtime/info', normalizeFrontendBaseUrl(frontendUrl));
+    const response = await page.request.get(runtimeUrl.toString(), { timeout: timeoutMs });
+    checks.push({
+      id: 'canvaspro-runtime-api',
+      label: 'CanvasPro runtime API is reachable through Studio backend proxy',
+      ok: response.status() < 500,
+      message: response.status() < 500 ? undefined : `Runtime API returned HTTP ${response.status()}`,
+    });
+  } catch (error) {
+    checks.push({
+      id: 'canvaspro-runtime-api',
+      label: 'CanvasPro runtime API is reachable through Studio backend proxy',
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  const directProxyError = consoleErrors.find((error) => /ECONNREFUSED.*127\.0\.0\.1:8777|127\.0\.0\.1:8777.*ECONNREFUSED/i.test(error));
+  checks.push({
+    id: 'canvaspro-no-direct-proxy-error',
+    label: 'CanvasPro smoke does not hit the native 8777 API directly from Vite',
+    ok: !directProxyError,
+    message: directProxyError,
+  });
+}
+
 function resolveScreenshotPaths(options) {
   const evidenceScreenshotPath = options.evidenceScreenshotPath || options.screenshotPath || '';
   const workspaceScreenshotPath = options.workspaceScreenshotPath || '';
@@ -403,7 +523,11 @@ export async function runStudioFrontendSmoke(options = {}) {
   const screenshotPaths = resolveScreenshotPaths(options);
   const checks = [];
   const consoleErrors = [];
-  const browser = await chromium.launch({ headless: !options.headed });
+  const summaryUrl = options.canvasproOnly ? buildCanvasProSmokeUrl(frontendUrl) : smokeUrl;
+  const browser = await chromium.launch({
+    headless: !options.headed,
+    ...(options.browserExecutablePath ? { executablePath: options.browserExecutablePath } : {}),
+  });
 
   try {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
@@ -417,6 +541,21 @@ export async function runStudioFrontendSmoke(options = {}) {
     page.on('pageerror', (error) => {
       consoleErrors.push(error.message);
     });
+
+    if (options.canvasproOnly) {
+      await checkCanvasProWorkspace(checks, page, frontendUrl, consoleErrors, timeoutMs);
+      await captureScreenshot(page, screenshotPaths.workspaceScreenshotPath || screenshotPaths.evidenceScreenshotPath);
+      return createSmokeSummary({
+        frontendUrl: summaryUrl,
+        checks,
+        consoleErrors,
+        screenshotPath: screenshotPaths.screenshotPath,
+        workspaceScreenshotPath: screenshotPaths.workspaceScreenshotPath,
+        evidenceScreenshotPath: screenshotPaths.evidenceScreenshotPath,
+        allowConsoleErrors: options.allowConsoleErrors,
+        requiredCheckIds: REQUIRED_CANVASPRO_CHECK_IDS,
+      });
+    }
 
     await page.goto(smokeUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await page.waitForLoadState('networkidle', { timeout: Math.min(timeoutMs, 5000) }).catch(() => undefined);
@@ -455,19 +594,23 @@ export async function runStudioFrontendSmoke(options = {}) {
       manualBotPanel,
       timeoutMs,
     );
-    await manualBotPanel.first().evaluate((element) => {
-      if (element instanceof HTMLDetailsElement) {
-        element.open = true;
-      }
-    });
+    if (recordedCheckOk(checks, 'manual-bot-id-panel')) {
+      await manualBotPanel.first().evaluate((element) => {
+        if (element instanceof HTMLDetailsElement) {
+          element.open = true;
+        }
+      });
+    }
     const manualBotInput = page.getByTestId('manual-bot-id-input');
     await checkVisible(checks, page, 'manual-bot-id-input', 'Manual bot id input', manualBotInput, timeoutMs);
-    await manualBotInput.fill(
-      [
-        'manual_image_bot|Manual Image Bot|text-to-image|manual-image',
-        'manual_video_bot|Manual Video Bot|image-to-video|manual-video',
-      ].join('\n'),
-    );
+    if (recordedCheckOk(checks, 'manual-bot-id-input')) {
+      await manualBotInput.fill(
+        [
+          'manual_image_bot|Manual Image Bot|text-to-image|manual-image',
+          'manual_video_bot|Manual Video Bot|image-to-video|manual-video',
+        ].join('\n'),
+      );
+    }
     await checkVisible(
       checks,
       page,
@@ -766,6 +909,14 @@ export async function runStudioFrontendSmoke(options = {}) {
     await checkVisible(checks, page, 'layers-panel', 'Layers & Agents panel', page.getByText('Layers & Agents'), timeoutMs);
     await checkVisible(checks, page, 'inspector-panel', 'Inspector panel', page.getByText('Inspector'), timeoutMs);
     await checkVisible(checks, page, 'canvas-generate', 'Canvas generate control', page.getByRole('button', { name: /generate/i }), timeoutMs);
+    await checkVisible(
+      checks,
+      page,
+      'canvaspro-workspace-switch',
+      'CanvasPro workspace switch',
+      page.getByTestId('canvaspro-workspace-switch'),
+      timeoutMs,
+    );
     await checkVisible(checks, page, 'footer-evidence', 'Evidence footer control', page.getByRole('button', { name: /evidence/i }), timeoutMs);
     await checkVisible(checks, page, 'footer-plan-remaining', 'Plan remaining footer control', page.getByRole('button', { name: /plan remaining/i }), timeoutMs);
     await checkVisible(checks, page, 'footer-start-queue', 'Start queue footer control', page.getByRole('button', { name: /start queue/i }), timeoutMs);
@@ -812,19 +963,20 @@ export async function runStudioFrontendSmoke(options = {}) {
     });
 
     await captureScreenshot(page, screenshotPaths.evidenceScreenshotPath);
+    await checkCanvasProWorkspace(checks, page, frontendUrl, consoleErrors, timeoutMs);
   } finally {
     await browser.close();
   }
 
   return createSmokeSummary({
-    frontendUrl: smokeUrl,
+    frontendUrl: summaryUrl,
     checks,
     consoleErrors,
     screenshotPath: screenshotPaths.screenshotPath,
     workspaceScreenshotPath: screenshotPaths.workspaceScreenshotPath,
     evidenceScreenshotPath: screenshotPaths.evidenceScreenshotPath,
     allowConsoleErrors: options.allowConsoleErrors,
-    requiredCheckIds: REQUIRED_STUDIO_CHECK_IDS,
+    requiredCheckIds: options.canvasproOnly ? REQUIRED_CANVASPRO_CHECK_IDS : REQUIRED_STUDIO_CHECK_IDS,
   });
 }
 

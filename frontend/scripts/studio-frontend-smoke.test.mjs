@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildCanvasProSmokeUrl,
   buildStudioSmokeUrl,
   createStudioSmokeInitScript,
   createSmokeSummary,
   normalizeFrontendBaseUrl,
+  REQUIRED_CANVASPRO_CHECK_IDS,
   REQUIRED_STUDIO_CHECK_IDS,
   runStudioFrontendSmoke,
 } from './studio-frontend-smoke.mjs';
@@ -14,6 +16,13 @@ test('buildStudioSmokeUrl opens the root Studio route from a bare dev server URL
   assert.equal(
     buildStudioSmokeUrl('http://127.0.0.1:5174'),
     'http://127.0.0.1:5174/',
+  );
+});
+
+test('buildCanvasProSmokeUrl opens CanvasPro through the single Dreamy Studio route', () => {
+  assert.equal(
+    buildCanvasProSmokeUrl('http://127.0.0.1:5174'),
+    'http://127.0.0.1:5174/dreamy?workspace=canvaspro',
   );
 });
 
@@ -28,6 +37,15 @@ test('studio smoke CLI has a global timeout guard', async () => {
   assert.match(source, /global-timeout-ms/);
   assert.match(source, /STUDIO_FRONTEND_SMOKE_GLOBAL_TIMEOUT_MS/);
   assert.match(source, /global timeout/);
+});
+
+test('studio smoke can use an explicit Chromium executable path', async () => {
+  const fs = await import('node:fs/promises');
+  const source = await fs.readFile(new URL('./studio-frontend-smoke.mjs', import.meta.url), 'utf8');
+  assert.match(source, /PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH/);
+  assert.match(source, /browser-executable/);
+  assert.match(source, /executablePath/);
+  assert.match(source, /canvaspro-only/);
 });
 
 test('createSmokeSummary records checked UI surfaces and console errors', () => {
@@ -178,4 +196,28 @@ test('runStudioFrontendSmoke records canvas flow and segment export controls', (
     assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes(id), `${id} should be required`);
     assert.match(runStudioFrontendSmoke.toString(), new RegExp(id));
   }
+});
+
+test('runStudioFrontendSmoke records CanvasPro single-entry smoke checks', async () => {
+  const fs = await import('node:fs/promises');
+  const source = await fs.readFile(new URL('./studio-frontend-smoke.mjs', import.meta.url), 'utf8');
+  const canvasProChecks = [
+    'canvaspro-workspace-switch',
+    'canvaspro-workspace-route',
+    'canvaspro-workspace-panel',
+    'canvaspro-iframe',
+    'canvaspro-iframe-entry',
+    'canvaspro-bridge-status',
+    'canvaspro-runtime-api',
+    'canvaspro-no-direct-proxy-error',
+  ];
+  for (const id of canvasProChecks) {
+    assert.ok(REQUIRED_STUDIO_CHECK_IDS.includes(id), `${id} should be required`);
+    if (id !== 'canvaspro-workspace-switch') {
+      assert.ok(REQUIRED_CANVASPRO_CHECK_IDS.includes(id), `${id} should be required in CanvasPro-only smoke`);
+    }
+    assert.match(source, new RegExp(id));
+  }
+  assert.match(runStudioFrontendSmoke.toString(), /checkCanvasProWorkspace/);
+  assert.match(runStudioFrontendSmoke.toString(), /REQUIRED_CANVASPRO_CHECK_IDS/);
 });

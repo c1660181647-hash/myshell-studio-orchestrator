@@ -74,6 +74,7 @@ class DeliveryPlan:
         backend_health_url: str,
         frontend_url: str,
         frontend_mode: str,
+        frontend_smoke_scope: str,
     ) -> None:
         self.backend = backend
         self.frontend_build = frontend_build
@@ -83,6 +84,7 @@ class DeliveryPlan:
         self.backend_health_url = backend_health_url
         self.frontend_url = frontend_url
         self.frontend_mode = frontend_mode
+        self.frontend_smoke_scope = frontend_smoke_scope
 
 
 def repo_root_from_script() -> Path:
@@ -114,6 +116,7 @@ def build_delivery_plan(
     evidence_screenshot_path: Path,
     frontend_smoke_report_path: Path | None = None,
     frontend_mode: str = DEFAULT_FRONTEND_MODE,
+    frontend_smoke_scope: str = "full",
 ) -> DeliveryPlan:
     backend_url = f"http://127.0.0.1:{backend_port}"
     frontend_url = f"http://127.0.0.1:{frontend_port}"
@@ -122,8 +125,11 @@ def build_delivery_plan(
     frontend_smoke_report = frontend_smoke_report_path or evidence_screenshot_path.with_name("frontend-smoke.json")
     if frontend_mode not in {"preview", "dev"}:
         raise ValueError(f"Unsupported frontend mode: {frontend_mode}")
+    if frontend_smoke_scope not in {"full", "canvaspro"}:
+        raise ValueError(f"Unsupported frontend smoke scope: {frontend_smoke_scope}")
     frontend_env = {
         "VITE_DREAMY_ORCHESTRATOR_BASE_URL": backend_url,
+        "VITE_DREAMY_ORCHESTRATOR_PROXY_TARGET": backend_url,
         "STUDIO_FRONTEND_URL": frontend_url,
     }
     frontend_build = (
@@ -139,8 +145,22 @@ def build_delivery_plan(
     frontend_command = (
         ["npm", "run", "preview", "--", "--host", "127.0.0.1", "--port", str(frontend_port)]
         if frontend_mode == "preview"
-        else ["npm", "run", "dev", "--", "--host", "127.0.0.1", "--port", str(frontend_port)]
+        else ["npm", "run", "dev", "--", "--host", "127.0.0.1", "--port", str(frontend_port), "--strictPort"]
     )
+    frontend_smoke_command = [
+        "npm",
+        "run",
+        "smoke:studio",
+        "--",
+        "--workspace-screenshot",
+        str(workspace_screenshot_path),
+        "--evidence-screenshot",
+        str(evidence_screenshot_path),
+        "--report",
+        str(frontend_smoke_report),
+    ]
+    if frontend_smoke_scope == "canvaspro":
+        frontend_smoke_command.append("--canvaspro-only")
 
     return DeliveryPlan(
         backend=CommandSpec(
@@ -164,23 +184,13 @@ def build_delivery_plan(
         frontend_smoke=CommandSpec(
             id="frontend-smoke",
             cwd=frontend_cwd,
-            command=[
-                "npm",
-                "run",
-                "smoke:studio",
-                "--",
-                "--workspace-screenshot",
-                str(workspace_screenshot_path),
-                "--evidence-screenshot",
-                str(evidence_screenshot_path),
-                "--report",
-                str(frontend_smoke_report),
-            ],
+            command=frontend_smoke_command,
             env={"STUDIO_FRONTEND_URL": frontend_url},
         ),
         backend_health_url=f"{backend_url}/api/health",
         frontend_url=frontend_url,
         frontend_mode=frontend_mode,
+        frontend_smoke_scope=frontend_smoke_scope,
     )
 
 
@@ -363,6 +373,7 @@ def create_delivery_summary(
     report_path: Path,
     steps: list[StepResult],
     frontend_mode: str = DEFAULT_FRONTEND_MODE,
+    frontend_smoke_scope: str = "full",
     frontend_smoke_report_path: Path | None = None,
 ) -> dict[str, Any]:
     failures = [step.to_json() for step in steps if not step.ok]
@@ -385,6 +396,7 @@ def create_delivery_summary(
         "backendUrl": f"http://127.0.0.1:{backend_port}",
         "frontendUrl": f"http://127.0.0.1:{frontend_port}",
         "frontendMode": frontend_mode,
+        "frontendSmokeScope": frontend_smoke_scope,
         "artifacts": artifacts,
         "summary": {
             "total": len(steps),
@@ -427,6 +439,7 @@ def run_delivery_check(args: argparse.Namespace) -> dict[str, Any]:
         evidence_screenshot_path=evidence_screenshot_path,
         frontend_smoke_report_path=frontend_smoke_report_path,
         frontend_mode=args.frontend_mode,
+        frontend_smoke_scope=args.frontend_smoke_scope,
     )
 
     steps: list[StepResult] = []
@@ -442,6 +455,7 @@ def run_delivery_check(args: argparse.Namespace) -> dict[str, Any]:
             report_path=report_path,
             steps=steps,
             frontend_mode=plan.frontend_mode,
+            frontend_smoke_scope=plan.frontend_smoke_scope,
             frontend_smoke_report_path=frontend_smoke_report_path,
         )
         write_delivery_summary(summary, report_path)
@@ -486,6 +500,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         choices=("preview", "dev"),
         default=DEFAULT_FRONTEND_MODE,
         help="Use production build preview by default; dev is faster for local iteration.",
+    )
+    parser.add_argument(
+        "--frontend-smoke-scope",
+        choices=("full", "canvaspro"),
+        default="full",
+        help="Run the full Studio frontend smoke or only /dreamy?workspace=canvaspro.",
     )
     parser.add_argument("--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--artifacts-dir", default="", help="Directory for logs, screenshots, and summary JSON.")

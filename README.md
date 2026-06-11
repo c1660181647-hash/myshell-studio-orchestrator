@@ -33,11 +33,13 @@ MyShell Studio Orchestrator is a unified agent dispatch center for Dreamy miniap
 Install dependencies once:
 
 ```bash
-cd orchestrator/backend
-python -m pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r orchestrator/backend/requirements.txt
 
-cd ../../frontend
+cd frontend
 npm install
+cd ..
 ```
 
 Run backend and frontend together from the repository root:
@@ -54,13 +56,55 @@ http://127.0.0.1:5174/dreamy
 
 CanvasPro is available from the Studio workspace switch inside `/dreamy`.
 
-Optional ports and CanvasPro API proxy:
+CanvasPro API requests are routed through the Studio backend by default. If the original
+AI-CanvasPro `server.py` is not available, Studio uses a compatibility store for runtime info,
+redacted config, user settings, prompt presets, and project JSON so the canvas can still open from
+the same Studio URL. Generation and provider-specific CanvasPro tasks still require the native
+CanvasPro backend.
+
+Optional native CanvasPro backend:
 
 ```bash
-BACKEND_PORT=8090 FRONTEND_PORT=5174 \
-VITE_AI_CANVASPRO_PROXY_TARGET=http://127.0.0.1:8777 \
+bash scripts/setup-canvaspro.sh
 npm run dev
 ```
+
+The setup script clones `https://github.com/ashuoAI/AI-CanvasPro` into
+`.external/AI-CanvasPro`, creates a separate `.external/AI-CanvasPro/.venv`, installs its
+`requirements.txt`, prepares the ignored `frontend/public/ai-canvaspro/` static mount, and keeps
+that external source out of git. You can pin the external checkout to a known commit/tag/branch:
+
+```bash
+AI_CANVASPRO_REF=<commit-or-tag> bash scripts/setup-canvaspro.sh
+```
+
+You can also point to an existing checkout:
+
+```bash
+AI_CANVASPRO_SERVER_DIR=/path/to/AI-CanvasPro npm run dev
+```
+
+Commercial/license boundary: AI-CanvasPro source and assets are not committed to this repository.
+Only Studio-owned bridge files, scripts, and docs live here. The local upstream license files describe
+AI-CanvasPro as Source Available/non-OSI and require separate written authorization for commercial
+use, SaaS/cloud service use, paid delivery, or packaged redistribution. Confirm those upstream terms
+and any third-party asset/model-provider terms before commercial deployment.
+
+Optional ports:
+
+```bash
+BACKEND_PORT=8090 FRONTEND_PORT=5174 npm run dev
+```
+
+Advanced: point the Studio backend at an already-running CanvasPro API:
+
+```bash
+AI_CANVASPRO_API_BASE=http://127.0.0.1:8777 npm run dev
+```
+
+By default, the Studio backend only falls back on known missing CanvasPro compatibility endpoints
+or when the native service is unreachable. It does not hide native upstream `502/503/504` responses
+unless `AI_CANVASPRO_COMPAT_ON_UPSTREAM_STATUS=1` is explicitly set.
 
 Manual backend:
 
@@ -185,6 +229,9 @@ Important backend settings:
 - `MYSHELL_CDP_URL` - Chrome DevTools endpoint, default `http://127.0.0.1:9222`.
 - `MYSHELL_COOKIE_INJECTION_STATUS_PATH` - Optional path for the Chrome cookie injection result JSON. Defaults to backend `.studio/cookie-injection-status.json`.
 - `STUDIO_ROUTER_MODE=local|gemini` - local catalog matching by default; Gemini requires `GEMINI_API_KEY`.
+- `AI_CANVASPRO_API_BASE` - Optional native AI-CanvasPro API origin. Defaults to `http://127.0.0.1:8777`.
+- `AI_CANVASPRO_COMPAT_DIR` - Optional directory for Studio's CanvasPro compatibility JSON store. Defaults to `orchestrator/backend/.studio/canvaspro`.
+- `AI_CANVASPRO_COMPAT_ON_UPSTREAM_STATUS=1` - Optional escape hatch to fall back on native CanvasPro `502/503/504`; disabled by default so real upstream failures stay visible.
 
 Dreamy is marked `ready` when server init data is configured, otherwise it is still dispatch-ready as `client_delegated` so the authenticated Telegram browser can execute it. In both modes, placeholder posters are not accepted as completion evidence.
 

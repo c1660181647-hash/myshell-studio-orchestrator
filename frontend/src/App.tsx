@@ -22,22 +22,22 @@ import {
 } from './services/studioSession';
 import { resolveInitialEntry } from './services/initialEntry';
 import { trackEvent } from './services/tracking';
-import Explore from './pages/Characters';
-import AiPicks from './pages/AiPicks';
-import BotDetail from './pages/BotDetail';
-import Library from './pages/Library';
-import ViewImage from './pages/ViewImage';
-import GetEnergy from './pages/GetEnergy';
-import Settings from './pages/Settings';
-import EnergyHistory from './pages/EnergyHistory';
-import Upload from './pages/Upload';
-import { TagGenerator } from './pages/TagGenerator';
-import Earn from './pages/Earn';
-import ShareInvite from './pages/ShareInvite';
-import TestCustomizeScene from './pages/TestCustomizeScene';
-import CheckinDemo from './pages/CheckinDemo';
-import Dreamy from './pages/Dreamy';
 
+const Explore = React.lazy(() => import('./pages/Characters'));
+const AiPicks = React.lazy(() => import('./pages/AiPicks'));
+const BotDetail = React.lazy(() => import('./pages/BotDetail'));
+const Library = React.lazy(() => import('./pages/Library'));
+const ViewImage = React.lazy(() => import('./pages/ViewImage'));
+const GetEnergy = React.lazy(() => import('./pages/GetEnergy'));
+const Settings = React.lazy(() => import('./pages/Settings'));
+const EnergyHistory = React.lazy(() => import('./pages/EnergyHistory'));
+const Upload = React.lazy(() => import('./pages/Upload'));
+const TagGenerator = React.lazy(() => import('./pages/TagGenerator').then((module) => ({ default: module.TagGenerator })));
+const Earn = React.lazy(() => import('./pages/Earn'));
+const ShareInvite = React.lazy(() => import('./pages/ShareInvite'));
+const TestCustomizeScene = React.lazy(() => import('./pages/TestCustomizeScene'));
+const CheckinDemo = React.lazy(() => import('./pages/CheckinDemo'));
+const Dreamy = React.lazy(() => import('./pages/Dreamy'));
 
 let communityPushCtaOpenedReported = false;
 
@@ -211,28 +211,38 @@ function StudioReturnDock() {
   );
 }
 
+function RouteFallback() {
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-Cr-Bg-default-v2 text-sm font-semibold text-Cr-text-subtler-v2">
+      Loading
+    </div>
+  );
+}
+
 function AppRoutes() {
   return (
     <div className="h-full w-full">
-      <Routes>
-        <Route path="/" element={<Dreamy />} />
-        <Route path="/explore" element={<Explore />} />
-        <Route path="/ai-picks" element={<AiPicks />} />
-        <Route path="/bot" element={<BotDetail />} />
-        <Route path="/profile" element={<Settings />} />
-        <Route path="/library" element={<Library />} />
-        <Route path="/library/:id" element={<ViewImage />} />
-        <Route path="/energy" element={<GetEnergy />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/energy-history" element={<EnergyHistory />} />
-        <Route path="/upload" element={<Upload />} />
-        <Route path="/tag-generator" element={<TagGenerator />} />
-        <Route path="/earn" element={<Earn />} />
-        <Route path="/share-invite" element={<ShareInvite />} />
-        <Route path="/dreamy" element={<Dreamy />} />
-        <Route path="/__test-customize-scene" element={<TestCustomizeScene />} />
-        <Route path="/checkin-demo" element={<CheckinDemo />} />
-      </Routes>
+      <React.Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/" element={<Dreamy />} />
+          <Route path="/explore" element={<Explore />} />
+          <Route path="/ai-picks" element={<AiPicks />} />
+          <Route path="/bot" element={<BotDetail />} />
+          <Route path="/profile" element={<Settings />} />
+          <Route path="/library" element={<Library />} />
+          <Route path="/library/:id" element={<ViewImage />} />
+          <Route path="/energy" element={<GetEnergy />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/energy-history" element={<EnergyHistory />} />
+          <Route path="/upload" element={<Upload />} />
+          <Route path="/tag-generator" element={<TagGenerator />} />
+          <Route path="/earn" element={<Earn />} />
+          <Route path="/share-invite" element={<ShareInvite />} />
+          <Route path="/dreamy" element={<Dreamy />} />
+          <Route path="/__test-customize-scene" element={<TestCustomizeScene />} />
+          <Route path="/checkin-demo" element={<CheckinDemo />} />
+        </Routes>
+      </React.Suspense>
       <StudioReturnDock />
     </div>
   );

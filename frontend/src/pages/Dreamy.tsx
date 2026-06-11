@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ChangeEvent,
   DragEvent as ReactDragEvent,
@@ -146,7 +146,8 @@ import type {
   StudioStatus,
 } from '../services/dreamyUnified';
 import { trackEvent } from '../services/tracking';
-import CanvasPro from './CanvasPro';
+
+const CanvasPro = lazy(() => import('./CanvasPro'));
 
 type TabKey = 'chat' | 'preview';
 type StudioWorkspace = 'orchestrator' | 'canvaspro';
@@ -1478,11 +1479,15 @@ function StudioWorkspaceSwitch({
   ];
 
   return (
-    <div className="grid h-9 w-[210px] shrink-0 grid-cols-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 p-1">
+    <div
+      data-testid="studio-workspace-switch"
+      className="grid h-9 w-[210px] shrink-0 grid-cols-2 rounded-lg-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-subtle-v2 p-1"
+    >
       {items.map(({ id, label, Icon }) => (
         <button
           key={id}
           type="button"
+          data-testid={id === 'canvaspro' ? 'canvaspro-workspace-switch' : 'orchestrator-workspace-switch'}
           aria-label={`Switch Studio workspace to ${label}`}
           aria-pressed={workspace === id}
           onClick={() => onChange(id)}
@@ -8432,6 +8437,7 @@ export default function Dreamy() {
         <div className="flex min-w-0 items-center justify-end gap-2">
           <button
             type="button"
+            data-testid="mobile-workspace-switch"
             onClick={() => setStudioWorkspace(workspace === 'canvaspro' ? 'orchestrator' : 'canvaspro')}
             className="flex h-8 w-8 items-center justify-center rounded-md-v2 border border-white/10 bg-white/[0.04] text-Cr-text-subtler-v2 active:bg-white/[0.08] md:hidden"
             aria-label={workspace === 'canvaspro' ? 'Switch to Studio command workspace' : 'Switch to CanvasPro workspace'}
@@ -8800,11 +8806,23 @@ export default function Dreamy() {
       )}
 
       {workspace === 'canvaspro' ? (
-        <section className="relative z-0 min-h-0 flex-1 overflow-hidden border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2">
-          <CanvasPro
-            embeddedInStudio
-            onBackToStudio={() => setStudioWorkspace('orchestrator')}
-          />
+        <section
+          data-testid="canvaspro-workspace-panel"
+          className="relative z-0 min-h-0 flex-1 overflow-hidden border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2"
+        >
+          <Suspense
+            fallback={
+              <div className="flex h-full w-full items-center justify-center bg-Cr-Bg-soft-v2 text-sm font-semibold text-Cr-text-subtler-v2">
+                <Loader2 size={16} className="mr-2 animate-spin" />
+                Loading CanvasPro
+              </div>
+            }
+          >
+            <CanvasPro
+              embeddedInStudio
+              onBackToStudio={() => setStudioWorkspace('orchestrator')}
+            />
+          </Suspense>
         </section>
       ) : (
       <main className="dreamy-studio-grid">

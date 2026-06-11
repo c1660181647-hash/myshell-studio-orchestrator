@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const CANVASPRO_ENTRY = '/ai-canvaspro/index.html';
+const CANVASPRO_BRIDGE_SRC = '/ai-canvaspro/studio-bridge.js';
 const BRIDGE_REQUEST = 'aicanvas-studio:request';
 const BRIDGE_RESPONSE = 'aicanvas-studio:response';
 const BRIDGE_READY = 'aicanvas-studio:ready';
@@ -138,9 +139,23 @@ export default function CanvasPro({ embeddedInStudio = false, onBackToStudio }: 
     [],
   );
 
+  const injectStudioBridge = useCallback(() => {
+    const frame = iframeRef.current;
+    const doc = frame?.contentDocument;
+    if (!doc) return;
+    if (doc.querySelector('[data-canvaspro-placeholder="1"]')) return;
+    if (doc.getElementById('myshell-studio-canvaspro-bridge')) return;
+    const script = doc.createElement('script');
+    script.id = 'myshell-studio-canvaspro-bridge';
+    script.type = 'module';
+    script.src = CANVASPRO_BRIDGE_SRC;
+    doc.head.appendChild(script);
+  }, []);
+
   useEffect(() => {
     const handleMessage = (event: MessageEvent<BridgeResponseMessage>) => {
       if (event.origin !== window.location.origin) return;
+      if (event.source !== iframeRef.current?.contentWindow) return;
       const message = event.data || {};
       if (message.type === BRIDGE_READY) {
         setBridgeStatus((current) => ({
@@ -282,14 +297,19 @@ export default function CanvasPro({ embeddedInStudio = false, onBackToStudio }: 
   const backLabel = embeddedInStudio ? 'Command' : 'Studio';
 
   return (
-    <main className="relative h-full w-full overflow-hidden bg-Cr-Bg-soft-v2">
+    <main
+      data-testid="canvaspro-workspace"
+      className="relative h-full w-full overflow-hidden bg-Cr-Bg-soft-v2"
+    >
       <iframe
         ref={iframeRef}
         key={reloadKey}
+        data-testid="canvaspro-iframe"
         title="AI CanvasPro"
         src={src}
         className="h-full w-full border-0"
         allow="clipboard-read; clipboard-write; fullscreen; web-share"
+        onLoad={injectStudioBridge}
       />
       <input
         ref={fileInputRef}
@@ -325,6 +345,7 @@ export default function CanvasPro({ embeddedInStudio = false, onBackToStudio }: 
         )}
         <div className="pointer-events-auto flex max-w-[calc(100vw-108px)] items-center gap-2 overflow-x-auto rounded-full-v2 border border-Cr-border-default-v2 bg-Cr-Bg-surface-default-v2/90 p-1 shadow-[0_10px_28px_rgba(0,0,0,0.28)] backdrop-blur-xl">
           <div
+            data-testid="canvaspro-bridge-status"
             className="hidden h-9 shrink-0 items-center gap-2 rounded-full-v2 border border-Cr-border-default-v2 bg-Cr-Bg-soft-v2 px-3 text-xs font-semibold text-Cr-text-subtler-v2 sm:inline-flex"
             title={savedLabel ? `最近离线快照 ${savedLabel}` : statusLabel}
           >

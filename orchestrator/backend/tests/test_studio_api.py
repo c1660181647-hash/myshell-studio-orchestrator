@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import json
 import os
 import shutil
@@ -9,12 +10,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 from fastapi.testclient import TestClient
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 
-from main import app  # noqa: E402
+from main import app, _read_canvaspro_json, _write_canvaspro_json  # noqa: E402
 from studio import PROJECTS  # noqa: E402
 from studio_registry import page_for_dispatch  # noqa: E402
 from studio_store import STUDIO_STORE  # noqa: E402
@@ -89,6 +91,244 @@ class StudioApiTest(unittest.TestCase):
         self.assertEqual(captured["url"], "http://127.0.0.1:18877/api/v2/projects?active=1")
         self.assertEqual(json.loads(captured["content"].decode()), {"name": "demo"})
         self.assertEqual(captured["headers"]["x-canvas-test"], "yes")
+
+    def test_ai_canvaspro_compat_config_redacts_secret_keys(self) -> None:
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            async def __aenter__(self) -> "FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, *args) -> None:
+                return None
+
+            async def request(self, *args, **kwargs):
+                raise httpx.ConnectError("native canvaspro unavailable")
+
+        payload = {
+            "providers": {
+                "openai": {
+                    "apiKey": "sk-should-not-persist",
+                    "modelApiKey": "mk-should-not-persist",
+                    "apiUrl": "https://api.example.test",
+                },
+            },
+            "safe": True,
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "AI_CANVASPRO_API_BASE": "http://127.0.0.1:18877",
+                        "AI_CANVASPRO_COMPAT_DIR": temp_dir,
+                    },
+                ),
+                patch("main.httpx.AsyncClient", FakeAsyncClient),
+            ):
+                response = self.client.post("/ai-canvaspro-api/api/config", json=payload)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers["x-ai-canvaspro-compat"], "1")
+            body = response.json()
+            self.assertEqual(body["secretPersistence"], "disabled")
+            self.assertEqual(body["data"]["providers"]["openai"], {"apiUrl": "https://api.example.test"})
+
+            stored = json.loads(Path(temp_dir, "config.json").read_text(encoding="utf-8"))
+            stored_text = json.dumps(stored)
+            self.assertNotIn("sk-should-not-persist", stored_text)
+            self.assertNotIn("mk-should-not-persist", stored_text)
+            self.assertEqual(stored["providers"]["openai"], {"apiUrl": "https://api.example.test"})
+
+    def test_ai_canvaspro_upstream_5xx_is_not_hidden_by_default(self) -> None:
+        class FakeResponse:
+            status_code = 503
+            content = b"upstream down"
+            headers = {"content-type": "text/plain"}
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            async def __aenter__(self) -> "FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, *args) -> None:
+                return None
+
+            async def request(self, *args, **kwargs) -> FakeResponse:
+                return FakeResponse()
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "AI_CANVASPRO_API_BASE": "http://127.0.0.1:18877",
+                    "AI_CANVASPRO_COMPAT_ON_UPSTREAM_STATUS": "",
+                },
+            ),
+            patch("main.httpx.AsyncClient", FakeAsyncClient),
+        ):
+            response = self.client.get("/ai-canvaspro-api/api/v2/runtime/info")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.text, "upstream down")
+        self.assertNotIn("x-ai-canvaspro-compat", response.headers)
+
+    def test_ai_canvaspro_loopback_proxy_refused_503_uses_compat_fallback(self) -> None:
+        class FakeResponse:
+            status_code = 503
+            content = b"<html><h1>Unable to connect</h1><li>Connection refused</li></html>"
+            headers = {"content-type": "text/html"}
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            async def __aenter__(self) -> "FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, *args) -> None:
+                return None
+
+            async def request(self, *args, **kwargs) -> FakeResponse:
+                return FakeResponse()
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "AI_CANVASPRO_API_BASE": "http://127.0.0.1:18877",
+                    "AI_CANVASPRO_COMPAT_ON_UPSTREAM_STATUS": "",
+                },
+            ),
+            patch("main.httpx.AsyncClient", FakeAsyncClient),
+        ):
+            response = self.client.get("/ai-canvaspro-api/api/v2/runtime/info")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["x-ai-canvaspro-compat"], "1")
+        self.assertEqual(response.json()["mode"], "studio-compat")
+
+    def test_ai_canvaspro_known_404_endpoint_uses_compat_fallback(self) -> None:
+        class FakeResponse:
+            status_code = 404
+            content = b"not found"
+            headers = {"content-type": "text/plain"}
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            async def __aenter__(self) -> "FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, *args) -> None:
+                return None
+
+            async def request(self, *args, **kwargs) -> FakeResponse:
+                return FakeResponse()
+
+        with (
+            patch.dict(os.environ, {"AI_CANVASPRO_API_BASE": "http://127.0.0.1:18877"}),
+            patch("main.httpx.AsyncClient", FakeAsyncClient),
+        ):
+            response = self.client.get("/ai-canvaspro-api/api/v2/runtime/info")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["x-ai-canvaspro-compat"], "1")
+        self.assertEqual(response.json()["mode"], "studio-compat")
+
+    def test_ai_canvaspro_compat_project_save_and_list(self) -> None:
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            async def __aenter__(self) -> "FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, *args) -> None:
+                return None
+
+            async def request(self, *args, **kwargs):
+                raise httpx.ConnectError("native canvaspro unavailable")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "AI_CANVASPRO_API_BASE": "http://127.0.0.1:18877",
+                        "AI_CANVASPRO_COMPAT_DIR": temp_dir,
+                    },
+                ),
+                patch("main.httpx.AsyncClient", FakeAsyncClient),
+            ):
+                save_response = self.client.post(
+                    "/ai-canvaspro-api/api/v2/projects/save",
+                    json={"projectName": "Demo/Key", "canvases": []},
+                )
+                list_response = self.client.get("/ai-canvaspro-api/api/v2/projects")
+
+            self.assertEqual(save_response.status_code, 200)
+            self.assertEqual(save_response.headers["x-ai-canvaspro-compat"], "1")
+            self.assertEqual(save_response.json()["filename"], "Demo_Key.json")
+            self.assertTrue(Path(temp_dir, "project_Demo_Key.json").exists())
+
+            projects = list_response.json()
+            self.assertEqual(len(projects), 1)
+            self.assertEqual(projects[0]["filename"], "Demo_Key.json")
+            self.assertEqual(projects[0]["projectName"], "Demo/Key")
+
+    def test_ai_canvaspro_default_project_missing_returns_empty_project(self) -> None:
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            async def __aenter__(self) -> "FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, *args) -> None:
+                return None
+
+            async def request(self, *args, **kwargs):
+                raise httpx.ConnectError("native canvaspro unavailable")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "AI_CANVASPRO_API_BASE": "http://127.0.0.1:18877",
+                        "AI_CANVASPRO_COMPAT_DIR": temp_dir,
+                    },
+                ),
+                patch("main.httpx.AsyncClient", FakeAsyncClient),
+            ):
+                response = self.client.get("/ai-canvaspro-api/api/v2/projects/default_v2_project.json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["x-ai-canvaspro-compat"], "1")
+        body = response.json()
+        self.assertEqual(body["filename"], "default_v2_project.json")
+        self.assertEqual(body["activeCanvasId"], "canvas_1")
+        self.assertEqual(body["canvases"][0]["nodes"], [])
+
+    def test_ai_canvaspro_json_store_concurrent_writes_remain_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"AI_CANVASPRO_COMPAT_DIR": temp_dir}):
+                def write_index(index: int) -> None:
+                    _write_canvaspro_json("settings.json", {"index": index, "values": list(range(16))})
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                    list(executor.map(write_index, range(40)))
+
+                stored = _read_canvaspro_json("settings.json", {})
+
+        self.assertIsInstance(stored, dict)
+        self.assertIsInstance(stored.get("index"), int)
+        self.assertEqual(stored.get("values"), list(range(16)))
 
     def test_run_stream_creates_project_and_execution_request(self) -> None:
         with self.client.stream(
