@@ -68,6 +68,9 @@ export const REQUIRED_STUDIO_CHECK_IDS = Object.freeze([
   'canvaspro-iframe-entry',
   'canvaspro-bridge-status',
   'canvaspro-runtime-api',
+  'canvaspro-upstream-author-links-hidden',
+  'canvaspro-license-disclosure-menu',
+  'canvaspro-license-disclosure-dialog',
   'canvaspro-no-direct-proxy-error',
   'footer-evidence',
   'footer-plan-remaining',
@@ -101,6 +104,9 @@ export const REQUIRED_CANVASPRO_CHECK_IDS = Object.freeze([
   'canvaspro-iframe-entry',
   'canvaspro-bridge-status',
   'canvaspro-runtime-api',
+  'canvaspro-upstream-author-links-hidden',
+  'canvaspro-license-disclosure-menu',
+  'canvaspro-license-disclosure-dialog',
   'canvaspro-no-direct-proxy-error',
 ]);
 
@@ -497,6 +503,8 @@ async function checkCanvasProWorkspace(checks, page, frontendUrl, consoleErrors,
     });
   }
 
+  await checkCanvasProAuthorSignalPolicy(checks, page, timeoutMs);
+
   const directProxyError = consoleErrors.find((error) => /ECONNREFUSED.*127\.0\.0\.1:8777|127\.0\.0\.1:8777.*ECONNREFUSED/i.test(error));
   checks.push({
     id: 'canvaspro-no-direct-proxy-error',
@@ -504,6 +512,113 @@ async function checkCanvasProWorkspace(checks, page, frontendUrl, consoleErrors,
     ok: !directProxyError,
     message: directProxyError,
   });
+}
+
+async function checkCanvasProAuthorSignalPolicy(checks, page, timeoutMs) {
+  const frame = page.frameLocator('[data-testid="canvaspro-iframe"]');
+  try {
+    await frame.locator('#userAvatar').waitFor({ state: 'visible', timeout: Math.min(timeoutMs, 8000) });
+    await frame.locator('#userAvatar').click({ timeout: timeoutMs });
+
+    const menuPolicy = await frame.locator('body').evaluate(() => {
+      const hiddenIds = ['btnTutorial', 'btnGithubOfficial', 'btnFeatureFeedback'];
+      const visibleUpstreamIds = hiddenIds.filter((id) => {
+        const element = document.getElementById(id);
+        if (!element) return false;
+        const style = window.getComputedStyle(element);
+        return !element.hidden && style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+      });
+      return {
+        authorSignals: document.documentElement.dataset.studioCanvasproAuthorSignals || '',
+        visibleUpstreamIds,
+        aboutLabel: document.getElementById('btnAbout')?.textContent?.replace(/\s+/g, ' ').trim() || '',
+      };
+    });
+
+    checks.push({
+      id: 'canvaspro-upstream-author-links-hidden',
+      label: 'CanvasPro upstream tutorial, GitHub, and feedback links are hidden',
+      ok: menuPolicy.visibleUpstreamIds.length === 0 && menuPolicy.authorSignals === 'hidden',
+      message:
+        menuPolicy.visibleUpstreamIds.length === 0 && menuPolicy.authorSignals === 'hidden'
+          ? undefined
+          : `Visible upstream ids: ${menuPolicy.visibleUpstreamIds.join(', ') || 'none'}; policy=${menuPolicy.authorSignals || 'unset'}`,
+    });
+    checks.push({
+      id: 'canvaspro-license-disclosure-menu',
+      label: 'CanvasPro About menu points to third-party license disclosure',
+      ok: /第三方组件\s*\/\s*授权声明/.test(menuPolicy.aboutLabel),
+      message: /第三方组件\s*\/\s*授权声明/.test(menuPolicy.aboutLabel)
+        ? undefined
+        : `Unexpected About label: ${menuPolicy.aboutLabel || 'empty'}`,
+    });
+
+    await frame.locator('#btnAbout').click({ timeout: timeoutMs });
+    const disclosurePolicy = await frame.locator('body').evaluate(() => {
+      const modal = document.getElementById('studioCanvasproLicenseModal');
+      const modalVisible = Boolean(
+        modal &&
+          !modal.hidden &&
+          modal.getAttribute('aria-hidden') === 'false' &&
+          window.getComputedStyle(modal).display !== 'none' &&
+          modal.getClientRects().length > 0,
+      );
+      const disclosureText =
+        modal?.querySelector('.studio-canvaspro-license-disclosure')?.textContent?.replace(/\s+/g, ' ').trim() || '';
+      const title =
+        modal?.querySelector('.studio-canvaspro-license-modal-title')?.textContent?.replace(/\s+/g, ' ').trim() || '';
+      const authorText = document.querySelector('#aboutOverlay .about-author')?.textContent?.replace(/\s+/g, ' ').trim() || '';
+      const bilibili = document.getElementById('btnBilibili');
+      const bilibiliVisible = Boolean(
+        bilibili &&
+          !bilibili.hidden &&
+          window.getComputedStyle(bilibili).display !== 'none' &&
+          bilibili.getClientRects().length > 0,
+      );
+      return {
+        modalVisible,
+        title,
+        disclosureText,
+        authorText,
+        bilibiliVisible,
+      };
+    });
+    const dialogOk =
+      disclosurePolicy.modalVisible &&
+      /第三方组件\s*\/\s*授权声明/.test(disclosurePolicy.title) &&
+      /AI-CanvasPro/.test(disclosurePolicy.disclosureText) &&
+      /书面授权/.test(disclosurePolicy.disclosureText) &&
+      !disclosurePolicy.authorText &&
+      !disclosurePolicy.bilibiliVisible;
+    checks.push({
+      id: 'canvaspro-license-disclosure-dialog',
+      label: 'CanvasPro About dialog is replaced with third-party license disclosure',
+      ok: dialogOk,
+      message: dialogOk
+        ? undefined
+        : `modalVisible=${disclosurePolicy.modalVisible}; title=${disclosurePolicy.title || 'empty'}; hasDisclosure=${Boolean(disclosurePolicy.disclosureText)}; author=${disclosurePolicy.authorText || 'hidden'}; bilibiliVisible=${disclosurePolicy.bilibiliVisible}`,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    checks.push({
+      id: 'canvaspro-upstream-author-links-hidden',
+      label: 'CanvasPro upstream tutorial, GitHub, and feedback links are hidden',
+      ok: false,
+      message,
+    });
+    checks.push({
+      id: 'canvaspro-license-disclosure-menu',
+      label: 'CanvasPro About menu points to third-party license disclosure',
+      ok: false,
+      message,
+    });
+    checks.push({
+      id: 'canvaspro-license-disclosure-dialog',
+      label: 'CanvasPro About dialog is replaced with third-party license disclosure',
+      ok: false,
+      message,
+    });
+  }
 }
 
 function resolveScreenshotPaths(options) {

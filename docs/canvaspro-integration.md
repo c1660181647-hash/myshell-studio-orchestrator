@@ -18,6 +18,20 @@ CanvasPro still owns the canvas runtime. Studio adds a thin bridge layer:
 - The bridge does not modify renderer, interaction, minimap, node, or edge internals.
 - Embedded API calls go to `/ai-canvaspro-api/*`, which is proxied through the Studio backend.
 
+## Studio UI Policy
+
+Studio keeps the upstream CanvasPro files external and applies product-facing UI policy in
+`studio-bridge.js` at runtime:
+
+- Upstream tutorial, GitHub, feedback, and personal homepage links are hidden or neutralized inside
+  the embedded CanvasPro menu.
+- The CanvasPro `About` entry is relabeled as `第三方组件 / 授权声明`.
+- The About dialog keeps a third-party component disclosure and license boundary instead of sending
+  users to upstream support or author channels.
+- This is not a white-label authorization. It only prevents user navigation out of Studio while
+  preserving the requirement to review and obtain upstream commercial or white-label rights before
+  commercial deployment.
+
 ## Backend Compatibility
 
 The original AI CanvasPro Python service is optional in Studio development:

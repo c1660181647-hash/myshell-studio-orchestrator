@@ -209,6 +209,9 @@ test('runStudioFrontendSmoke records CanvasPro single-entry smoke checks', async
     'canvaspro-iframe-entry',
     'canvaspro-bridge-status',
     'canvaspro-runtime-api',
+    'canvaspro-upstream-author-links-hidden',
+    'canvaspro-license-disclosure-menu',
+    'canvaspro-license-disclosure-dialog',
     'canvaspro-no-direct-proxy-error',
   ];
   for (const id of canvasProChecks) {

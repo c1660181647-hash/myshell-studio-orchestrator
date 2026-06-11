@@ -1,6 +1,6 @@
 import { graphStore } from './src/core/stores/appStore.js';
 
-const BRIDGE_VERSION = '2026.06.04';
+const BRIDGE_VERSION = '2026.06.11';
 const DB_NAME = 'myshell-studio-ai-canvaspro';
 const DB_VERSION = 1;
 const PROJECT_STORE = 'projects';
@@ -10,6 +10,16 @@ const MESSAGE_RESPONSE = 'aicanvas-studio:response';
 const MESSAGE_READY = 'aicanvas-studio:ready';
 const MESSAGE_AUTOSAVE = 'aicanvas-studio:autosave';
 const API_BASE = location.pathname.startsWith('/ai-canvaspro/') ? '/ai-canvaspro-api' : '';
+const AUTHOR_SIGNAL_POLICY_KEY = '__MYSHELL_STUDIO_CANVASPRO_AUTHOR_SIGNAL_POLICY__';
+const AUTHOR_SIGNAL_POLICY_STYLE_ID = 'studio-canvaspro-author-signal-policy';
+const LICENSE_MODAL_ID = 'studioCanvasproLicenseModal';
+const AUTHOR_SIGNAL_LABEL = '第三方组件 / 授权声明';
+const HIDDEN_UPSTREAM_MENU_IDS = Object.freeze(['btnTutorial', 'btnGithubOfficial', 'btnFeatureFeedback']);
+const BLOCKED_UPSTREAM_EXTERNAL_URL_PATTERNS = Object.freeze([
+  /github\.com\/ashuoAI\/AI-CanvasPro/i,
+  /i1etb6xynr\.feishu\.cn/i,
+  /space\.bilibili\.com\/1876480181/i,
+]);
 const ALLOWED_ACTIONS = new Set([
   'getStatus',
   'saveSnapshot',
@@ -110,6 +120,374 @@ function installOfflineGenerationGuard() {
     },
     true,
   );
+}
+
+function installAuthorSignalPolicyStyles() {
+  if (document.getElementById(AUTHOR_SIGNAL_POLICY_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = AUTHOR_SIGNAL_POLICY_STYLE_ID;
+  style.textContent = `
+    #btnTutorial,
+    #btnGithubOfficial,
+    #btnFeatureFeedback,
+    #btnBilibili {
+      display: none !important;
+    }
+    #avatarMenu {
+      min-width: 236px;
+    }
+    #btnAbout .studio-canvaspro-about-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #aboutOverlay {
+      position: fixed !important;
+      inset: 0 !important;
+      align-items: center !important;
+      justify-content: center !important;
+      background: rgba(0, 0, 0, 0.68) !important;
+      z-index: 2147483000 !important;
+    }
+    #aboutOverlay .about-dialog {
+      width: min(420px, calc(100vw - 40px)) !important;
+      padding: 28px 28px 24px !important;
+      border: 1px solid rgba(255, 255, 255, 0.14) !important;
+      border-radius: 16px !important;
+      background: rgba(18, 18, 22, 0.98) !important;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.68) !important;
+      color: rgba(255, 255, 255, 0.92) !important;
+    }
+    #aboutOverlay .about-logo {
+      display: none !important;
+    }
+    #aboutOverlay .about-title {
+      margin-top: 0 !important;
+      color: rgba(255, 255, 255, 0.96) !important;
+      font-size: 18px !important;
+      line-height: 1.4 !important;
+    }
+    #aboutOverlay .about-version,
+    #aboutOverlay .about-footer,
+    #aboutOverlay .about-close {
+      color: rgba(255, 255, 255, 0.68) !important;
+    }
+    #${LICENSE_MODAL_ID} {
+      position: fixed !important;
+      inset: 0 !important;
+      display: none;
+      align-items: center !important;
+      justify-content: center !important;
+      padding: 24px !important;
+      background: rgba(0, 0, 0, 0.68) !important;
+      z-index: 2147483001 !important;
+      box-sizing: border-box !important;
+    }
+    #${LICENSE_MODAL_ID}[aria-hidden="false"] {
+      display: flex !important;
+    }
+    .studio-canvaspro-license-modal-card {
+      position: relative;
+      width: min(440px, 100%);
+      padding: 28px 28px 24px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 16px;
+      background: rgba(18, 18, 22, 0.98);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.68);
+      color: rgba(255, 255, 255, 0.92);
+      text-align: left;
+    }
+    .studio-canvaspro-license-modal-title {
+      margin: 0 32px 14px 0;
+      color: rgba(255, 255, 255, 0.96);
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+    .studio-canvaspro-license-modal-close {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 30px;
+      height: 30px;
+      border: 0;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.72);
+      cursor: pointer;
+    }
+    .studio-canvaspro-license-modal-close:hover {
+      background: rgba(255, 255, 255, 0.14);
+      color: rgba(255, 255, 255, 0.94);
+    }
+    .studio-canvaspro-license-disclosure {
+      margin: 14px 0 0;
+      padding: 12px;
+      border: 1px solid var(--stroke-default, rgba(255, 255, 255, 0.12));
+      border-radius: 10px;
+      background: var(--white-05, rgba(255, 255, 255, 0.05));
+      color: var(--text-secondary, rgba(255, 255, 255, 0.72));
+      font-size: 13px;
+      line-height: 1.65;
+      text-align: left;
+    }
+    .studio-canvaspro-license-disclosure p {
+      margin: 0 0 8px;
+    }
+    .studio-canvaspro-license-disclosure p:last-child {
+      margin-bottom: 0;
+    }
+    .studio-canvaspro-license-disclosure strong {
+      color: var(--text-primary, rgba(255, 255, 255, 0.92));
+      font-weight: 700;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function setElementHidden(element) {
+  if (!element) return;
+  if (!element.hidden) element.hidden = true;
+  if (element.getAttribute('aria-hidden') !== 'true') element.setAttribute('aria-hidden', 'true');
+  if (element.tabIndex !== -1) element.tabIndex = -1;
+}
+
+function isBlockedUpstreamExternalUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  if (BLOCKED_UPSTREAM_EXTERNAL_URL_PATTERNS.some((pattern) => pattern.test(text))) return true;
+  try {
+    const url = new URL(text, location.href);
+    return BLOCKED_UPSTREAM_EXTERNAL_URL_PATTERNS.some((pattern) => pattern.test(url.href));
+  } catch {
+    return false;
+  }
+}
+
+function neutralizeBlockedExternalUrl(element) {
+  if (!element) return;
+  const url = element.getAttribute('data-external-url') || element.getAttribute('href') || '';
+  if (!isBlockedUpstreamExternalUrl(url)) return;
+  if (element.dataset && !element.dataset.studioBlockedExternalUrl) {
+    element.dataset.studioBlockedExternalUrl = url;
+  } else if (!element.getAttribute('data-studio-blocked-external-url')) {
+    element.setAttribute('data-studio-blocked-external-url', url);
+  }
+  element.removeAttribute('data-external-url');
+  if (element.tagName === 'A') element.removeAttribute('href');
+}
+
+function setButtonLabel(button, label) {
+  if (!button || button.dataset.studioCanvasproLabel === label) return;
+  const icon = button.querySelector('svg')?.cloneNode(true);
+  button.replaceChildren();
+  if (icon) button.appendChild(icon);
+  const text = document.createElement('span');
+  text.className = 'studio-canvaspro-about-label';
+  text.textContent = label;
+  button.appendChild(text);
+  button.setAttribute('aria-label', label);
+  button.dataset.studioCanvasproLabel = label;
+}
+
+function createDisclosureParagraph(text, strongPrefix = '') {
+  const paragraph = document.createElement('p');
+  if (strongPrefix) {
+    const strong = document.createElement('strong');
+    strong.textContent = strongPrefix;
+    paragraph.appendChild(strong);
+    paragraph.appendChild(document.createTextNode(text));
+  } else {
+    paragraph.textContent = text;
+  }
+  return paragraph;
+}
+
+function updateAboutDisclosure() {
+  const overlay = document.getElementById('aboutOverlay');
+  const dialog = overlay?.querySelector('.about-dialog');
+  if (!dialog) return;
+
+  const title = dialog.querySelector('.about-title');
+  if (title && title.textContent !== AUTHOR_SIGNAL_LABEL) title.textContent = AUTHOR_SIGNAL_LABEL;
+
+  const author = dialog.querySelector('.about-author');
+  if (author?.textContent) author.textContent = '';
+  setElementHidden(author);
+
+  const upstreamLink = document.getElementById('btnBilibili');
+  neutralizeBlockedExternalUrl(upstreamLink);
+  setElementHidden(upstreamLink);
+
+  const footer = dialog.querySelector('.about-footer');
+  if (footer) {
+    footer.textContent = 'CanvasPro is loaded as an external optional component inside MyShell Studio.';
+  }
+
+  let disclosure = document.getElementById('studioCanvasproLicenseDisclosure');
+  if (!disclosure) {
+    disclosure = document.createElement('div');
+    disclosure.id = 'studioCanvasproLicenseDisclosure';
+    disclosure.className = 'studio-canvaspro-license-disclosure';
+    const version = document.getElementById('aboutVersion');
+    if (version?.parentElement) {
+      version.insertAdjacentElement('afterend', disclosure);
+    } else {
+      dialog.appendChild(disclosure);
+    }
+  }
+
+  if (disclosure.dataset.studioCanvasproReady === 'true') return;
+  disclosure.replaceChildren(
+    createDisclosureParagraph('CanvasPro 以外部可选组件形式接入 Studio。'),
+    createDisclosureParagraph(
+      ' AI-CanvasPro。版权、许可证和商业授权归其权利方所有；商业、SaaS、打包分发或白标使用需先取得书面授权。',
+      '上游项目：',
+    ),
+    createDisclosureParagraph('Studio 已隐藏上游教程、反馈和仓库跳转入口，避免用户离开当前产品环境。'),
+  );
+  disclosure.dataset.studioCanvasproReady = 'true';
+}
+
+function ensureStudioLicenseModal() {
+  let modal = document.getElementById(LICENSE_MODAL_ID);
+  if (modal) return modal;
+
+  modal = document.createElement('div');
+  modal.id = LICENSE_MODAL_ID;
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-hidden', 'true');
+  modal.setAttribute('aria-labelledby', 'studioCanvasproLicenseModalTitle');
+
+  const card = document.createElement('div');
+  card.className = 'studio-canvaspro-license-modal-card';
+
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.id = 'studioCanvasproLicenseModalClose';
+  close.className = 'studio-canvaspro-license-modal-close';
+  close.setAttribute('aria-label', '关闭授权声明');
+  close.textContent = '×';
+
+  const title = document.createElement('h2');
+  title.id = 'studioCanvasproLicenseModalTitle';
+  title.className = 'studio-canvaspro-license-modal-title';
+  title.textContent = AUTHOR_SIGNAL_LABEL;
+
+  const disclosure = document.createElement('div');
+  disclosure.className = 'studio-canvaspro-license-disclosure';
+  disclosure.replaceChildren(
+    createDisclosureParagraph('CanvasPro 以外部可选组件形式接入 Studio。'),
+    createDisclosureParagraph(
+      ' AI-CanvasPro。版权、许可证和商业授权归其权利方所有；商业、SaaS、打包分发或白标使用需先取得书面授权。',
+      '上游项目：',
+    ),
+    createDisclosureParagraph('Studio 已隐藏上游教程、反馈和仓库跳转入口，避免用户离开当前产品环境。'),
+  );
+
+  card.append(close, title, disclosure);
+  modal.appendChild(card);
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function openAboutDisclosure() {
+  updateAboutDisclosure();
+  const upstreamOverlay = document.getElementById('aboutOverlay');
+  if (upstreamOverlay) {
+    upstreamOverlay.style.display = 'none';
+    upstreamOverlay.setAttribute('aria-hidden', 'true');
+  }
+  const modal = ensureStudioLicenseModal();
+  modal.hidden = false;
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeStudioLicenseModal() {
+  const modal = document.getElementById(LICENSE_MODAL_ID);
+  if (!modal) return;
+  modal.hidden = true;
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function closeAboutDisclosure() {
+  closeStudioLicenseModal();
+  const overlay = document.getElementById('aboutOverlay');
+  if (!overlay) return;
+  overlay.style.display = 'none';
+  overlay.setAttribute('aria-hidden', 'true');
+}
+
+function applyAuthorSignalPolicy() {
+  installAuthorSignalPolicyStyles();
+  for (const id of HIDDEN_UPSTREAM_MENU_IDS) {
+    const element = document.getElementById(id);
+    neutralizeBlockedExternalUrl(element);
+    setElementHidden(element);
+  }
+  document.querySelectorAll('[data-external-url], a[href]').forEach((element) => {
+    neutralizeBlockedExternalUrl(element);
+  });
+  setButtonLabel(document.getElementById('btnAbout'), AUTHOR_SIGNAL_LABEL);
+  updateAboutDisclosure();
+  document.documentElement.dataset.studioCanvasproAuthorSignals = 'hidden';
+}
+
+function installAuthorSignalPolicy() {
+  if (window[AUTHOR_SIGNAL_POLICY_KEY]) return;
+  window[AUTHOR_SIGNAL_POLICY_KEY] = true;
+  let policyTimer = null;
+
+  document.addEventListener(
+    'click',
+    (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('#btnAbout')) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        openAboutDisclosure();
+        return;
+      }
+      if (
+        target.closest('#studioCanvasproLicenseModalClose') ||
+        target === document.getElementById(LICENSE_MODAL_ID) ||
+        target.closest('#aboutClose') ||
+        target === document.getElementById('aboutOverlay')
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        closeAboutDisclosure();
+        return;
+      }
+      const trigger = target.closest('[data-external-url], [data-studio-blocked-external-url], a[href]');
+      if (!trigger) return;
+      const url =
+        trigger.getAttribute('data-studio-blocked-external-url') ||
+        trigger.getAttribute('data-external-url') ||
+        trigger.getAttribute('href') ||
+        '';
+      if (!isBlockedUpstreamExternalUrl(url)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      window.showToast?.('请在第三方组件 / 授权声明中查看 CanvasPro 授权边界。', 'warn');
+    },
+    true,
+  );
+
+  const schedulePolicy = () => {
+    window.clearTimeout(policyTimer);
+    policyTimer = window.setTimeout(applyAuthorSignalPolicy, 50);
+  };
+
+  applyAuthorSignalPolicy();
+  window.setTimeout(applyAuthorSignalPolicy, 500);
+  window.setTimeout(applyAuthorSignalPolicy, 1500);
+  new MutationObserver(schedulePolicy).observe(document.body || document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
 }
 
 function cloneJson(value) {
@@ -832,6 +1210,7 @@ function installAutosaveHooks() {
 async function boot() {
   if (bridgeAlreadyInstalled) return;
   installOfflineGenerationGuard();
+  installAuthorSignalPolicy();
   installAutosaveHooks();
   await checkApiReachable();
   window.setInterval(checkApiReachable, 15000);
