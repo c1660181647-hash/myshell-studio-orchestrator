@@ -1,19 +1,27 @@
 // Phase 6 Step 2: Canvas 渲染器
 // 逐帧渲染时间线到 OffscreenCanvas，复用 PreviewPanel 的所有计算逻辑
 
-import type { TimelineClip, EditorAsset, TimelineTrack, ClipFilters, TextClipData } from '../types';
+import type { TimelineClip, EditorAsset, TimelineTrack, ClipFilters, TextClipData, TransitionType } from '../types';
 import {
   resolveClipPropsAt,
   clipFilters,
   clipCrop,
   filterCss,
-  transitionStyles,
   transitionNeedsUnderlay,
   textAnimationStyle,
   textExitAnimationStyle,
   clipSpeed,
   temperatureOverlay,
 } from '../utils';
+
+// 转场在导出端的数值修饰（对应 utils.transitionStyles 的 CSS 输出，转成 Canvas 可用的数值）
+interface TransitionMods {
+  alpha?: number;            // 整体透明度（fade/dissolve/zoom）
+  scale?: number;            // 额外缩放（zoom，绕媒体中心）
+  translateXFrac?: number;   // 横向位移（slide，单位=媒体显示宽度的倍数）
+  translateYFrac?: number;
+  inset?: { t: number; r: number; b: number; l: number }; // 揭开裁剪（wipe，各边裁掉的比例）
+}
 
 /**
  * Canvas 渲染器：逐帧渲染时间线
@@ -67,7 +75,7 @@ export class CanvasRenderer {
       } else {
         const asset = assets.get(clip.assetId);
         if (asset) {
-          await this.renderMedia(clip, asset, playhead, clips);
+          await this.renderMedia(clip, asset, playhead, clips, assets);
         }
       }
     }
@@ -105,59 +113,86 @@ export class CanvasRenderer {
   }
 
   /**
-   * 渲染媒体片段（视频/图片）
+   * 渲染媒体片段（视频/图片）。若片段带转场，先画上一相邻片段的定格末帧作垫底，
+   * 再带转场修饰画当前片段（与预览 FrozenLayer + transitionStyles 一致）。
    */
   private async renderMedia(
     clip: TimelineClip,
     asset: EditorAsset,
     playhead: number,
-    allClips: TimelineClip[]
+    allClips: TimelineClip[],
+    assets: Map<string, EditorAsset>
   ): Promise<void> {
     const localT = playhead - clip.start;
+    const tr = clip.transition;
+    const inTr = tr ? localT >= 0 && localT < tr.duration : false;
 
-    // 1. 计算属性（复用 utils.resolveClipPropsAt）
+    // 转场垫底：fade 之外的转场需要把"上一相邻片段"定格在末帧画在底层做叠化
+    if (inTr && tr && transitionNeedsUnderlay(tr.type)) {
+      const prev = this.prevAdjacentClip(clip, allClips);
+      const prevAsset = prev ? assets.get(prev.assetId) : null;
+      if (prev && prevAsset) {
+        // 定格在 prev 末帧前一点（避开 EOF 黑帧，与预览 FrozenLayer 的 -0.04 一致）
+        const prevEndLocal = Math.max(0, prev.duration - 0.04);
+        await this.drawMediaFrame(prev, prevAsset, prevEndLocal);
+      }
+    }
+
+    // 当前片段（转场期内带修饰）
+    const mods = inTr && tr ? this.transitionMods(tr.type, localT / tr.duration) : undefined;
+    await this.drawMediaFrame(clip, asset, localT, mods);
+  }
+
+  /**
+   * 绘制单个媒体片段的某一帧到 canvas（含变换/裁剪/滤镜/色温/淡入淡出）。
+   * 可选 mods 施加转场修饰（透明度/缩放/位移/揭开裁剪），全部在 save/restore 内，
+   * 不泄漏任何 ctx 状态（这是"重影 bug"的根因，务必保持）。
+   */
+  private async drawMediaFrame(
+    clip: TimelineClip,
+    asset: EditorAsset,
+    localT: number,
+    mods?: TransitionMods
+  ): Promise<void> {
     const props = resolveClipPropsAt(clip, localT);
     const fade = this.calculateFade(props, localT, clip.duration);
+    const trAlpha = mods?.alpha ?? 1;
 
-    // 2. 获取视频帧
     const speed = clipSpeed(clip);
     const sourceTime = clip.trimStart + localT * speed;
     const mediaEl = await this.getMediaElement(asset, sourceTime);
     if (!mediaEl) return;
 
-    // 3. 计算变换和裁剪
     const crop = clipCrop(clip);
     const filters = clipFilters(clip);
 
     this.ctx.save();
 
-    // 4. 应用全局透明度
-    this.ctx.globalAlpha = props.opacity * fade;
+    // 透明度：片段 opacity × 淡入淡出 × 转场 alpha
+    this.ctx.globalAlpha = props.opacity * fade * trAlpha;
 
-    // 5. 计算画布中心位置和缩放
     const frameW = this.canvas.width;
     const frameH = this.canvas.height;
     const centerX = frameW / 2;
     const centerY = frameH / 2;
-
-    // 位置偏移（百分比转像素）
     const offsetX = (props.x / 100) * frameW;
     const offsetY = (props.y / 100) * frameH;
 
-    // 6. 应用变换
+    // 变换（位置/旋转/缩放/镜像）
     this.ctx.translate(centerX + offsetX, centerY + offsetY);
     this.ctx.rotate((props.rotation * Math.PI) / 180);
     this.ctx.scale(props.scale * (clip.flipH ? -1 : 1), props.scale * (clip.flipV ? -1 : 1));
 
-    // 7. 应用滤镜（Canvas filter API）
+    // 转场缩放（zoom，绕媒体中心=当前原点）
+    if (mods?.scale != null) this.ctx.scale(mods.scale, mods.scale);
+
     this.ctx.filter = this.convertFiltersToCanvas(filters);
 
-    // 8. 计算素材在画框中的显示尺寸（object-contain）
+    // object-contain 显示尺寸
     const mediaW = asset.width || 1920;
     const mediaH = asset.height || 1080;
     const mediaAspect = mediaW / mediaH;
     const frameAspect = frameW / frameH;
-
     let fitW = frameW;
     let fitH = frameH;
     if (mediaAspect > frameAspect) {
@@ -166,42 +201,45 @@ export class CanvasRenderer {
       fitW = frameH * mediaAspect;
     }
 
-    // 9. 应用裁剪
+    // 裁剪
     const cropL = crop.left * fitW;
     const cropR = crop.right * fitW;
     const cropT = crop.top * fitH;
     const cropB = crop.bottom * fitH;
     const visibleW = fitW - cropL - cropR;
     const visibleH = fitH - cropT - cropB;
-
-    // 10. 绘制媒体（居中）
     const drawX = -visibleW / 2;
     const drawY = -visibleH / 2;
 
-    // Canvas 裁剪：只显示可见部分
+    // 转场位移（slide，单位=显示尺寸的倍数）
+    if (mods?.translateXFrac) this.ctx.translate(mods.translateXFrac * visibleW, 0);
+    if (mods?.translateYFrac) this.ctx.translate(0, mods.translateYFrac * visibleH);
+
+    // 转场揭开裁剪（wipe）：裁到揭开的矩形区域
+    if (mods?.inset) {
+      const { t, r, b, l } = mods.inset;
+      this.ctx.beginPath();
+      this.ctx.rect(drawX + l * visibleW, drawY + t * visibleH, visibleW * (1 - l - r), visibleH * (1 - t - b));
+      this.ctx.clip();
+    }
+
     const srcX = (cropL / fitW) * mediaW;
     const srcY = (cropT / fitH) * mediaH;
     const srcW = (visibleW / fitW) * mediaW;
     const srcH = (visibleH / fitH) * mediaH;
-
     this.ctx.drawImage(mediaEl, srcX, srcY, srcW, srcH, drawX, drawY, visibleW, visibleH);
 
-    // 11. 色温叠加（用 globalCompositeOperation 模拟 soft-light）
+    // 色温叠加（用 globalCompositeOperation 模拟 soft-light）
     const tempOverlay = temperatureOverlay(filters);
     if (tempOverlay) {
       this.ctx.globalCompositeOperation = 'soft-light';
       this.ctx.fillStyle = tempOverlay.color;
-      this.ctx.globalAlpha = tempOverlay.opacity * props.opacity * fade;
+      this.ctx.globalAlpha = tempOverlay.opacity * props.opacity * fade * trAlpha;
       this.ctx.fillRect(drawX, drawY, visibleW, visibleH);
       this.ctx.globalCompositeOperation = 'source-over';
     }
 
     this.ctx.restore();
-
-    // 12. 渲染转场（如果有）
-    if (clip.transition && localT < clip.transition.duration) {
-      await this.renderTransition(clip, localT, allClips, asset);
-    }
   }
 
   /**
@@ -314,19 +352,50 @@ export class CanvasRenderer {
   }
 
   /**
-   * 渲染转场效果
+   * 转场垫底片段：同轨上结束最晚、且在本片段开始之前的片段（与预览 prevAdjacentClip 一致）
    */
-  private async renderTransition(
-    clip: TimelineClip,
-    localT: number,
-    allClips: TimelineClip[],
-    asset: EditorAsset
-  ): Promise<void> {
-    // 注意：此方法在 renderMedia 的 ctx.restore() 之后被调用，此时修改 globalAlpha
-    // 对当前片段已无视觉效果，反而会泄漏到后续帧——导致下一帧的清屏 fillRect 半透明、
-    // 擦不干净 → 旋转/运动元素叠成"一堆/重影"。故这里不再改任何持久状态。
-    // 导出转场（垫底层定格）属未实现项，留待后续；当前保持无副作用的空实现。
-    void clip; void localT; void allClips; void asset;
+  private prevAdjacentClip(c: TimelineClip, allClips: TimelineClip[]): TimelineClip | null {
+    let best: TimelineClip | null = null;
+    let bestEnd = -Infinity;
+    for (const o of allClips) {
+      if (o.trackId !== c.trackId || o.id === c.id) continue;
+      const end = o.start + o.duration;
+      if (end <= c.start + 0.06 && end > bestEnd) { best = o; bestEnd = end; }
+    }
+    return best;
+  }
+
+  /**
+   * 转场类型+进度 → Canvas 数值修饰（镜像 utils.transitionStyles 的 CSS 输出）。
+   * p: 0..1。fade/dissolve→alpha；wipe→inset 揭开裁剪；slide→位移；zoom→alpha+缩放。
+   * CSS inset 语法为 inset(top right bottom left)，k=1-t 表示该边裁掉的比例。
+   */
+  private transitionMods(type: TransitionType, p: number): TransitionMods {
+    const t = Math.max(0, Math.min(1, p));
+    const k = 1 - t;
+    switch (type) {
+      case 'fade':
+      case 'dissolve':
+        return { alpha: t };
+      case 'wipe-left':  // 从左揭开：右侧裁掉 k
+        return { inset: { t: 0, r: k, b: 0, l: 0 } };
+      case 'wipe-right': // 从右揭开：左侧裁掉 k
+        return { inset: { t: 0, r: 0, b: 0, l: k } };
+      case 'wipe-up':    // 从上揭开：底部裁掉 k
+        return { inset: { t: 0, r: 0, b: k, l: 0 } };
+      case 'wipe-down':  // 从下揭开：顶部裁掉 k
+        return { inset: { t: k, r: 0, b: 0, l: 0 } };
+      case 'slide-left':
+        return { translateXFrac: k };
+      case 'slide-right':
+        return { translateXFrac: -k };
+      case 'zoom-in':
+        return { alpha: t, scale: 0.6 + 0.4 * t };
+      case 'zoom-out':
+        return { alpha: t, scale: 1.4 - 0.4 * t };
+      default:
+        return {};
+    }
   }
 
   /**
