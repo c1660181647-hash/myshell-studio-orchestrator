@@ -190,7 +190,6 @@ function getSupportedMimeType(): string | null {
 
   for (const type of types) {
     if (MediaRecorder.isTypeSupported(type)) {
-      console.log('Using MediaRecorder MIME type:', type);
       return type;
     }
   }

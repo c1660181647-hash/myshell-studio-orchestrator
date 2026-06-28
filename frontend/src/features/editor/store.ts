@@ -257,13 +257,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   hydrate: async (projectId) => {
     const key = projectId || '__default__';
     const cur = get();
-    console.log('[hydrate] called with projectId:', projectId, 'key:', key, 'current loadedProjectId:', cur.loadedProjectId);
     if (cur.hydrating) return;
     if (cur.loadedProjectId === key) {
-      console.log('[hydrate] skipped: already loaded this projectId');
       return; // 同会话重开同项目：保留内存中的实时状态
     }
-    console.log('[hydrate] loading data for key:', key);
     set({ hydrating: true });
     if (cur.loadedProjectId && cur.loadedProjectId !== key) revokeAssetUrls(cur.assets);
     const snap = await getSnapshot(key);
@@ -838,43 +835,6 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       trimEnd: clip.trimEnd,
       keyframes: undefined,
     };
-
-    console.log('[splitClip] 切割调试信息:', {
-      原片段: {
-        start: clip.start,
-        duration: clip.duration,
-        end: clip.start + clip.duration,
-        trimStart: clip.trimStart,
-        trimEnd: clip.trimEnd,
-        speed: clip.speed ?? 1,
-      },
-      切割点原始: splitTime,
-      本地时间原始: localTimeRaw,
-      本地时间对齐: localTime,
-      源素材切割点: sourceSplitTime,
-      片段A: {
-        start: clipA.start,
-        duration: clipA.duration,
-        end: clipA.start + clipA.duration,
-        trimStart: clipA.trimStart,
-        trimEnd: clipA.trimEnd,
-        '计算的duration': (clipA.trimEnd - clipA.trimStart) / speed,
-      },
-      片段B: {
-        start: clipB.start,
-        duration: clipB.duration,
-        end: clipB.start + clipB.duration,
-        trimStart: clipB.trimStart,
-        trimEnd: clipB.trimEnd,
-        '计算的duration': (clipB.trimEnd - clipB.trimStart) / speed,
-      },
-      是否相接: clipA.start + clipA.duration === clipB.start,
-      时间轴间隙: clipB.start - (clipA.start + clipA.duration),
-      '片段A源时长': clipA.trimEnd - clipA.trimStart,
-      '片段B源时长': clipB.trimEnd - clipB.trimStart,
-      '源时长总和': (clipA.trimEnd - clipA.trimStart) + (clipB.trimEnd - clipB.trimStart),
-      '原始源时长': clip.trimEnd - clip.trimStart,
-    });
 
     // 关键帧处理：根据切割点分配到两个片段
     if (clip.keyframes) {
