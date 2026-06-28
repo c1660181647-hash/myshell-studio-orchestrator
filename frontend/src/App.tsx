@@ -38,6 +38,7 @@ const ShareInvite = React.lazy(() => import('./pages/ShareInvite'));
 const TestCustomizeScene = React.lazy(() => import('./pages/TestCustomizeScene'));
 const CheckinDemo = React.lazy(() => import('./pages/CheckinDemo'));
 const Dreamy = React.lazy(() => import('./pages/Dreamy'));
+const VideoEditorTest = React.lazy(() => import('./pages/VideoEditorTest'));
 
 let communityPushCtaOpenedReported = false;
 
@@ -239,6 +240,7 @@ function AppRoutes() {
           <Route path="/earn" element={<Earn />} />
           <Route path="/share-invite" element={<ShareInvite />} />
           <Route path="/dreamy" element={<Dreamy />} />
+          <Route path="/video-editor-test" element={<VideoEditorTest />} />
           <Route path="/__test-customize-scene" element={<TestCustomizeScene />} />
           <Route path="/checkin-demo" element={<CheckinDemo />} />
         </Routes>

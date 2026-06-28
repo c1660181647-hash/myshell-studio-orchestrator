@@ -179,3 +179,24 @@ input {
 [dir='rtl'] .rtl-flip {
   transform: scaleX(-1);
 }
+
+/* --- 转场库微缩演示（hover 时循环播放，作用于卡片上层） --- */
+.group:hover .tr-demo-fade { animation: trFade 1.2s ease-in-out infinite; }
+.group:hover .tr-demo-wipe-l { animation: trWipeL 1.2s ease-in-out infinite; }
+.group:hover .tr-demo-wipe-r { animation: trWipeR 1.2s ease-in-out infinite; }
+.group:hover .tr-demo-wipe-u { animation: trWipeU 1.2s ease-in-out infinite; }
+.group:hover .tr-demo-wipe-d { animation: trWipeD 1.2s ease-in-out infinite; }
+.group:hover .tr-demo-slide-l { animation: trSlideL 1.2s ease-in-out infinite; }
+.group:hover .tr-demo-slide-r { animation: trSlideR 1.2s ease-in-out infinite; }
+.group:hover .tr-demo-zoom-in { animation: trZoomIn 1.2s ease-in-out infinite; }
+.group:hover .tr-demo-zoom-out { animation: trZoomOut 1.2s ease-in-out infinite; }
+
+@keyframes trFade { 0% { opacity: 0; } 60%, 100% { opacity: 1; } }
+@keyframes trWipeL { 0% { clip-path: inset(0 100% 0 0); } 60%, 100% { clip-path: inset(0 0 0 0); } }
+@keyframes trWipeR { 0% { clip-path: inset(0 0 0 100%); } 60%, 100% { clip-path: inset(0 0 0 0); } }
+@keyframes trWipeU { 0% { clip-path: inset(0 0 100% 0); } 60%, 100% { clip-path: inset(0 0 0 0); } }
+@keyframes trWipeD { 0% { clip-path: inset(100% 0 0 0); } 60%, 100% { clip-path: inset(0 0 0 0); } }
+@keyframes trSlideL { 0% { transform: translateX(100%); } 60%, 100% { transform: translateX(0); } }
+@keyframes trSlideR { 0% { transform: translateX(-100%); } 60%, 100% { transform: translateX(0); } }
+@keyframes trZoomIn { 0% { opacity: 0; transform: scale(0.6); } 60%, 100% { opacity: 1; transform: scale(1); } }
+@keyframes trZoomOut { 0% { opacity: 0; transform: scale(1.4); } 60%, 100% { opacity: 1; transform: scale(1); } }

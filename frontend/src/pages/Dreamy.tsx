@@ -148,9 +148,10 @@ import type {
 import { trackEvent } from '../services/tracking';
 
 const CanvasPro = lazy(() => import('./CanvasPro'));
+const VideoEditor = lazy(() => import('./VideoEditor'));
 
 type TabKey = 'chat' | 'preview';
-type StudioWorkspace = 'orchestrator' | 'canvaspro';
+type StudioWorkspace = 'orchestrator' | 'canvaspro' | 'editor';
 type CanvasTool = 'select' | 'pan' | 'connect';
 type CanvasNodeKind =
   | 'prompt'
@@ -1460,6 +1461,7 @@ function getStudioWorkspaceFromSearch(search: string): StudioWorkspace {
   try {
     const params = new URLSearchParams(search);
     const value = params.get('workspace') || params.get('view');
+    if (value === 'editor') return 'editor';
     return value === 'canvaspro' ? 'canvaspro' : 'orchestrator';
   } catch {
     return 'orchestrator';
@@ -6043,7 +6045,7 @@ export default function Dreamy() {
   const setStudioWorkspace = useCallback(
     (nextWorkspace: StudioWorkspace) => {
       setWorkspaceState(nextWorkspace);
-      navigate(nextWorkspace === 'canvaspro' ? '/dreamy?workspace=canvaspro' : '/dreamy', { replace: true });
+      navigate(nextWorkspace === 'orchestrator' ? '/dreamy' : `/dreamy?workspace=${nextWorkspace}`, { replace: true });
       trackEvent('dreamy_studio_workspace_switch', {
         workspace: nextWorkspace,
       });
@@ -6054,7 +6056,13 @@ export default function Dreamy() {
   const selectedSegment = useMemo(() => {
     const segments = getTimelineDisplaySegments(project?.segments || []);
     const id = project?.selectedSegmentId;
-    return segments.find((segment) => segment.id === id) || segments[segments.length - 1] || null;
+    const result = segments.find((segment) => segment.id === id) || segments[segments.length - 1] || null;
+    console.log('[Dreamy] selectedSegment computed:', {
+      targetId: id,
+      resultId: result?.id,
+      allSegmentIds: segments.map(s => s.id)
+    });
+    return result;
   }, [project]);
   const manualBotEntries = useMemo(() => parseManualBotEntries(manualBotIdsText), [manualBotIdsText]);
   const selectedManualBotEntry = useMemo(
@@ -8064,7 +8072,11 @@ export default function Dreamy() {
   }, []);
 
   const selectSegment = (segmentId: string) => {
-    setProject((prev) => (prev ? { ...prev, selectedSegmentId: segmentId } : prev));
+    console.log('[Dreamy] selectSegment called with segmentId:', segmentId);
+    setProject((prev) => {
+      console.log('[Dreamy] prev.selectedSegmentId:', prev?.selectedSegmentId, '-> new:', segmentId);
+      return prev ? { ...prev, selectedSegmentId: segmentId } : prev;
+    });
     setActiveTab('preview');
   };
 
@@ -8805,7 +8817,26 @@ export default function Dreamy() {
       </div>
       )}
 
-      {workspace === 'canvaspro' ? (
+      {workspace === 'editor' ? (
+        <section
+          data-testid="editor-workspace-panel"
+          className="relative z-0 min-h-0 flex-1 overflow-hidden border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2"
+        >
+          <Suspense
+            fallback={
+              <div className="flex h-full w-full items-center justify-center bg-Cr-Bg-soft-v2 text-sm font-semibold text-Cr-text-subtler-v2">
+                <Loader2 size={16} className="mr-2 animate-spin" />
+                Loading Video Editor
+              </div>
+            }
+          >
+            <VideoEditor
+              projectId={selectedSegment?.id || project?.projectId}
+              onBack={() => setStudioWorkspace('canvaspro')}
+            />
+          </Suspense>
+        </section>
+      ) : workspace === 'canvaspro' ? (
         <section
           data-testid="canvaspro-workspace-panel"
           className="relative z-0 min-h-0 flex-1 overflow-hidden border-t border-Cr-border-default-v2 bg-Cr-Bg-soft-v2"
@@ -8821,6 +8852,22 @@ export default function Dreamy() {
             <CanvasPro
               embeddedInStudio
               onBackToStudio={() => setStudioWorkspace('orchestrator')}
+              onOpenEditor={(activeCanvasId) => {
+                console.log('[Dreamy] onOpenEditor called with activeCanvasId:', activeCanvasId);
+                if (activeCanvasId) {
+                  // 映射 CanvasPro 的 canvas_N 到 segment ID
+                  // canvas_1 -> verified_workshop_segment_1
+                  // canvas_2 -> verified_workshop_segment_2
+                  const match = activeCanvasId.match(/canvas_(\d+)/);
+                  if (match) {
+                    const canvasNum = match[1];
+                    const segmentId = `verified_workshop_segment_${canvasNum}`;
+                    console.log('[Dreamy] Mapping canvas to segment:', { activeCanvasId, segmentId });
+                    selectSegment(segmentId);
+                  }
+                }
+                setStudioWorkspace('editor');
+              }}
             />
           </Suspense>
         </section>

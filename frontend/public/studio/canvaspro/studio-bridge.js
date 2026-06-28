@@ -9,10 +9,12 @@ const MESSAGE_REQUEST = 'aicanvas-studio:request';
 const MESSAGE_RESPONSE = 'aicanvas-studio:response';
 const MESSAGE_READY = 'aicanvas-studio:ready';
 const MESSAGE_AUTOSAVE = 'aicanvas-studio:autosave';
+const MESSAGE_OPEN_EDITOR = 'aicanvas-studio:open-editor';
 const API_BASE = location.pathname.startsWith('/ai-canvaspro/') ? '/ai-canvaspro-api' : '';
 const AUTHOR_SIGNAL_POLICY_KEY = '__MYSHELL_STUDIO_CANVASPRO_AUTHOR_SIGNAL_POLICY__';
 const AUTHOR_SIGNAL_POLICY_STYLE_ID = 'studio-canvaspro-author-signal-policy';
 const LICENSE_MODAL_ID = 'studioCanvasproLicenseModal';
+const EDITOR_BUTTON_ID = 'studioCanvasproEditorButton';
 const AUTHOR_SIGNAL_LABEL = '第三方组件 / 授权声明';
 const HIDDEN_UPSTREAM_MENU_IDS = Object.freeze(['btnTutorial', 'btnGithubOfficial', 'btnFeatureFeedback']);
 const BLOCKED_UPSTREAM_EXTERNAL_URL_PATTERNS = Object.freeze([
@@ -241,8 +243,75 @@ function installAuthorSignalPolicyStyles() {
       color: var(--text-primary, rgba(255, 255, 255, 0.92));
       font-weight: 700;
     }
+    #${EDITOR_BUTTON_ID} {
+      position: relative;
+      color: var(--text-secondary, rgba(255, 255, 255, 0.72));
+    }
+    #${EDITOR_BUTTON_ID}:hover {
+      color: var(--text-primary, rgba(255, 255, 255, 0.94));
+    }
+    #${EDITOR_BUTTON_ID} .studio-canvaspro-editor-label {
+      position: absolute;
+      left: calc(100% + 10px);
+      top: 50%;
+      transform: translateY(-50%);
+      display: none;
+      white-space: nowrap;
+      color: rgba(255, 80, 90, 0.96);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      pointer-events: none;
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+    }
+    #${EDITOR_BUTTON_ID}:hover .studio-canvaspro-editor-label,
+    #${EDITOR_BUTTON_ID}:focus-visible .studio-canvaspro-editor-label {
+      display: inline-flex;
+    }
   `;
   document.head.appendChild(style);
+}
+
+function createEditorButton() {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'sidebar-btn-v3 studio-canvaspro-editor-btn';
+  button.id = EDITOR_BUTTON_ID;
+  button.setAttribute('aria-label', '剪辑');
+  button.setAttribute('title', '剪辑');
+  button.setAttribute('data-tooltip-right', '剪辑');
+  button.innerHTML = `
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M4 7h16" />
+      <path d="M4 17h16" />
+      <path d="M7 3v18" />
+      <path d="M17 3v18" />
+      <path d="M9.5 7v10" />
+      <path d="M14.5 7v10" />
+    </svg>
+    <span class="studio-canvaspro-editor-label">剪辑</span>
+  `;
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const snapshot = getSnapshotEnvelope();
+    const activeCanvasId = snapshot.data?.activeCanvasId || '';
+    postToStudio({ type: MESSAGE_OPEN_EDITOR, payload: { source: 'canvaspro-sidebar', activeCanvasId } });
+  });
+  return button;
+}
+
+function installStudioEditorButton() {
+  if (document.getElementById(EDITOR_BUTTON_ID)) return;
+  const sidebar = document.querySelector('.sidebar-floating');
+  if (!sidebar) return;
+  const anchor = document.getElementById('btnTasks') || document.querySelector('.sidebar-flex-spacer');
+  const button = createEditorButton();
+  if (anchor && anchor.parentElement === sidebar) {
+    sidebar.insertBefore(button, anchor);
+  } else {
+    sidebar.appendChild(button);
+  }
 }
 
 function setElementHidden(element) {
@@ -421,6 +490,7 @@ function closeAboutDisclosure() {
 
 function applyAuthorSignalPolicy() {
   installAuthorSignalPolicyStyles();
+  installStudioEditorButton();
   for (const id of HIDDEN_UPSTREAM_MENU_IDS) {
     const element = document.getElementById(id);
     neutralizeBlockedExternalUrl(element);

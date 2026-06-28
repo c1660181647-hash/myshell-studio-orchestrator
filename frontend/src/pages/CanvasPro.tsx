@@ -17,6 +17,7 @@ const BRIDGE_REQUEST = 'aicanvas-studio:request';
 const BRIDGE_RESPONSE = 'aicanvas-studio:response';
 const BRIDGE_READY = 'aicanvas-studio:ready';
 const BRIDGE_AUTOSAVE = 'aicanvas-studio:autosave';
+const BRIDGE_OPEN_EDITOR = 'aicanvas-studio:open-editor';
 
 type BridgeStats = {
   canvasCount?: number;
@@ -45,7 +46,7 @@ type BridgeResponseMessage = {
   error?: string;
   id?: string;
   ok?: boolean;
-  payload?: unknown;
+  payload?: { activeCanvasId?: string; [key: string]: unknown };
   type?: string;
 };
 
@@ -58,6 +59,7 @@ type PendingBridgeRequest = {
 interface CanvasProProps {
   embeddedInStudio?: boolean;
   onBackToStudio?: () => void;
+  onOpenEditor?: (activeCanvasId?: string) => void;
 }
 
 function createRequestId() {
@@ -80,7 +82,7 @@ function formatSavedAt(value?: string) {
   }
 }
 
-export default function CanvasPro({ embeddedInStudio = false, onBackToStudio }: CanvasProProps) {
+export default function CanvasPro({ embeddedInStudio = false, onBackToStudio, onOpenEditor }: CanvasProProps) {
   const navigate = useNavigate();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -176,6 +178,10 @@ export default function CanvasPro({ embeddedInStudio = false, onBackToStudio }: 
         }));
         return;
       }
+      if (message.type === BRIDGE_OPEN_EDITOR) {
+        onOpenEditor?.(message.payload?.activeCanvasId);
+        return;
+      }
       if (message.type !== BRIDGE_RESPONSE || !message.id) return;
       const pending = pendingRequests.current.get(message.id);
       if (!pending) return;
@@ -189,7 +195,7 @@ export default function CanvasPro({ embeddedInStudio = false, onBackToStudio }: 
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [onOpenEditor]);
 
   const runBridgeAction = useCallback(
     async <T,>(
